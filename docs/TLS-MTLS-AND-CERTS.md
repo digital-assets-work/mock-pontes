@@ -5,6 +5,10 @@ they work. This covers the runtime PKI, CSR enrollment, mTLS trust, PKCS#12 expo
 profile enforcement, and the optional externally-provided (e.g. Let's Encrypt)
 server-certificate loader.
 
+> **User guide:** for a step-by-step walkthrough of generating a key & CSR with
+> the ECB CertApp tool and enrolling to get a certificate + `.p12`, see
+> [`ENROLL-WITH-ECB-TOOLS.md`](ENROLL-WITH-ECB-TOOLS.md).
+
 ---
 
 ## 1. HTTPS + mTLS server

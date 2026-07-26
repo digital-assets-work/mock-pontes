@@ -167,6 +167,9 @@ enrolled users across restarts and to run multiple replicas.
 - [`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md) — which official ECB
   Pontes endpoints the mock implements, the controls each enforces, and the mock
   release they were introduced in.
+- [`docs/ENROLL-WITH-ECB-TOOLS.md`](docs/ENROLL-WITH-ECB-TOOLS.md) — take a key
+  & CSR generated with the official ECB CertApp tool, enroll in the mock, and
+  produce/install a client certificate and `.p12`.
 - [`docs/TLS-MTLS-AND-CERTS.md`](docs/TLS-MTLS-AND-CERTS.md) — HTTPS/mTLS, runtime
   PKI, CSR enrollment, PKCS#12 export, and profile enforcement.
 
