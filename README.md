@@ -61,6 +61,16 @@ npm run build && npm run run   # production build + run
 
 ## API surface
 
+The mock's OpenAPI description is served in **both JSON and YAML**, and the
+vendored official ECB Pontes spec is exposed alongside it:
+
+| Spec | JSON | YAML |
+|------|------|------|
+| Mock (this service) | `GET /openapi.json` | `GET /openapi.yaml` |
+| Official ECB Pontes (vendored) | `GET /openapi/official.json` | `GET /openapi/official.yaml` |
+
+Browse them interactively via the embedded Swagger UI at `/ui/docs`.
+
 ### Pontes-compatible routes
 
 These mimic the real Pontes A2A API so a client can target the mock by pointing
