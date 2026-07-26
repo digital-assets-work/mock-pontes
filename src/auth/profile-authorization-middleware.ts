@@ -17,7 +17,7 @@ import {
 
 /** Route patterns requiring EXTERNAL_USER (1-step bridge operations) */
 const BRIDGE_1STEP_PATTERNS: readonly RegExp[] = [
-  /\/dlt\/[^/]+\/api\/bridge\/cash-token\/payments/,
+  /\/dlt\/[^/]+\/api\/bridge\/payments/,
   // PFoD / XvP bridge endpoints (reserved for future)
   /\/dlt\/[^/]+\/api\/bridge\/pfod\//,
   /\/dlt\/[^/]+\/api\/bridge\/xvp\//,

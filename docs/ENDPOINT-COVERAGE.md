@@ -59,7 +59,7 @@ change behaviour. Gaps are listed, not fixed.
 | Method | Official path | Status | Mock path | Controls | Since |
 |--------|---------------|--------|-----------|----------|-------|
 | GET | `/dlt/{ncb}/api/bridge/current-business-window` | IMPLEMENTED | same | `JWT` `mTLS` | v0.1.0 |
-| POST | `/dlt/{ncb}/api/bridge/payments` | PARTIAL | `/dlt/{ncb}/api/bridge/cash-token/payments` | `JWT` `mTLS` `PROFILE:EXTERNAL_USER` `STATE` | v0.1.0 |
+| POST | `/dlt/{ncb}/api/bridge/payments` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:EXTERNAL_USER` `STATE` | v0.1.0 |
 | POST | `/dlt/{ncb}/api/bridge/direct-rtgs/payments` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/bridge/whitelist/verify` | NOT IMPLEMENTED | — | — | — |
 | POST | `/dlt/{ncb}/api/bridge/initpfoddeli` | NOT IMPLEMENTED | — | — | — |
@@ -168,8 +168,8 @@ change behaviour. Gaps are listed, not fixed.
 
 ### Coverage summary
 
-- **IMPLEMENTED:** 11 official operations.
-- **PARTIAL:** 4 (path-shape differences — see §3).
+- **IMPLEMENTED:** 12 official operations.
+- **PARTIAL:** 3 (path-shape differences — see §3).
 - **NOT IMPLEMENTED:** the remainder of the EII API (T2 accounts, GRS registry/entities/mDLT, PoA, instruct-on-behalf, direct-RTGS, XvP/IGW, extracts, stats).
 
 ---
@@ -217,10 +217,6 @@ official funding/defunding/transaction/wallet endpoints instead.
 
 ### PARTIAL — path-shape differences
 
-- **1-step payment.** Official `POST /dlt/{ncb}/api/bridge/payments`; the mock
-  serves `POST /dlt/{ncb}/api/bridge/cash-token/payments`. Same intent (immediate
-  cash-token settlement) but a client pointed at the official path will 404.
-  Enforces `PROFILE:EXTERNAL_USER`.
 - **Draft status updates.** The official spec uses a generic
   `.../{...-drafts}/{id}/{status}` path where `{status}` is the target state
   (e.g. `APPROVED`, `CANCELED`). The mock instead exposes literal
@@ -242,6 +238,15 @@ official funding/defunding/transaction/wallet endpoints instead.
   businessdate values but does not reject transactions outside an open window.
 - **IMS list returns drafts.** `GET .../ims/transactions` returns in-flight mock
   drafts rather than the full settled-transaction extract model of the real API.
+- **`supplementaryData` (non-official, "reason of payment").** The **2-step**
+  transaction endpoint `POST .../rvs/transactions-requests` accepts an optional
+  `supplementaryData` string and carries it through the draft, the settled
+  transaction, and the `GET .../ims/transactions` query. This anticipates the ECB
+  change (Jul 2026 clarification) that surfaces the Pontes **U2A** "reason for the
+  payment" in `octopus.Settlement.supplementaryData` — it is *readable* in the
+  official spec but not officially settable via A2A submission. Note: the
+  **1-step** `POST .../bridge/payments` endpoint does **not** accept
+  `supplementaryData`.
 
 ### Gaps worth follow-up (not fixed here)
 
