@@ -96,6 +96,42 @@ Simulation endpoints to drive the mock's state:
 | GET | `/admin/business-window` | Get business window config |
 | PUT | `/admin/business-window` | Update business window config |
 
+### Enrollment routes (mock-only)
+
+The mock ships a **local certificate authority** so you can obtain client
+certificates without the real ECB process. These endpoints have **no equivalent
+on real Pontes** — there, certificates are issued manually by the **TARGET
+Service Desk**, not through an API.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/iam/realms/{ncb}/protocol/openid-connect/csr` | Submit a PKCS#10 CSR; declares the user (when new) and returns a signed certificate (PEM) |
+| GET | `/admin/enrolled-users` | List users that have a certificate enrolled in this instance |
+| GET | `/admin/enrolled-users/{username}/certificate` | Fetch an enrolled user's certificate (PEM) |
+
+**CSR request body** (`application/json`):
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `username` | always | Must match the CSR Common Name |
+| `password` | always | Verified for an existing user; set on first declaration |
+| `csr` | always | PKCS#10 CSR in PEM format |
+| `profile` | new users only | e.g. `PILOT_READ_WRITE`, `EXTERNAL_USER` |
+| `entityBIC` | new users only | Owning entity BIC (MSPID) |
+
+Responses: `200` `{ "certificate": "<PEM>" }` · `400` missing fields / invalid
+CSR · `401` invalid credentials for an existing user · `409` certificate
+fingerprint already associated with another user. `GET
+/admin/enrolled-users/{username}/certificate` returns `404` when the user has no
+enrolled certificate.
+
+The easiest way to drive these is the built-in UI: the **[`/ui/enroll`](/ui/enroll)**
+page uploads/pastes a CSR, declares the user, and downloads the signed
+certificate (and a PKCS#12 bundle), while **[`/ui/docs`](/ui/docs)** exposes the
+same endpoints via Swagger UI ("try it out"). See
+[`docs/TLS-MTLS-AND-CERTS.md`](docs/TLS-MTLS-AND-CERTS.md) for the runtime PKI,
+CSR enrollment, and PKCS#12 export details.
+
 ## Configuration
 
 Configuration is via environment variables (see [`.env.example`](.env.example)):
