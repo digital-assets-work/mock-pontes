@@ -1,14 +1,17 @@
 # Endpoint coverage & controls
 
 > **Generated:** 2026-07-26 — audit of the code in this repository against the
-> vendored official spec.
+> vendored official spec. Regenerated after the admin-endpoint cleanup
+> (mock-only `fund`/`defund`/`transfer`/wallet-list/transaction-list removed in
+> favour of the official API).
 > **Official spec:** ECB Pontes Pilot *EII API* **v1.0.0**
 > (`src/ui/spec/pontes-official-v1.0.json`; YAML reference:
 > `../mock-pontes-workbench/docs/pontes-reference/pontes-pilot-v1.0.yaml`).
-> **Mock release baseline:** all rows below were introduced in the **initial
-> public release** — git tag `v0.1.0`, `package.json` version `1.0.0`
-> (2026-07-26). The **Since** column records the first mock release that shipped
-> the endpoint; update it whenever a new endpoint lands in a later release.
+> **Mock release baseline:** rows marked `v0.1.0` shipped in the **initial
+> public release** (git tag `v0.1.0`, `package.json` version `1.0.0`, 2026-07-26).
+> Rows marked `unreleased` have landed on `main` since and will carry the next
+> release tag. The **Since** column records the first mock release that shipped
+> the endpoint; update it whenever a new endpoint lands.
 
 This document is an **audit only** — it reports what exists today and does not
 change behaviour. Gaps are listed, not fixed.
@@ -68,8 +71,8 @@ change behaviour. Gaps are listed, not fixed.
 |--------|---------------|--------|-----------|----------|-------|
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}` | IMPLEMENTED | same | `JWT` `mTLS` `STATE` (404 if unknown) | v0.1.0 |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}/transactions` | IMPLEMENTED | same | `JWT` `mTLS` `STATE` (404 if unknown) | v0.1.0 |
+| GET | `/dlt/{ncb}/api/octopus/ams/wallets` | IMPLEMENTED | same | `JWT` `mTLS` | unreleased |
 | POST | `/dlt/{ncb}/api/octopus/ams/wallets` | NOT IMPLEMENTED | — (mock auto-creates wallets on first use) | — | — |
-| GET | `/dlt/{ncb}/api/octopus/ams/wallets` | NOT IMPLEMENTED | — (see mock-only `GET /admin/wallets`) | — | — |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets-drafts/{id}` | NOT IMPLEMENTED | — | — | — |
 | PUT | `/dlt/{ncb}/api/octopus/ams/wallets-drafts/{id}/{status}` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/octopus/ams/totalundermanagement` | NOT IMPLEMENTED | — | — | — |
@@ -165,7 +168,7 @@ change behaviour. Gaps are listed, not fixed.
 
 ### Coverage summary
 
-- **IMPLEMENTED:** 10 official operations.
+- **IMPLEMENTED:** 11 official operations.
 - **PARTIAL:** 4 (path-shape differences — see §3).
 - **NOT IMPLEMENTED:** the remainder of the EII API (T2 accounts, GRS registry/entities/mDLT, PoA, instruct-on-behalf, direct-RTGS, XvP/IGW, extracts, stats).
 
@@ -187,14 +190,13 @@ official Pontes API and must never be relied on against a real environment.
 
 ### Admin state-simulation (`src/admin/*`)
 
+Only mock-only controls with **no official-API equivalent** remain. The former
+state-changing/querying admin endpoints (`fund`, `defund`, `transfers`, wallet
+list/detail, transaction list) were **removed** — drive that state through the
+official funding/defunding/transaction/wallet endpoints instead.
+
 | Method | Mock path | Purpose | Controls | Since |
 |--------|-----------|---------|----------|-------|
-| GET | `/admin/wallets` | List all wallets & balances | `none` | v0.1.0 |
-| GET | `/admin/wallets/{alias}` | Wallet detail + transaction log | `none` `STATE` (404) | v0.1.0 |
-| POST | `/admin/wallets/{alias}/fund` | Credit a wallet (auto-creates) | `none` | v0.1.0 |
-| POST | `/admin/wallets/{alias}/defund` | Debit a wallet | `none` `STATE` (404) | v0.1.0 |
-| POST | `/admin/transfers` | Wallet-to-wallet transfer | `none` `STATE` (400/404) | v0.1.0 |
-| GET | `/admin/transactions` | List all transactions | `none` | v0.1.0 |
 | POST | `/admin/reset` | Reset mock state | `none` | v0.1.0 |
 | GET | `/admin/business-window` | Read business-window config | `none` | v0.1.0 |
 | PUT | `/admin/business-window` | Update business-window config | `none` | v0.1.0 |
@@ -231,6 +233,11 @@ official Pontes API and must never be relied on against a real environment.
 - **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
   wallet instead of requiring the official AMS wallet-creation flow. There is no
   balance/overdraft check — debits can drive a balance negative.
+- **Infinite funding source.** The token-issuance wallet
+  `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` that sources funding is treated as
+  having an infinite balance: funding approvals credit the target wallet without
+  debiting/checking the issuance wallet. Funding is therefore the supported way
+  to seed cash into the mock (there is no admin `fund` shortcut).
 - **Business window is not enforced.** The mock serves current-business-window /
   businessdate values but does not reject transactions outside an open window.
 - **IMS list returns drafts.** `GET .../ims/transactions` returns in-flight mock
