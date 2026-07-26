@@ -114,6 +114,9 @@ enrolled users across restarts and to run multiple replicas.
 
 ## Documentation
 
+- [`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md) — which official ECB
+  Pontes endpoints the mock implements, the controls each enforces, and the mock
+  release they were introduced in.
 - [`docs/TLS-MTLS-AND-CERTS.md`](docs/TLS-MTLS-AND-CERTS.md) — HTTPS/mTLS, runtime
   PKI, CSR enrollment, PKCS#12 export, and profile enforcement.
 
