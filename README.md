@@ -69,29 +69,33 @@ its Pontes base URL at this service.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/dlt/{ncb}/api/octopus/health` | Health check |
+| GET | `/dlt/{ncb}/api/octopus/ams/wallets` | List dedicated cash wallets |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}` | Wallet details |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}/transactions` | Wallet transactions |
 | POST | `/dlt/{ncb}/api/octopus/rvs/transactions-requests` | Create transfer draft |
 | PUT | `/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{id}/approve` | Approve draft |
-| POST | `/dlt/{ncb}/api/octopus/rvs/funding-requests` | Create funding draft |
-| POST | `/dlt/{ncb}/api/octopus/rvs/defunding-requests` | Create defunding draft |
+| POST | `/dlt/{ncb}/api/octopus/tms/funding-requests` | Create funding draft |
+| POST | `/dlt/{ncb}/api/octopus/tms/defunding-requests` | Create defunding draft |
 | GET | `/dlt/{ncb}/api/bridge/current-business-window` | Business window |
 
 Transport troubleshooting endpoints (served at the domain root, mirroring the
 real Pontes gateway): `GET /check/ip`, `GET /check/mtls`.
 
+> **Seeding cash into the mock.** Use the official **funding** endpoint
+> (`POST .../tms/funding-requests` then approve). The token-issuance wallet that
+> sources the funds is treated as having an **infinite** balance, so funding
+> always succeeds — there is no separate admin "fund" shortcut. Move balances
+> between wallets with the official transfer (`rvs/transactions-requests` +
+> approve) or 1-step bridge payment, and remove cash with **defunding**.
+
 ### Admin routes
 
-Simulation endpoints to drive the mock's state:
+Mock-only endpoints with **no official-API equivalent** (everything else is now
+driven through the official Pontes endpoints above — see
+[`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md)):
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/admin/wallets` | List all mock wallets & balances |
-| GET | `/admin/wallets/:alias` | Wallet detail with transaction log |
-| POST | `/admin/wallets/:alias/fund` | Simulate funding (credit wallet) |
-| POST | `/admin/wallets/:alias/defund` | Simulate defunding (debit wallet) |
-| POST | `/admin/transfers` | Simulate transfer between wallets |
-| GET | `/admin/transactions` | List all mock transactions |
 | POST | `/admin/reset` | Reset mock state |
 | GET | `/admin/business-window` | Get business window config |
 | PUT | `/admin/business-window` | Update business window config |

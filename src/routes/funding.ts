@@ -30,6 +30,15 @@ function ensureWallet(store: MockStore, alias: string, body: any): void {
 export function createFundingRouter(store: MockStore) {
   const router = createRouter();
 
+  // Funding source model (mock):
+  // The token-issuance wallet `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` is the DCA
+  // that sources the funds for a funding request. In this mock it is treated as
+  // having an INFINITE balance available — funding approvals always credit the
+  // target wallet and never debit or balance-check the issuance wallet. This is
+  // why funding is the supported way to seed cash into the mock (there is no
+  // separate admin "fund" shortcut). Defunding does the reverse: it debits the
+  // target wallet and credits the (infinite) issuance wallet.
+
   // POST /dlt/:ncb/api/octopus/tms/funding-requests — Create funding draft
   router.post(
     "/dlt/:ncb/api/octopus/tms/funding-requests",
