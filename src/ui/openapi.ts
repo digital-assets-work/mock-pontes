@@ -112,6 +112,22 @@ export const openapiSpec = {
         responses: { "200": { description: "Access token" }, "401": { description: "Auth failure" } },
       },
     },
+    "/iam/realms/{ncb}/protocol/openid-connect/certs": {
+      get: {
+        tags: ["Pontes · IAM"],
+        summary: "JWKS — signing public keys for JWT verification",
+        parameters: [{ $ref: "#/components/parameters/ncb" }],
+        responses: { "200": { description: "JWK Set" } },
+      },
+    },
+    "/iam/realms/{ncb}/.well-known/openid-configuration": {
+      get: {
+        tags: ["Pontes · IAM"],
+        summary: "OpenID Connect discovery document",
+        parameters: [{ $ref: "#/components/parameters/ncb" }],
+        responses: { "200": { description: "OIDC configuration (issuer, token_endpoint, jwks_uri)" } },
+      },
+    },
     // ---------------- Pontes · Wallets ----------------
     "/dlt/{ncb}/api/octopus/ams/wallets": {
       get: {

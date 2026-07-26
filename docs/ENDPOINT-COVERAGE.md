@@ -174,16 +174,29 @@ change behaviour. Gaps are listed, not fixed.
 
 ---
 
-## 2. Mock-only endpoints (no official EII API equivalent)
+## 2. Endpoints outside the EII OpenAPI
 
-These exist only to make local development possible. They are **not** part of the
-official Pontes API and must never be relied on against a real environment.
+Two kinds live here: **standard IAM (Keycloak) endpoints** that also exist on real
+Pontes (documented in the ECB Connectivity Training, not the EII OpenAPI), and
+**mock-only helpers** with no real-Pontes equivalent.
 
-### IAM / enrollment (`src/auth/*`)
+### IAM (Keycloak-compatible) endpoints (`src/auth/*`) — standard platform
+
+The mock exposes these so a client can complete the mTLS → token → API flow and
+verify issued JWTs by their `kid`.
+
+| Method | Path | Purpose | Controls | Since |
+|--------|------|---------|----------|-------|
+| POST | `/iam/realms/{ncb}/protocol/openid-connect/token` | Acquire a JWT (grant_type=password) | `mTLS-req` `STATE` | v0.1.0 |
+| GET | `/iam/realms/{ncb}/protocol/openid-connect/certs` | JWKS — signing public key(s) for JWT verification (`kid=mock-pontes-key-1`, ES256) | `none` | unreleased |
+| GET | `/iam/realms/{ncb}/.well-known/openid-configuration` | OIDC discovery (`issuer`, `token_endpoint`, `jwks_uri`) | `none` | unreleased |
+
+### Enrollment (mock-only local CA, `src/auth/*`)
+
+Mock-only: real Pontes issues certificates via the TARGET Service Desk, not an API.
 
 | Method | Mock path | Purpose | Controls | Since |
 |--------|-----------|---------|----------|-------|
-| POST | `/iam/realms/{ncb}/protocol/openid-connect/token` | Acquire a mock JWT (grant_type=password) | `mTLS-req` `STATE` | v0.1.0 |
 | POST | `/iam/realms/{ncb}/protocol/openid-connect/csr` | Local CA: submit CSR, declare user, receive signed cert | `STATE` (username/password + CSR; new users need `profile`+`entityBIC`) | v0.1.0 |
 | GET | `/admin/enrolled-users` | List enrolled users | `none` | v0.1.0 |
 | GET | `/admin/enrolled-users/{username}/certificate` | Fetch an enrolled user's certificate (PEM) | `none` | v0.1.0 |
@@ -250,11 +263,5 @@ official funding/defunding/transaction/wallet endpoints instead.
 
 ### Gaps worth follow-up (not fixed here)
 
-- **JWKS endpoint is dead code.** `createTokenRouter` in
-  `src/auth/token-endpoint.ts` defines
-  `GET /iam/realms/{ncb}/protocol/openid-connect/certs` (plus a second token
-  handler), but it is **not mounted** in `src/index.ts` (the enrollment router
-  serves the token endpoint instead). So JWKS is not reachable. Either mount it or
-  remove the dead code.
 - **No NRO on cancel.** `NRO` is applied to funding/defunding **create** POSTs
   only; approve/cancel PUTs are not signature-checked.

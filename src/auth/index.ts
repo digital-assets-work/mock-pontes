@@ -1,4 +1,3 @@
-export { createTokenRouter } from "./token-endpoint.js";
 export { createEnrollmentAuthRouter } from "./enrollment-routes.js";
 export { createJwtMiddleware, type AuthContext } from "./jwt-middleware.js";
 export { createNroMiddleware } from "./nro-middleware.js";

@@ -1,6 +1,7 @@
 import {
   createRouter,
   defineEventHandler,
+  getRequestURL,
   getRouterParam,
   readBody,
   readRawBody,
@@ -9,6 +10,7 @@ import {
 import { createHash, X509Certificate } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { getTestKeys } from "./test-keys.js";
+import { buildJwks, buildOpenIdConfiguration } from "./oidc.js";
 import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
 import { isStrictMode, validateClientIdForProfile } from "./profile-enforcement.js";
@@ -308,5 +310,41 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
     }),
   );
 
+  // --- IAM (Keycloak-compatible) discovery + JWKS ---
+  // JWKS: the signing public key so clients can verify issued JWTs by `kid`.
+  router.get(
+    "/iam/realms/:ncb/protocol/openid-connect/certs",
+    defineEventHandler(async () => {
+      const keys = await getTestKeys();
+      return buildJwks(keys.publicKeyPem);
+    }),
+  );
+
+  // OpenID Connect discovery document for the realm.
+  router.get(
+    "/iam/realms/:ncb/.well-known/openid-configuration",
+    defineEventHandler((event) => {
+      const ncb = getRouterParam(event, "ncb")!;
+      return buildOpenIdConfiguration(realmIssuer(event, ncb));
+    }),
+  );
+
   return router;
+}
+
+/** Compute the realm issuer URL, e.g. `https://host/iam/realms/bdf`. */
+function realmIssuer(event: Parameters<typeof getRequestURL>[0], ncb: string): string {
+  const envUrl = process.env.PUBLIC_EXTERNAL_URL;
+  let origin = "";
+  if (envUrl) {
+    origin = envUrl.replace(/\/$/, "");
+  } else {
+    try {
+      const u = getRequestURL(event);
+      origin = `${u.protocol}//${u.host}`;
+    } catch {
+      origin = "";
+    }
+  }
+  return `${origin}/iam/realms/${ncb}`;
 }
