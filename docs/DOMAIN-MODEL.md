@@ -127,15 +127,21 @@ The cash-token account holding a balance.
 - Official: create (2-step), list, get, get settled transactions, total-under-mgmt.
 - Mock: **read** (`GET .../ams/wallets`, `.../{walias}`, `.../transactions`)
   implemented; wallets are **auto-created** on first reference (no creation
-  draft); no `validFrom/validTo`, PoA, or T2 link modelling.
+  draft). As of #13 the DCW is properly modelled: **`availableBalance` +
+  `lockedBalance`** (invariant available + locked = total), per-currency
+  holdings, `isBlocked`/validity, and **debit rights** (only a user of the owning
+  entity may debit by default; PoA grantees / whitelisted operators too). The
+  store exposes `credit`/`debit`/`lock`/`release`/`settleLocked` + `canDebit`,
+  persisted to **Redis when `REDIS_URL` is set**. Still missing: the official
+  2-step **creation** flow and T2-link modelling.
 
 ### 2.5 Holding 🟡
 
 A balance line inside a DCW.
 
 - Key fields: `holdingID`, `walletAlias`, `amount`, `type`, `modalityType`.
-- Cardinality: **1 DCW → 1..\*** Holdings (per currency/modality). Mock tracks a
-  single EUR `balance` string per wallet.
+- Cardinality: **1 DCW → 1..\*** Holdings (per currency/modality). The mock
+  exposes an `AVAILABLE` and a `LOCKED` holding per wallet (EUR).
 
 ### 2.6 T2 Account ⚪
 
