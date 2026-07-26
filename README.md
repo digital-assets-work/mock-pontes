@@ -61,6 +61,16 @@ npm run build && npm run run   # production build + run
 
 ## API surface
 
+The mock's OpenAPI description is served in **both JSON and YAML**, and the
+vendored official ECB Pontes spec is exposed alongside it:
+
+| Spec | JSON | YAML |
+|------|------|------|
+| Mock (this service) | `GET /openapi.json` | `GET /openapi.yaml` |
+| Official ECB Pontes (vendored) | `GET /openapi/official.json` | `GET /openapi/official.yaml` |
+
+Browse them interactively via the embedded Swagger UI at `/ui/docs`.
+
 ### Pontes-compatible routes
 
 These mimic the real Pontes A2A API so a client can target the mock by pointing
@@ -69,32 +79,72 @@ its Pontes base URL at this service.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/dlt/{ncb}/api/octopus/health` | Health check |
+| GET | `/dlt/{ncb}/api/octopus/ams/wallets` | List dedicated cash wallets |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}` | Wallet details |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}/transactions` | Wallet transactions |
 | POST | `/dlt/{ncb}/api/octopus/rvs/transactions-requests` | Create transfer draft |
 | PUT | `/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{id}/approve` | Approve draft |
-| POST | `/dlt/{ncb}/api/octopus/rvs/funding-requests` | Create funding draft |
-| POST | `/dlt/{ncb}/api/octopus/rvs/defunding-requests` | Create defunding draft |
+| POST | `/dlt/{ncb}/api/octopus/tms/funding-requests` | Create funding draft |
+| POST | `/dlt/{ncb}/api/octopus/tms/defunding-requests` | Create defunding draft |
 | GET | `/dlt/{ncb}/api/bridge/current-business-window` | Business window |
 
 Transport troubleshooting endpoints (served at the domain root, mirroring the
 real Pontes gateway): `GET /check/ip`, `GET /check/mtls`.
 
+> **Seeding cash into the mock.** Use the official **funding** endpoint
+> (`POST .../tms/funding-requests` then approve). The token-issuance wallet that
+> sources the funds is treated as having an **infinite** balance, so funding
+> always succeeds — there is no separate admin "fund" shortcut. Move balances
+> between wallets with the official transfer (`rvs/transactions-requests` +
+> approve) or 1-step bridge payment, and remove cash with **defunding**.
+
 ### Admin routes
 
-Simulation endpoints to drive the mock's state:
+Mock-only endpoints with **no official-API equivalent** (everything else is now
+driven through the official Pontes endpoints above — see
+[`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md)):
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/admin/wallets` | List all mock wallets & balances |
-| GET | `/admin/wallets/:alias` | Wallet detail with transaction log |
-| POST | `/admin/wallets/:alias/fund` | Simulate funding (credit wallet) |
-| POST | `/admin/wallets/:alias/defund` | Simulate defunding (debit wallet) |
-| POST | `/admin/transfers` | Simulate transfer between wallets |
-| GET | `/admin/transactions` | List all mock transactions |
 | POST | `/admin/reset` | Reset mock state |
 | GET | `/admin/business-window` | Get business window config |
 | PUT | `/admin/business-window` | Update business window config |
+
+### Enrollment routes (mock-only)
+
+The mock ships a **local certificate authority** so you can obtain client
+certificates without the real ECB process. These endpoints have **no equivalent
+on real Pontes** — there, certificates are issued manually by the **TARGET
+Service Desk**, not through an API.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/iam/realms/{ncb}/protocol/openid-connect/csr` | Submit a PKCS#10 CSR; declares the user (when new) and returns a signed certificate (PEM) |
+| GET | `/admin/enrolled-users` | List users that have a certificate enrolled in this instance |
+| GET | `/admin/enrolled-users/{username}/certificate` | Fetch an enrolled user's certificate (PEM) |
+
+**CSR request body** (`application/json`):
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `username` | always | Must match the CSR Common Name |
+| `password` | always | Verified for an existing user; set on first declaration |
+| `csr` | always | PKCS#10 CSR in PEM format |
+| `profile` | new users only | e.g. `PILOT_READ_WRITE`, `EXTERNAL_USER` |
+| `entityBIC` | new users only | Owning entity BIC (MSPID) |
+
+Responses: `200` `{ "certificate": "<PEM>" }` · `400` missing fields / invalid
+CSR · `401` invalid credentials for an existing user · `409` certificate
+fingerprint already associated with another user. `GET
+/admin/enrolled-users/{username}/certificate` returns `404` when the user has no
+enrolled certificate.
+
+The easiest way to drive these is the built-in UI: the **[`/ui/enroll`](/ui/enroll)**
+page uploads/pastes a CSR, declares the user, and downloads the signed
+certificate (and a PKCS#12 bundle), while **[`/ui/docs`](/ui/docs)** exposes the
+same endpoints via Swagger UI ("try it out"). See
+[`docs/TLS-MTLS-AND-CERTS.md`](docs/TLS-MTLS-AND-CERTS.md) for the runtime PKI,
+CSR enrollment, and PKCS#12 export details.
 
 ## Configuration
 
@@ -116,6 +166,12 @@ enrolled users across restarts and to run multiple replicas.
 
 - [`examples/`](examples/) — runnable **mTLS + NRO** client examples in
   TypeScript, Python, and Java (check-mtls → health → token → NRO-signed funding).
+- [`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md) — which official ECB
+  Pontes endpoints the mock implements, the controls each enforces, and the mock
+  release they were introduced in.
+- [`docs/ENROLL-WITH-ECB-TOOLS.md`](docs/ENROLL-WITH-ECB-TOOLS.md) — take a key
+  & CSR generated with the official ECB CertApp tool, enroll in the mock, and
+  produce/install a client certificate and `.p12`.
 - [`docs/TLS-MTLS-AND-CERTS.md`](docs/TLS-MTLS-AND-CERTS.md) — HTTPS/mTLS, runtime
   PKI, CSR enrollment, PKCS#12 export, and profile enforcement.
 
