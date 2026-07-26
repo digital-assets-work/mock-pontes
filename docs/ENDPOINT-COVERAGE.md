@@ -13,14 +13,6 @@
 This document is an **audit only** — it reports what exists today and does not
 change behaviour. Gaps are listed, not fixed.
 
-## How to regenerate
-
-1. Re-list official operations:
-   `node -e 'const s=require("./src/ui/spec/pontes-official-v1.0.json");for(const p in s.paths)for(const m in s.paths[p])if(["get","post","put","delete","patch"].includes(m))console.log(m.toUpperCase(),p)'`
-2. Re-list mock routes: `grep -rnE "router\.(get|post|put)\(" src/routes src/admin src/auth`
-3. Re-check the middleware order in `src/index.ts` and update the **Controls** column.
-4. Bump the **Since** column only for endpoints added in the release being cut.
-
 ## Legend
 
 **Status**
