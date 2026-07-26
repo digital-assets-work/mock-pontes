@@ -7,6 +7,9 @@
  *   GET  /ui/docs              → embedded Swagger UI (OpenAPI "try it out")
  *   GET  /ui/enroll            → upload a CSR, enroll a user, download the signed cert
  *   GET  /openapi.json         → OpenAPI spec (consumed by Swagger UI)
+ *   GET  /openapi.yaml         → OpenAPI spec as YAML
+ *   GET  /openapi/official.json → vendored official ECB Pontes spec
+ *   GET  /openapi/official.yaml → vendored official ECB Pontes spec as YAML
  *   GET  /ui/config.json       → runtime config as JSON (consumed by the home page)
  *   POST /ui/inspect           → parse a submitted PEM (CSR/cert) and return details
  *
@@ -26,10 +29,17 @@ import {
 import { openapiSpec } from "./openapi.js";
 import { inspectPem } from "./inspect.js";
 import { buildP12 } from "./p12.js";
+import { stringify as stringifyYaml } from "yaml";
 // Official ECB Pontes OpenAPI v1.0 (EII API), vendored as JSON.
 // Source: https://www.ecb.europa.eu/paym/target/target-professional-use-documents-links/pontes/shared/pdf/ecb.pontes26_05_15_OpenAPI_Document_v1.0_Pontes_Pilot.en.zip
 // Retrieved 2026-07-24; pristine (converted from YAML). Refresh from that URL when ECB updates the spec.
 import officialSpec from "./spec/pontes-official-v1.0.json";
+
+// The specs are static, so serialize them to YAML once at module load rather
+// than on every request. `lineWidth: 0` disables line folding so long strings
+// (e.g. multi-line endpoint descriptions) round-trip byte-for-byte to the JSON.
+const openapiYaml = stringifyYaml(openapiSpec, { lineWidth: 0 });
+const officialYaml = stringifyYaml(officialSpec, { lineWidth: 0 });
 
 function baseUrlFor(event: Parameters<typeof getRequestURL>[0]): string {
   const envUrl = process.env.PUBLIC_EXTERNAL_URL;
@@ -111,7 +121,8 @@ const HOME_BODY = `
     <tr><td class="k">mTLS check</td><td><a class="link" id="e-mtls" target="_blank">/check/mtls</a> <span class="hint">(requires a client cert)</span></td></tr>
     <tr><td class="k">CSR enrollment</td><td><code id="e-csr"></code></td></tr>
     <tr><td class="k">Token</td><td><code id="e-token"></code></td></tr>
-    <tr><td class="k">OpenAPI</td><td><a class="link" id="e-openapi" target="_blank">/openapi.json</a></td></tr>
+    <tr><td class="k">OpenAPI</td><td><a class="link" id="e-openapi" target="_blank">/openapi.json</a> · <a class="link" href="/openapi.yaml" target="_blank">/openapi.yaml</a></td></tr>
+    <tr><td class="k">Official spec</td><td><a class="link" href="/openapi/official.json" target="_blank">/openapi/official.json</a> · <a class="link" href="/openapi/official.yaml" target="_blank">/openapi/official.yaml</a></td></tr>
   </tbody></table>
 </div>
 
@@ -472,8 +483,24 @@ export function createUiRouter() {
   );
 
   router.get(
+    "/openapi.yaml",
+    defineEventHandler((event) => {
+      setResponseHeader(event, "content-type", "application/yaml; charset=utf-8");
+      return openapiYaml;
+    }),
+  );
+
+  router.get(
     "/openapi/official.json",
     defineEventHandler(() => officialSpec),
+  );
+
+  router.get(
+    "/openapi/official.yaml",
+    defineEventHandler((event) => {
+      setResponseHeader(event, "content-type", "application/yaml; charset=utf-8");
+      return officialYaml;
+    }),
   );
 
   router.get(
@@ -492,6 +519,9 @@ export function createUiRouter() {
           csr: `${baseUrl}/iam/realms/${ncb}/protocol/openid-connect/csr`,
           token: `${baseUrl}/iam/realms/${ncb}/protocol/openid-connect/token`,
           openapi: `${baseUrl}/openapi.json`,
+          openapiYaml: `${baseUrl}/openapi.yaml`,
+          officialOpenapi: `${baseUrl}/openapi/official.json`,
+          officialOpenapiYaml: `${baseUrl}/openapi/official.yaml`,
         },
         runtime: {
           port: Number(process.env.PORT || 3001),

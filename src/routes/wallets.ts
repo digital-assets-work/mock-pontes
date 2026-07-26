@@ -6,8 +6,39 @@ import {
 } from "h3";
 import type { MockStore } from "../state/mock-store.js";
 
+function toWalletResponse(wallet: {
+  alias: string;
+  ownerEntityID: string;
+  ownerBIC: string;
+  managerNCB: string;
+  balance: string;
+  currency: string;
+  isMainWallet: boolean;
+  createdAt: string;
+}) {
+  return {
+    walletAlias: wallet.alias,
+    ownerEntityID: wallet.ownerEntityID,
+    ownerBIC: wallet.ownerBIC,
+    managerNCB: wallet.managerNCB,
+    balance: wallet.balance,
+    currency: wallet.currency,
+    isMainWallet: wallet.isMainWallet,
+    createdAt: wallet.createdAt,
+  };
+}
+
 export function createWalletsRouter(store: MockStore) {
   const router = createRouter();
+
+  // GET /dlt/:ncb/api/octopus/ams/wallets — Retrieve Dedicated Cash Wallet list
+  // Official AMS query. Replaces the former mock-only `GET /admin/wallets`.
+  router.get(
+    "/dlt/:ncb/api/octopus/ams/wallets",
+    defineEventHandler(() => {
+      return { wallets: store.getWallets().map(toWalletResponse) };
+    }),
+  );
 
   // GET /dlt/:ncb/api/octopus/ams/wallets/:walias
   router.get(

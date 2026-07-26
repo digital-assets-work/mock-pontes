@@ -31,9 +31,10 @@ import { createBridgePaymentsRouter } from "./routes/bridge-payments.js";
 import { createUiRouter } from "./ui/router.js";
 
 // Admin route factories
-import { createAdminWalletsRouter } from "./admin/wallets.js";
-import { createAdminTransfersRouter } from "./admin/transfers.js";
-import { createAdminTransactionsRouter } from "./admin/transactions.js";
+// Only mock-only controls with no official-API equivalent remain: business-window
+// simulation config and the test-harness reset. State-changing/querying admin
+// endpoints (fund/defund/transfer/list) were removed in favour of the official
+// Pontes endpoints (see docs/ENDPOINT-COVERAGE.md).
 import { createAdminBusinessWindowRouter } from "./admin/business-window.js";
 import { createAdminResetRouter } from "./admin/reset.js";
 import { getRuntimePkiBundle, closeRuntimePkiPersistence, getTlsCertConfig } from "./auth/runtime-pki.js";
@@ -119,10 +120,7 @@ app.use(createFundingRouter(store).handler);
 app.use(createBusinessWindowRouter(store).handler);
 app.use(createBridgePaymentsRouter(store).handler);
 
-// Admin routes
-app.use(createAdminWalletsRouter(store).handler);
-app.use(createAdminTransfersRouter(store).handler);
-app.use(createAdminTransactionsRouter(store).handler);
+// Admin routes (mock-only, no official equivalent)
 app.use(createAdminBusinessWindowRouter(store).handler);
 app.use(createAdminResetRouter(store).handler);
 
