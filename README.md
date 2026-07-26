@@ -166,6 +166,9 @@ enrolled users across restarts and to run multiple replicas.
 
 - [`examples/`](examples/) — runnable **mTLS + NRO** client examples in
   TypeScript, Python, and Java (check-mtls → health → token → NRO-signed funding).
+- [`docs/DOMAIN-MODEL.md`](docs/DOMAIN-MODEL.md) — the Pontes functional object
+  model: concepts, cardinalities, fields, and lifecycles, coloured by what the
+  mock implements.
 - [`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md) — which official ECB
   Pontes endpoints the mock implements, the controls each enforces, and the mock
   release they were introduced in.
