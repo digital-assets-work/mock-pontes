@@ -114,6 +114,8 @@ enrolled users across restarts and to run multiple replicas.
 
 ## Documentation
 
+- [`examples/`](examples/) — runnable **mTLS + NRO** client examples in
+  TypeScript, Python, and Java (check-mtls → health → token → NRO-signed funding).
 - [`docs/TLS-MTLS-AND-CERTS.md`](docs/TLS-MTLS-AND-CERTS.md) — HTTPS/mTLS, runtime
   PKI, CSR enrollment, PKCS#12 export, and profile enforcement.
 

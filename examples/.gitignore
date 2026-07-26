@@ -1,0 +1,12 @@
+# Local TLS material — never commit real keys/certs
+*.key
+*.crt
+*.csr
+*.pem
+*.p12
+csr.cnf
+
+# Per-language build artifacts
+node_modules/
+target/
+.venv/

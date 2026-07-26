@@ -1,0 +1,13 @@
+{
+  "name": "mock-pontes-example-typescript",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal mTLS + NRO client example for mock-pontes (Node built-ins only)",
+  "scripts": {
+    "start": "tsx index.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0"
+  }
+}
