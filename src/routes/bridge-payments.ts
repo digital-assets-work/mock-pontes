@@ -26,13 +26,18 @@ function ensureWallet(store: MockStore, alias: string, managerNCB: string): void
 /**
  * Bridge Cash Token Payments router.
  * 1-step payment endpoint — no draft/approve cycle.
- * POST /dlt/:ncb/api/bridge/cash-token/payments
+ * POST /dlt/:ncb/api/bridge/payments
+ *
+ * Mirrors the official Pontes operation "Submit Cash Token Payment Request"
+ * (bridge.PaymentRequest): required fields amount, currency, paymentID, and the
+ * credited/debited wallet aliases + credited manager ID. On success it returns
+ * HTTP 200 with the plain-text confirmation string used by the real API.
  */
 export function createBridgePaymentsRouter(store: MockStore) {
   const router = createRouter();
 
   router.post(
-    "/dlt/:ncb/api/bridge/cash-token/payments",
+    "/dlt/:ncb/api/bridge/payments",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
       const now = new Date().toISOString();
@@ -47,12 +52,22 @@ export function createBridgePaymentsRouter(store: MockStore) {
         currency,
       } = body;
 
-      // Validate required fields
-      if (!debitedCashWalletAlias || !creditedCashWalletAlias || !amount) {
+      // Validate required fields per the official bridge.PaymentRequest schema.
+      const missing = [
+        ["amount", amount],
+        ["currency", currency],
+        ["paymentID", paymentID],
+        ["creditedCashWalletAlias", creditedCashWalletAlias],
+        ["creditedCashWalletManagerID", creditedCashWalletManagerID],
+        ["debitedCashWalletAlias", debitedCashWalletAlias],
+      ]
+        .filter(([, v]) => !v)
+        .map(([k]) => k);
+      if (missing.length > 0) {
         setResponseStatus(event, 400);
         return {
           businessErrors: [
-            { errorCode: "HL-VAL-001", errorDescription: "Missing required fields: debitedCashWalletAlias, creditedCashWalletAlias, amount" },
+            { errorCode: "HL-VAL-001", errorDescription: `Missing required fields: ${missing.join(", ")}` },
           ],
         };
       }
@@ -90,16 +105,9 @@ export function createBridgePaymentsRouter(store: MockStore) {
         settledAt: now,
       });
 
-      setResponseStatus(event, 201);
-      return {
-        paymentID: finalPaymentID,
-        status: "SETTLED",
-        amount,
-        currency: currency || "EUR",
-        debitedCashWalletAlias,
-        creditedCashWalletAlias,
-        settledAt: now,
-      };
+      // The official endpoint returns HTTP 200 with a plain-text confirmation.
+      setResponseStatus(event, 200);
+      return "Cash Token Payment Settled Succesfully";
     }),
   );
 

@@ -158,14 +158,43 @@ export const openapiSpec = {
       },
     },
     // ---------------- Pontes · Payments ----------------
-    "/dlt/{ncb}/api/bridge/cash-token/payments": {
+    "/dlt/{ncb}/api/bridge/payments": {
       post: {
         tags: ["Pontes · Payments"],
         summary: "1-step cash-token payment (EXTERNAL_USER)",
         security: [{ bearerAuth: [] }],
         parameters: [{ $ref: "#/components/parameters/ncb" }],
-        requestBody: { content: { "application/json": { schema: { type: "object" } } } },
-        responses: { "200": { description: "Payment settled" } },
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: [
+                  "amount",
+                  "currency",
+                  "paymentID",
+                  "creditedCashWalletAlias",
+                  "creditedCashWalletManagerID",
+                  "debitedCashWalletAlias",
+                ],
+                properties: {
+                  paymentID: { type: "string", example: "payment_517ae232-29e7-4efb-8743-0177bbe6d576" },
+                  amount: { type: "string", example: "100.50" },
+                  currency: { type: "string", example: "EUR" },
+                  creditedCashWalletAlias: { type: "string", example: "WDEEURMP01DEAAXXX-01" },
+                  creditedCashWalletManagerID: { type: "string", example: "MARKDEFFXXX" },
+                  debitedCashWalletAlias: { type: "string", example: "WFREURMP01FRAAXXX-01" },
+                  debitedCashWalletManagerID: { type: "string", example: "BDFEFR2TXXX" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Payment settled (plain-text confirmation)" },
+          "400": { description: "Missing/invalid fields" },
+        },
       },
     },
     // ---------------- Pontes · Funding ----------------
