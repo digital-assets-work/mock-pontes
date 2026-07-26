@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest an improvement or new mocked behaviour
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: input
+    id: ecb-reference
+    attributes:
+      label: ECB Pontes documentation reference
+      description: Link to the relevant part of the official ECB Pontes documentation, if applicable.
+      placeholder: "https://www.ecb.europa.eu/paym/target/..."
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

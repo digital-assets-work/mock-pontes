@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a problem with mock-pontes
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including expected vs. actual behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce it? Include requests/responses where relevant.
+      placeholder: |
+        1. Start the container with `docker run ...`
+        2. Call `...`
+        3. See error `...`
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / image tag
+      placeholder: "e.g. ghcr.io/digital-assets-work/mock-pontes:1.0.0"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node.js version, Docker version, etc.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: shell

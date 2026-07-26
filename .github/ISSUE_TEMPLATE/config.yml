@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Official ECB Pontes documentation
+    url: https://www.ecb.europa.eu/paym/target/target-professional-use-documents-links/pontes-documents-links/html/index.en.html
+    about: The authoritative Pontes specifications and API documentation published by the ECB.
+  - name: Report a security vulnerability
+    url: https://github.com/digital-assets-work/mock-pontes/security/advisories/new
+    about: Please report security issues privately, not as public issues.

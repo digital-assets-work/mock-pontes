@@ -1,0 +1,10 @@
+mock-pontes
+Copyright 2026 digital-assets-work
+
+This product is an unofficial community tool. It is not produced, endorsed, or
+supported by the European Central Bank (ECB). It reproduces the shape of the
+publicly documented ECB Pontes (TARGET) A2A API for local development and testing
+purposes only.
+
+Official ECB Pontes documentation:
+https://www.ecb.europa.eu/paym/target/target-professional-use-documents-links/pontes-documents-links/html/index.en.html
