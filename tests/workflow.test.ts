@@ -1,0 +1,174 @@
+/**
+ * Unit tests for the generic Workflow base and its concrete workflows
+ * (transfer, funding, defunding, one-step payment) plus workflow persistence
+ * (issue #14).
+ */
+
+import { describe, it, expect } from "@jest/globals";
+import { MemoryStore } from "../src/state/memory-store.js";
+import { CacheMemory } from "../src/cache/in-memory.js";
+import { TransferWorkflow } from "../src/workflows/transfer.js";
+import { FundingWorkflow, DefundingWorkflow } from "../src/workflows/funding.js";
+import { PaymentWorkflow } from "../src/workflows/payment.js";
+import { isWorkflowRejection, WorkflowRejection } from "../src/workflows/workflow.js";
+
+function seededStore(): MemoryStore {
+  const store = new MemoryStore();
+  store.ensureWallet("SRC", { ownerEntityID: "BANKAXXXXXX", managerNCB: "BDFEFR" });
+  store.ensureWallet("DST", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDFEFR" });
+  store.credit("SRC", "100.00");
+  return store;
+}
+
+describe("TransferWorkflow (two-step)", () => {
+  it("creates a PENDING_APPROVAL draft persisted in the store", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    const draft = wf.create({
+      id: "TR1",
+      amount: "10.00",
+      creditedWalletAlias: "DST",
+      debitedWalletAlias: "SRC",
+    });
+    expect(draft.status).toBe("PENDING_APPROVAL");
+    expect(draft.type).toBe("TRANSFER");
+    expect(store.getDraft("TR1")?.status).toBe("PENDING_APPROVAL");
+  });
+
+  it("approve settles: debits source, credits target, records a TX-", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    const settled = wf.approve("TR1");
+    expect(settled.status).toBe("SETTLED");
+    expect(store.getWallet("SRC")?.balance).toBe("60.00");
+    expect(store.getWallet("DST")?.balance).toBe("40.00");
+    const txs = store.getTransactions();
+    expect(txs).toHaveLength(1);
+    expect(txs[0].id.startsWith("TX-")).toBe(true);
+    expect(txs[0].type).toBe("TRANSFER");
+  });
+
+  it("cancel moves the draft to CANCELED without touching balances", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    const canceled = wf.cancel("TR1");
+    expect(canceled.status).toBe("CANCELED");
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
+    expect(store.getTransactions()).toHaveLength(0);
+  });
+
+  it("rejects approve of an unknown draft with 404", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    try {
+      wf.approve("NOPE");
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect(isWorkflowRejection(e)).toBe(true);
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(404);
+      expect(r.errorDescription).toBe("Draft NOPE not found");
+    }
+  });
+
+  it("rejects approve of an already-settled draft with 409", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    wf.approve("TR1");
+    try {
+      wf.approve("TR1");
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(409);
+      expect(r.errorDescription).toBe("Draft TR1 is in status SETTLED, cannot approve");
+    }
+  });
+});
+
+describe("FundingWorkflow / DefundingWorkflow", () => {
+  it("funding approve credits the target only", () => {
+    const store = seededStore();
+    const wf = new FundingWorkflow(store);
+    wf.create({
+      id: "FRQ1",
+      amount: "25.00",
+      creditedWalletAlias: "DST",
+      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+    });
+    wf.approve("FRQ1");
+    expect(store.getWallet("DST")?.balance).toBe("25.00");
+  });
+
+  it("funding uses a 'Funding draft' not-found label", () => {
+    const store = seededStore();
+    const wf = new FundingWorkflow(store);
+    try {
+      wf.approve("FRQX");
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).errorDescription).toBe("Funding draft FRQX not found");
+    }
+  });
+
+  it("defunding approve debits the source only", () => {
+    const store = seededStore();
+    const wf = new DefundingWorkflow(store);
+    wf.create({
+      id: "DRQ1",
+      amount: "30.00",
+      creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      debitedWalletAlias: "SRC",
+    });
+    wf.approve("DRQ1");
+    expect(store.getWallet("SRC")?.balance).toBe("70.00");
+  });
+
+  it("does not confuse a funding draft with a defunding workflow (type guard)", () => {
+    const store = seededStore();
+    new FundingWorkflow(store).create({
+      id: "FRQ1",
+      amount: "10.00",
+      creditedWalletAlias: "DST",
+      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+    });
+    const defunding = new DefundingWorkflow(store);
+    expect(() => defunding.approve("FRQ1")).toThrow();
+  });
+});
+
+describe("PaymentWorkflow (one-step)", () => {
+  it("execute settles immediately without persisting a draft", () => {
+    const store = seededStore();
+    const wf = new PaymentWorkflow(store);
+    wf.execute({ id: "PAY1", amount: "15.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    expect(store.getWallet("SRC")?.balance).toBe("85.00");
+    expect(store.getWallet("DST")?.balance).toBe("15.00");
+    expect(store.getDrafts()).toHaveLength(0);
+    expect(store.getTransactions()).toHaveLength(1);
+    expect(store.getTransactions()[0].id).toBe("TX-PAY1");
+  });
+});
+
+describe("Workflow persistence (memory/Redis-style cache)", () => {
+  it("persists drafts and transactions and rehydrates them", async () => {
+    const cache = new CacheMemory();
+    const store = new MemoryStore(cache);
+    store.ensureWallet("SRC", { ownerEntityID: "BANKAXXXXXX", managerNCB: "BDFEFR" });
+    store.ensureWallet("DST", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDFEFR" });
+    store.credit("SRC", "100.00");
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "20.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    wf.approve("TR1");
+
+    const reloaded = new MemoryStore(cache);
+    await reloaded.hydrate();
+    expect(reloaded.getDraft("TR1")?.status).toBe("SETTLED");
+    expect(reloaded.getTransactions()).toHaveLength(1);
+    expect(reloaded.getWallet("SRC")?.balance).toBe("80.00");
+    expect(reloaded.getWallet("DST")?.balance).toBe("20.00");
+  });
+});
