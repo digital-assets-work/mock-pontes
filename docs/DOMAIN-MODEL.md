@@ -283,6 +283,17 @@ In the mock this is implemented for **transactions** and **funding/defunding**
 (🟢); the same lifecycle for **entities, wallets, T2 accounts, PoA, mDLT** is ⚪
 not implemented. Behaviour: `404` on unknown draft, `409` if not `PENDING_APPROVAL`.
 
+**Generic Workflow engine.** All money-movement operations (2-step transfer,
+funding, defunding and the 1-step bridge payment — and, later, XvP) share a
+single `Workflow` base (`src/workflows/`) that implements exactly this state
+machine plus two extension points: `conditions(phase)` (validate/authorise a
+transition) and `apply()` (the DCW debit/credit effect at settlement). One-step
+workflows collapse `create`+`approve` into a single `execute()`. Consistent with
+the availability policy, **two-step workflows do not reserve funds** — a debit's
+availability is only ever checked at the approval step; only XvP (§4) locks funds
+up-front via the DCW `lock`/`release` ops. Workflow records and settled
+transactions persist to Redis when `REDIS_URL` is set.
+
 ### 3.2 Settlement / payment status
 
 `PaymentStatus` enum on settled records:
