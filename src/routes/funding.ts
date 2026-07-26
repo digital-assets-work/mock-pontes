@@ -6,24 +6,20 @@ import {
   setResponseStatus,
   createError,
 } from "h3";
-import type { MockStore, Draft, Wallet } from "../state/mock-store.js";
+import type { MockStore, Draft } from "../state/mock-store.js";
 
 /**
  * Auto-create a wallet if it doesn't exist (mock-only convenience).
  */
 function ensureWallet(store: MockStore, alias: string, body: any): void {
   if (!alias || store.getWallet(alias)) return;
-  const wallet: Wallet = {
-    alias,
-    ownerBIC: body.creditedCashWalletOwnerID || body.debitedCashWalletOwnerID || "UNKNOWN",
-    ownerEntityID: body.creditedCashWalletOwnerID || body.debitedCashWalletOwnerID || "UNKNOWN",
+  const owner = body.creditedCashWalletOwnerID || body.debitedCashWalletOwnerID || "UNKNOWN";
+  store.ensureWallet(alias, {
+    ownerBIC: owner,
+    ownerEntityID: owner,
     managerNCB: body.creditedCashWalletManagerID || body.debitedCashWalletManagerID || "UNKNOWN",
-    balance: "0.00",
     currency: body.currency || "EUR",
-    isMainWallet: true,
-    createdAt: new Date().toISOString(),
-  };
-  store.upsertWallet(wallet);
+  });
   console.log(`[mock-pontes] Auto-created wallet ${alias}`);
 }
 

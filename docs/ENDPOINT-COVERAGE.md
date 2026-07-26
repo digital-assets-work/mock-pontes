@@ -239,9 +239,18 @@ official funding/defunding/transaction/wallet endpoints instead.
 
 ### Behavioural simplifications on implemented endpoints
 
+- **DCW object model.** Dedicated Cash Wallets are modelled with an
+  `availableBalance` + `lockedBalance` (invariant `available + locked = total`),
+  per-currency holdings, an `isBlocked` flag/validity window, and **debit rights**
+  (by default only a user of the owning entity may debit; PoA grantees and
+  whitelisted market DLT operators are also allowed). The store exposes
+  `credit`/`debit`/`lock`/`release`/`settleLocked` + `canDebit`, and wallet reads
+  expose the available/locked/holdings model. State **persists to Redis** when
+  `REDIS_URL` is set. *(Money-movement handlers are migrated onto these ops in the
+  workflow issues; see the tracking epic.)*
 - **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
-  wallet instead of requiring the official AMS wallet-creation flow. There is no
-  balance/overdraft check — debits can drive a balance negative.
+  wallet (via the DCW create primitive: zero balances, same-entity debit rights,
+  no PoA/whitelist) instead of requiring the official AMS wallet-creation flow.
 - **Infinite funding source.** The token-issuance wallet
   `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` that sources funding is treated as
   having an infinite balance: funding approvals credit the target wallet without
