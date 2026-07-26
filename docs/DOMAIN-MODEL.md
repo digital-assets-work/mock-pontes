@@ -89,13 +89,18 @@ wallets and entities.
 
 A participant in the ESY DLT (a bank/PSP), identified by BIC.
 
-- Key fields: `entityID`, `entityIDType` (`BIC`), `name`, `shortName`,
-  `countryCode`, `isBlocked`, `isPrivate`, `status`, `fourEyesType`, `mspID`,
-  `rolesTable`, `historicStatus`.
+- **Create** (`globalregistry.CreateEntity`, 2-step): `entityID`, `entityIDType`
+  (`BIC`), `name`, `shortName`, `countryCode`, `rolesTable`, `validFrom`/`validTo`.
+- **Read** (`globalregistry.Entity`) adds: `id`, `mspID`, `domain`, `isBlocked`,
+  `isPrivate`, `status`, `fourEyesType`, `instructingPartyID`, `initiatorUserUUID`,
+  `historicStatus`, `timestamps`, `lastUpdated`.
+- Blocking is toggled via `PATCH .../grs/entities/{id}` (`isBlocked`).
 - Cardinality: owns **0..\*** DCWs; groups **1..\*** Users.
 - Official endpoints: `grs/entities` (create 2-step, list, get, patch blocking).
   **Not implemented** — the mock infers the owning entity from the wallet alias
   / enrolled user's `entityBIC`.
+- States: `PENDING_APPROVAL` → `ACTIVE` (approve) / `CANCELED` (cancel); then
+  `ACTIVE` ⇄ `BLOCKED` via patch.
 
 ### 2.3 User 🟢
 
@@ -136,8 +141,13 @@ A balance line inside a DCW.
 
 An RTGS (TARGET2) account reference a DCW is linked to for funding/defunding.
 
-- Key fields: `accountReference`, `managerID`, `status`, `fourEyesType`, `links`.
+- **Create** (`accountmanagement.CreateT2Account`, 2-step): `accountReference`,
+  `countryCode`, `links` (array of `T2AccountWalletLink`).
+- **Read** (`accountmanagement.T2Account`) adds: `id`, `managerID`, `status`,
+  `fourEyesType`, `instructingPartyID`, `initiatorUserUUID`, `historicStatus`,
+  `timestamps`, `lastUpdated`.
 - Cardinality: linked to **0..\*** DCWs via `T2AccountWalletLink`.
+- States: `PENDING_APPROVAL` → `ACTIVE` / `CANCELED`.
 - Official: create (2-step), list, get. **Not implemented** — funding treats the
   token-issuance wallet as an infinite source instead.
 
@@ -145,7 +155,10 @@ An RTGS (TARGET2) account reference a DCW is linked to for funding/defunding.
 
 Authorises a party to operate a DCW on behalf of the owner.
 
+- Fields: `id`, grantor/authorised party, `status`, `fourEyesType`,
+  `validFrom`/`validTo` (embedded in the wallet's `POAs` array).
 - Cardinality: **0..\*** per DCW.
+- States: `PENDING_APPROVAL` → `ACTIVE` / `CANCELED`.
 - Official: `ams/poa-drafts` (create 2-step), `ams/poa/{id}`. **Not implemented.**
 
 ### 2.8 Cash-Token Transaction 🟢
@@ -184,8 +197,15 @@ Moves cash between a T2 account and a DCW (2-step, NRO-signed).
 
 ### 2.11 Direct RTGS Payment ⚪
 
-A payment settling directly on RTGS. Official: `tms/direct-rtgs/payments` and the
-`bridge/direct-rtgs/payments` variant (2-step / 1-step). **Not implemented.**
+A payment settling directly on RTGS (TARGET2), NRO-signed.
+
+- Fields (`triggermanagement.DirectRTGSPaymentInstruction`): `id`,
+  `correlationId`, `amount`, `currency`, `payerBank`, `receiverBank`,
+  `signature`, `signerPEM`.
+- NRO signing string: `id + amount + payerBank + receiverBank`.
+- States: `PENDING_APPROVAL` → `SETTLED` / `CANCELED` (2-step) for the
+  `tms/direct-rtgs/payments` variant; the `bridge/direct-rtgs/payments` variant
+  is 1-step. **Not implemented.**
 
 ### 2.12 Bridge 1-step Payment 🟢 (cash-token) / ⚪ (PFoD, XvP)
 
@@ -193,8 +213,13 @@ Immediate settlement, no draft/approve cycle.
 
 - Key fields (`bridge.PaymentRequest`): `paymentID`, `amount`, `currency`,
   `creditedCashWalletAlias`/`ManagerID`, `debitedCashWalletAlias`/`ManagerID`.
-- Mock: `POST .../bridge/payments` implemented (EXTERNAL_USER). **PFoD**
-  (`initpfoddeli`/`initpfodrece`) and **XvP** (`/igw/**`) **not implemented**.
+- Mock: `POST .../bridge/payments` implemented (EXTERNAL_USER).
+- **PFoD** (Payment-Free-of-Delivery) — **not implemented**:
+  - `bridge.PFoDDeliRequest` (deliver): `tradeID`, `amount`, `currency`,
+    `sellerCashTokenWalletRef`, `sellerID`, `sellerCAMBIC`, `buyerID`.
+  - `bridge.PFoDReceRequest` (receive): `tradeID`, `amount`, `currency`,
+    `buyerCashTokenWalletRef`, `buyerID`, `buyerCAMBIC`, `sellerCAMBIC`.
+- **XvP** (`/igw/**`) — **not implemented**; see §4 for the full protocol.
 
 ### 2.13 Market DLT Operator & Whitelist ⚪
 
@@ -202,12 +227,20 @@ Registry of DLT platform operators and their authorisation whitelist.
 
 - `MarketDLTOperator`: `mdltOperatorID`, `operatorID`, `networkID`,
   `responsibleNCB`, `isBlocked`.
-- Cardinality: a Whitelist authorises **0..\*** operators. **Not implemented.**
+- `CreateMarketDLTOperatorWhitelist`: `managerID`, `marketDLTOperatorID`,
+  `marketDLTPlatformID`, `participantID`, `validFrom`/`validTo`.
+- Cardinality: a Whitelist authorises **0..\*** operators for a platform.
+- States: `PENDING_APPROVAL` → `ACTIVE` / `CANCELED`; `ACTIVE` ⇄ `BLOCKED`.
+  **Not implemented.**
 
 ### 2.14 Instruct-on-behalf ⚪
 
-An operation an operator instructs for another entity. Official:
-`tms/instruct-on-behalf-drafts`. **Not implemented.**
+An operation an operator/authorised party instructs for another entity.
+
+- Fields (`triggermanagement.CreateInstructOnBehalf`): `grantorParticipantBIC`,
+  `authorizedParticipantBIC` (the AMS variant adds wallet context).
+- States: `PENDING_APPROVAL` → `ACTIVE` / `CANCELED`.
+- Official: `tms/instruct-on-behalf-drafts`, `ams/...`. **Not implemented.**
 
 ### 2.15 Business Window & Business Date 🟡
 
@@ -270,7 +303,77 @@ stateDiagram-v2
 
 ---
 
-## 4. Implementation status summary
+## 4. XvP (Hash-Link) protocol ⚪ — not implemented
+
+**XvP** ("eXchange versus Payment") atomically settles the **cash leg** on Pontes
+against a **delivery/other leg** on a separate (market) DLT — i.e. **DvP**
+(delivery-vs-payment) or **PvP** (payment-vs-payment). It uses a **hashed
+time-lock** (the "Hash-Link" protocol): the cash leg is locked with two hashes
+and a timeout; revealing the matching **preimage key** either **executes** or
+**cancels** it, keeping both legs atomic.
+
+Two variants live on the **IGW** (inbound gateway):
+
+- **Cash-token XvP** — `/igw/{ncb}/v1/xvps` (seller settles from a cash-token DCW).
+- **Direct-RTGS XvP** — `/igw/{ncb}/v1/direct-rtgs/xvps` (seller settles on RTGS).
+
+### Participants & enums
+
+| Type | Fields |
+|------|--------|
+| `SimpleParticipant` (buyer) | `bic` |
+| `Participant` (cash-token seller) | `bic`, `cashWalletAlias`, `marketDLTOperator` |
+| `RTGSParticipant` (RTGS seller) | `bic`, `marketDLTOperator` |
+| `TransactionType` | `DVP` \| `PVP` |
+| `KeyType` | `EXECUTION` \| `CANCELLATION` |
+| `PaymentStatus` | `PENDING` \| `UNSETTLED` \| `SETTLED` \| `BURNED` |
+
+### Objects & fields
+
+| Object | Key fields |
+|--------|-----------|
+| `XvPInitRequest` | `seller`, `buyer`, `amount`, `currency` (`EUR`), `type` (DVP/PVP) |
+| `XvPInitResponse` | `xvpTransactionId`, **`executionHash`**, **`cancellationHash`**, `timeout` (ISO ts), + echoed `seller`/`buyer`/`amount`/`currency`/`type` |
+| `Payment` | `id`, `status` (`PaymentStatus`), `reason` |
+| `PaymentResponse` | `xvpTransactionId`, `payment`, **`executionKey`**, **`cancellationKey`** |
+
+### Flow
+
+1. **Init** — `POST /igw/{ncb}/v1/xvps` with `XvPInitRequest`. Pontes locks the
+   cash leg and returns `xvpTransactionId`, an `executionHash`, a
+   `cancellationHash` and a `timeout`. The two hashes are commitments the other
+   leg is built against.
+2. **Settle / cancel** — `POST /igw/{ncb}/v1/xvps/{xvpTransactionId}/payment`
+   supplying the preimage that matches a hash: the **execution key** (`KeyType
+   EXECUTION`) settles both legs; the **cancellation key** (`CANCELLATION`)
+   unwinds. Returns `PaymentResponse` (with the revealed `executionKey`/
+   `cancellationKey` and `payment.status`).
+3. **Poll** — `GET /igw/{ncb}/v1/xvps/{xvpTransactionId}` (XvP status) and
+   `.../payment` (`PaymentStatus`).
+4. **Timeout** — if neither key is revealed before `timeout`, the lock expires
+   and the XvP is cancelled/burned.
+
+### XvP state machine
+
+```mermaid
+stateDiagram-v2
+  [*] --> INITIALIZED: POST /xvps<br/>(returns executionHash,<br/>cancellationHash, timeout)
+  INITIALIZED --> PENDING: POST .../payment<br/>(key submitted)
+  PENDING --> SETTLED: execution key<br/>(matches executionHash)
+  PENDING --> CANCELLED: cancellation key<br/>(matches cancellationHash)
+  INITIALIZED --> CANCELLED: timeout elapsed
+  SETTLED --> [*]
+  CANCELLED --> [*]
+```
+
+> To implement XvP the mock would need: an XvP store keyed by `xvpTransactionId`,
+> generation of `executionHash`/`cancellationHash` (+ their keys) and a `timeout`,
+> preimage verification on the payment call, and the `PaymentStatus` transitions
+> above — for both the cash-token and direct-RTGS variants.
+
+---
+
+## 5. Implementation status summary
 
 | Concept | Status | Mock surface |
 |---------|--------|--------------|
