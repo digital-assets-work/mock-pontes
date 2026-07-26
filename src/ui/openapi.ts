@@ -113,6 +113,15 @@ export const openapiSpec = {
       },
     },
     // ---------------- Pontes · Wallets ----------------
+    "/dlt/{ncb}/api/octopus/ams/wallets": {
+      get: {
+        tags: ["Pontes · Wallets"],
+        summary: "Retrieve Dedicated Cash Wallet list",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/ncb" }],
+        responses: { "200": { description: "Wallets" }, "401": { description: "Unauthorized" } },
+      },
+    },
     "/dlt/{ncb}/api/octopus/ams/wallets/{walias}": {
       get: {
         tags: ["Pontes · Wallets"],
@@ -226,38 +235,6 @@ export const openapiSpec = {
       },
     },
     // ---------------- Mock · Admin (simulation) ----------------
-    "/admin/wallets": {
-      get: { tags: ["Mock · Admin"], summary: "MOCK: list all wallets & balances", responses: { "200": { description: "Wallets" } } },
-    },
-    "/admin/wallets/{alias}/fund": {
-      post: {
-        tags: ["Mock · Admin"],
-        summary: "MOCK: simulate funding (credit a wallet)",
-        parameters: [{ $ref: "#/components/parameters/alias" }],
-        requestBody: { content: { "application/json": { schema: { type: "object", properties: { amount: { type: "string", example: "1000000.00" } } } } } },
-        responses: { "200": { description: "Funded" } },
-      },
-    },
-    "/admin/wallets/{alias}/defund": {
-      post: {
-        tags: ["Mock · Admin"],
-        summary: "MOCK: simulate defunding (debit a wallet)",
-        parameters: [{ $ref: "#/components/parameters/alias" }],
-        requestBody: { content: { "application/json": { schema: { type: "object", properties: { amount: { type: "string", example: "1000000.00" } } } } } },
-        responses: { "200": { description: "Defunded" } },
-      },
-    },
-    "/admin/transfers": {
-      post: {
-        tags: ["Mock · Admin"],
-        summary: "MOCK: simulate a wallet-to-wallet transfer",
-        requestBody: { content: { "application/json": { schema: { type: "object" } } } },
-        responses: { "200": { description: "Transferred" } },
-      },
-    },
-    "/admin/transactions": {
-      get: { tags: ["Mock · Admin"], summary: "MOCK: list all transactions", responses: { "200": { description: "Transactions" } } },
-    },
     "/admin/business-window": {
       get: { tags: ["Mock · Admin"], summary: "MOCK: get business window", responses: { "200": { description: "Business window" } } },
       put: {
