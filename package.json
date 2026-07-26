@@ -8,6 +8,9 @@
   },
   "type": "module",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev-tee": "tsx watch src/index.ts 2>&1 | tee /tmp/mock-pontes.log",

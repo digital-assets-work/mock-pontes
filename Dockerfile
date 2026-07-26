@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage: install all deps and produce the bundled dist ----
-FROM node:22 AS builder
+FROM node:24 AS builder
 
 LABEL org.opencontainers.image.title="mock-pontes"
 LABEL org.opencontainers.image.description="Stateful mock of the ECB Pontes (TARGET) A2A API for local development and testing"
@@ -20,14 +20,14 @@ COPY . .
 RUN npm run build
 
 # ---- Deps stage: production-only node_modules for the runtime image ----
-FROM node:22 AS deps
+FROM node:24 AS deps
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---- Runtime stage: distroless node, minimal footprint ----
-FROM gcr.io/distroless/nodejs22-debian12 AS runtime
+FROM gcr.io/distroless/nodejs24-debian12 AS runtime
 
 # Change the user to nonroot (uid/gid 65532) defined in the distroless image
 USER nonroot
