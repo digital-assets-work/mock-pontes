@@ -164,6 +164,8 @@ enrolled users across restarts and to run multiple replicas.
 
 ## Documentation
 
+- [`examples/`](examples/) — runnable **mTLS + NRO** client examples in
+  TypeScript, Python, and Java (check-mtls → health → token → NRO-signed funding).
 - [`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md) — which official ECB
   Pontes endpoints the mock implements, the controls each enforces, and the mock
   release they were introduced in.
