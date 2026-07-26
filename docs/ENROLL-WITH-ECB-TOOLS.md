@@ -13,6 +13,12 @@ mock plays the role of the Service-Desk CA and issues the certificate instantly.
 > ⚠️ Local rehearsal only. Certificates issued by this mock are signed by its
 > throwaway runtime CA and are **not** trusted by real Pontes.
 
+> 🌐 **Want to try it without running anything?** A hosted mock is available at
+> **<https://mock.integration.pontes.ca-dag.work>** (NCB/realm `bdf`). Its server
+> certificate is publicly trusted, so you can drop the `-k` flag and omit
+> `CA_CERT` in the examples. Just swap `https://localhost:3001` for that URL in
+> the commands below.
+
 ---
 
 ## 1. Generate a private key + CSR with the ECB CertApp
@@ -96,7 +102,9 @@ For an existing user, the mock validates the `password` and re-issues.
 
 Point your enrollment at a running mock (default `https://localhost:3001`; the
 examples below use `bdf` as the NCB/realm). The mock uses a self-signed server
-cert, so pass `-k`/`--insecure` for local testing.
+cert, so pass `-k`/`--insecure` for local testing. (Against the hosted instance
+<https://mock.integration.pontes.ca-dag.work> the server cert is publicly trusted,
+so `-k` is not needed.)
 
 ### Path A — the built-in UI (recommended)
 
