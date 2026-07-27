@@ -1,9 +1,10 @@
 # Endpoint coverage & controls
 
-> **Generated:** 2026-07-26 — audit of the code in this repository against the
-> vendored official spec. Regenerated after the admin-endpoint cleanup
-> (mock-only `fund`/`defund`/`transfer`/wallet-list/transaction-list removed in
-> favour of the official API).
+> **Generated:** 2026-07-27 — audit of the code in this repository against the
+> vendored official spec. Regenerated after the object-model-first workflow suite
+> landed on `main` (DCW model, generic Workflow engine, and the transfer /
+> funding / defunding / direct-RTGS / PFoD / XvP money movements — see the closed
+> workflow issues) so the tables below reflect the current routes exactly.
 > **Official spec:** ECB Pontes Pilot *EII API* **v1.0.0**
 > (`src/ui/spec/pontes-official-v1.0.json`; YAML reference:
 > `../mock-pontes-workbench/docs/pontes-reference/pontes-pilot-v1.0.yaml`).
@@ -60,10 +61,10 @@ change behaviour. Gaps are listed, not fixed.
 |--------|---------------|--------|-----------|----------|-------|
 | GET | `/dlt/{ncb}/api/bridge/current-business-window` | IMPLEMENTED | same | `JWT` `mTLS` | v0.1.0 |
 | POST | `/dlt/{ncb}/api/bridge/payments` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:EXTERNAL_USER` `STATE` | v0.1.0 |
-| POST | `/dlt/{ncb}/api/bridge/direct-rtgs/payments` | NOT IMPLEMENTED | — | — | — |
+| POST | `/dlt/{ncb}/api/bridge/direct-rtgs/payments` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:EXTERNAL_USER` `NRO` `STATE` | unreleased |
 | GET | `/dlt/{ncb}/api/bridge/whitelist/verify` | NOT IMPLEMENTED | — | — | — |
-| POST | `/dlt/{ncb}/api/bridge/initpfoddeli` | NOT IMPLEMENTED | — | — | — |
-| POST | `/dlt/{ncb}/api/bridge/initpfodrece` | NOT IMPLEMENTED | — | — | — |
+| POST | `/dlt/{ncb}/api/bridge/initpfoddeli` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:EXTERNAL_USER` `STATE` | unreleased |
+| POST | `/dlt/{ncb}/api/bridge/initpfodrece` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:EXTERNAL_USER` `STATE` | unreleased |
 
 ### AMS — wallets & T2 accounts
 
@@ -92,8 +93,8 @@ change behaviour. Gaps are listed, not fixed.
 | Method | Official path | Status | Mock path | Controls | Since |
 |--------|---------------|--------|-----------|----------|-------|
 | POST | `/dlt/{ncb}/api/octopus/rvs/transactions-requests` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` | v0.1.0 |
-| PUT | `/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{instructionID}/{status}` | PARTIAL | `.../transactions-drafts/{id}/approve` and `.../{id}/cancel` | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (404/409) | v0.1.0 |
-| GET | `/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{instructionID}` | NOT IMPLEMENTED | — | — | — |
+| PUT | `/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{instructionID}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`, incl. `APPROVED`/`CANCELED`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (404/409, four-eyes, availability@approve) | unreleased |
+| GET | `/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{instructionID}` | IMPLEMENTED | same | `JWT` `mTLS` `STATE` (404) | unreleased |
 
 ### TMS — funding / defunding (2-step, NRO-signed)
 
@@ -101,16 +102,16 @@ change behaviour. Gaps are listed, not fixed.
 |--------|---------------|--------|-----------|----------|-------|
 | POST | `/dlt/{ncb}/api/octopus/tms/funding-requests` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` | v0.1.0 |
 | POST | `/dlt/{ncb}/api/octopus/tms/defunding-requests` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` | v0.1.0 |
-| PUT | `/dlt/{ncb}/api/octopus/tms/funding-requests-drafts/{id}/{status}` | PARTIAL | `.../funding-requests-drafts/{id}/approve` and `.../{id}/cancel` | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` | v0.1.0 |
-| PUT | `/dlt/{ncb}/api/octopus/tms/defunding-requests-drafts/{id}/{status}` | PARTIAL | `.../defunding-requests-drafts/{id}/approve` (no `cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` | v0.1.0 |
-| GET | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests-drafts/{id}` | NOT IMPLEMENTED | — | — | — |
-| GET | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests/{id}` | NOT IMPLEMENTED | — | — | — |
+| PUT | `/dlt/{ncb}/api/octopus/tms/funding-requests-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (four-eyes) | unreleased |
+| PUT | `/dlt/{ncb}/api/octopus/tms/defunding-requests-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (four-eyes, availability@approve) | unreleased |
+| GET | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests-drafts/{id}` | IMPLEMENTED | same (funding or defunding) | `JWT` `mTLS` `STATE` (404) | unreleased |
+| GET | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests/{id}` | IMPLEMENTED | same (funding or defunding) | `JWT` `mTLS` `STATE` (404) | unreleased |
 | POST | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests/extract` | NOT IMPLEMENTED | — | — | — |
 | POST | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests/payment-instructions/extract` | NOT IMPLEMENTED | — | — | — |
-| POST | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments` | NOT IMPLEMENTED | — | — | — |
-| GET | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments/{id}` | NOT IMPLEMENTED | — | — | — |
-| GET | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}` | NOT IMPLEMENTED | — | — | — |
-| PUT | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}/{status}` | NOT IMPLEMENTED | — | — | — |
+| POST | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` | unreleased |
+| GET | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments/{id}` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (404) | unreleased |
+| GET | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (404) | unreleased |
+| PUT | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (four-eyes, availability@approve) | unreleased |
 | POST | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments/extract` | NOT IMPLEMENTED | — | — | — |
 | POST | `/dlt/{ncb}/api/octopus/tms/instruct-on-behalf-drafts` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/octopus/tms/instruct-on-behalf/{id}` | NOT IMPLEMENTED | — | — | — |
@@ -157,24 +158,29 @@ change behaviour. Gaps are listed, not fixed.
 
 | Method | Official path | Status | Mock path | Controls | Since |
 |--------|---------------|--------|-----------|----------|-------|
-| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | init locks funds, NRO | XvP |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | — | XvP |
-| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | preimage | XvP |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | — | XvP |
-| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | init locks funds, NRO | XvP |
+| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | `NRO` `STATE` (locks funds; no `JWT`/`PROFILE` on `/igw`) | unreleased |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | `STATE` (404) | unreleased |
+| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (preimage verification) | unreleased |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (404) | unreleased |
+| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | `NRO` `STATE` (locks funds; no `JWT`/`PROFILE` on `/igw`) | unreleased |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
 | POST | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
 
 ### Coverage summary
 
-- **IMPLEMENTED:** 17 official operations — incl. the 5 XvP IGW operations
-  (`/igw/{ncb}/v1/xvps` init/status/payment + `direct-rtgs/xvps` init).
-- **PARTIAL:** 3 (path-shape differences — see §3).
-- **Mock-defined money movements** (behaviourally complete, mock paths): direct-RTGS
-  (`.../tms/direct-rtgs/payments`, `.../bridge/direct-rtgs/payments`) and PFoD
-  (`.../bridge/initpfoddeli`/`initpfodrece`).
-- **NOT IMPLEMENTED:** the remainder of the EII API (T2 accounts, GRS registry/entities/mDLT, PoA, instruct-on-behalf, the `direct-rtgs/xvps` GET/status IGW rows, extracts, stats).
+- **IMPLEMENTED:** 30 official operations. Includes the full 2-step draft
+  lifecycles via the generic `{status}` path + GET-by-id reads (RVS, TMS
+  funding/defunding, TMS direct-RTGS), the 1-step bridge `payments` and
+  `direct-rtgs/payments`, the matched PFoD legs (`initpfoddeli`/`initpfodrece`),
+  and the 5 XvP IGW operations (`/igw/{ncb}/v1/xvps` init/status/payment +
+  `direct-rtgs/xvps` init).
+- **PARTIAL:** 0 — the previously path-shape-divergent draft-status PUTs now serve
+  the official generic `{status}` path.
+- **NOT IMPLEMENTED:** the remainder of the EII API — T2 accounts, GRS
+  registry/entities/mDLT operators & whitelists, PoA, instruct-on-behalf, the
+  `direct-rtgs/xvps` status/payment IGW rows, `whitelist/verify`, and all
+  extract/stats operations.
 
 ---
 
@@ -230,22 +236,22 @@ official funding/defunding/transaction/wallet endpoints instead.
 
 ---
 
-## 3. Notes on PARTIAL endpoints and known gaps
+## 3. Notes on implemented endpoints and known gaps
 
-### PARTIAL — path-shape differences
+### Draft lifecycle (generic `{status}` — now matches the official path shape)
 
 - **Draft status updates.** The official spec uses a generic
   `.../{...-drafts}/{id}/{status}` path where `{status}` is the target state.
-  RVS transactions now serve the **generic `{status}`** transition
+  All 2-step drafts now serve this **generic `{status}`** transition
   (`approve`/`cancel`, case-insensitive, plus the `APPROVED`/`CANCELED` target
-  states) alongside a `GET .../transactions-drafts/{id}` read-by-id. TMS funding
-  also serves the **generic `{status}`** (approve|cancel) plus a
-  `GET .../tms/funding-defunding-requests(-drafts)/{id}` read; TMS defunding
-  likewise serves the generic `{status}` (approve **and cancel**, newly added).
-  Behaviour: `404` if the draft is unknown, `409` if it is not
-  in `PENDING_APPROVAL`. Two-step **approval** enforces **four-eyes** (approver
-  `≠` initiator → `403`) and, for debiting workflows, checks the source **debit
-  right** (`403`) and **available balance** (`422`) *at approval only*.
+  states) — RVS transactions, TMS funding **and** defunding (cancel included),
+  and TMS direct-RTGS — each alongside a `GET .../{...}/{id}` read-by-id (RVS
+  `transactions-drafts/{id}`; TMS `funding-defunding-requests(-drafts)/{id}`; TMS
+  `direct-rtgs/payments(-drafts)/{id}`). Behaviour: `404` if the draft is unknown,
+  `409` if it is not in `PENDING_APPROVAL`. Two-step **approval** enforces
+  **four-eyes** (approver `≠` initiator → `403`) and, for debiting workflows,
+  checks the source **debit right** (`403`) and **available balance** (`422`)
+  *at approval only*.
 
 ### Behavioural simplifications on implemented endpoints
 
