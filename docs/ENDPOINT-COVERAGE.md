@@ -31,6 +31,21 @@ declares:
 
 The implemented-set comes from a **route registry** ([`src/http/route-registry.ts`](../src/http/route-registry.ts)) populated as routes are declared (via `track()`), matched param-name-agnostically (`:id` ↔ `{instructionID}`), so it cannot drift from the live routes. The builder is [`src/ui/openapi.ts`](../src/ui/openapi.ts) (`buildServedSpec`). The pristine official spec stays at `/openapi/official.json`.
 
+## Error responses
+
+Every error is normalised to the official `ErrorResponse` shape (issue #33):
+
+```json
+{ "status": 409, "title": "Conflict", "businessErrors": [ { "errorCode": "HL-GER-004", "errorDescription": "…" } ] }
+```
+
+Normalisation is centralised in `src/http/error-response.ts`, wired via the H3
+`onError` (thrown errors) and `onBeforeResponse` (returned error bodies) hooks in
+`src/index.ts`. `errorCode` is always preserved and a `stack` is never exposed.
+The OAuth `{ error, error_description }` shape is kept **only** on the IAM token
+endpoint (`/iam/realms/{ncb}/protocol/openid-connect/token`); every other error —
+including the JWT `401` on `/dlt` — is normalised.
+
 ## Legend
 
 **Status**

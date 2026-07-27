@@ -18,7 +18,9 @@ function rejectAsError(e: unknown): never {
   if (isWorkflowRejection(e)) {
     throw createError({
       statusCode: e.statusCode,
-      data: { businessErrors: [{ errorDescription: e.errorDescription }] },
+      // Preserve errorCode (not just the description) so it survives to the
+      // normalised ErrorResponse (issue #33).
+      data: { businessErrors: e.businessErrors },
     });
   }
   throw e;

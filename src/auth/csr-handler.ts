@@ -48,6 +48,7 @@ export async function signCsr(
   csrPem: string,
   caKeyPem: string,
   caCertPem: string,
+  options: { validityMinutes?: number } = {},
 ): Promise<string> {
   const csr = new x509.Pkcs10CertificateRequest(csrPem);
   const caCert = new x509.X509Certificate(caCertPem);
@@ -57,10 +58,15 @@ export async function signCsr(
   const caKey = await crypto.webcrypto.subtle.importKey("pkcs8", pkcs8Der, EC_ALG, false, ["sign"]);
 
   // Real Pontes certificates are valid for 24 months from issuance (SDD v1.0 §6.3.5,
-  // Connectivity Training §"Certificate Renewal"). Mirror that here.
+  // Connectivity Training §"Certificate Renewal"). Mirror that here — unless a
+  // shorter validity is requested (admin-token mode issues 1-hour certs, #35).
   const notBefore = new Date();
   const notAfter = new Date(notBefore);
-  notAfter.setMonth(notAfter.getMonth() + 24);
+  if (options.validityMinutes != null) {
+    notAfter.setMinutes(notAfter.getMinutes() + options.validityMinutes);
+  } else {
+    notAfter.setMonth(notAfter.getMonth() + 24);
+  }
 
   const cert = await x509.X509CertificateGenerator.create({
     serialNumber: crypto.randomBytes(16).toString("hex"),

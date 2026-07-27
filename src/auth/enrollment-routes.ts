@@ -15,6 +15,12 @@ import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
 import { isStrictMode, validateClientIdForProfile } from "./profile-enforcement.js";
 import { track } from "../http/route-registry.js";
+import {
+  adminTokenConfigured,
+  enforceAdminToken,
+  adminUnauthorizedBody,
+  ADMIN_ENROLMENT_CERT_MINUTES,
+} from "./admin-token.js";
 
 interface RuntimePkiMaterial {
   clientSigningCaPrivateKeyPem: string;
@@ -219,10 +225,15 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
 
       let signedCertPem: string;
       try {
+        // When the admin gate is enabled, enrolment still works but issues a
+        // short-lived (1 hour) certificate (#35).
         signedCertPem = await signCsr(
           csr,
           options.runtimePki.clientSigningCaPrivateKeyPem,
           options.runtimePki.clientSigningCaCertificatePem,
+          adminTokenConfigured()
+            ? { validityMinutes: ADMIN_ENROLMENT_CERT_MINUTES }
+            : {},
         );
       } catch (err) {
         setResponseStatus(event, 500);
@@ -283,7 +294,10 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
 
   router.get(
     "/admin/enrolled-users",
-    defineEventHandler(() => {
+    defineEventHandler((event) => {
+      // When ADMIN_TOKEN is set, listing enrolled users requires the token;
+      // otherwise behaviour is unchanged (#35).
+      if (!enforceAdminToken(event)) return adminUnauthorizedBody();
       return { users: options.authUsersRepository.listEnrolledUsers() };
     }),
   );
@@ -291,6 +305,7 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
   router.get(
     "/admin/enrolled-users/:username/certificate",
     defineEventHandler((event) => {
+      if (!enforceAdminToken(event)) return adminUnauthorizedBody();
       const username = decodeURIComponent(getRouterParam(event, "username") || "");
       const certificateFingerprint = options.authUsersRepository.getFingerprintByUsername(username);
       const certificate = options.authUsersRepository.getCertificateByUsername(username);

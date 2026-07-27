@@ -1,7 +1,7 @@
 // @peculiar/x509's CJS build depends on tsyringe which requires a reflect polyfill
 import "reflect-metadata";
 import "dotenv/config";
-import { createApp, toNodeListener } from "h3";
+import { createApp, toNodeListener, setResponseStatus } from "h3";
 import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
@@ -46,6 +46,10 @@ import { createLoggingMiddleware } from "./logger/middleware.js";
 import { createMtlsConsistencyMiddleware } from "./auth/middleware.js";
 import { createInMemoryAuthUsersRepository, createPersistedAuthUsersRepository } from "./auth/users-repository.js";
 import { RedisCache } from "./cache/index.js";
+import {
+  normalizeReturnedErrorBody,
+  normalizeThrownError,
+} from "./http/error-response.js";
 
 // --- State ---
 const redisUrl = process.env.REDIS_URL;
@@ -77,7 +81,26 @@ const nroRoutePatterns: readonly RegExp[] = [
 ];
 
 // --- H3 App ---
-const app = createApp();
+// Every error is normalised to the official Pontes `ErrorResponse` shape
+// ({ status, title, businessErrors[] }) — thrown errors via `onError`, returned
+// error bodies via `onBeforeResponse`. Stacks are never exposed (issue #33).
+const app = createApp({
+  onError: (error, event) => {
+    if (event.handled) return;
+    const body = normalizeThrownError(error);
+    setResponseStatus(event, body.status);
+    event.node.res.setHeader("content-type", "application/json");
+    event.node.res.end(JSON.stringify(body));
+  },
+  onBeforeResponse: (event, response) => {
+    const normalised = normalizeReturnedErrorBody(
+      event.node.res.statusCode,
+      event.path || "",
+      response.body,
+    );
+    if (normalised) response.body = normalised;
+  },
+});
 
 // --- Global request logging + mTLS context enrichment middleware ---
 // Attaches certificate-derived context (e.g. presented client cert, fingerprint, validity)
