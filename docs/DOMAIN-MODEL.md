@@ -201,9 +201,10 @@ Moves cash between a T2 account and a DCW (2-step, NRO-signed).
   `.../{id}/approve` (funding also `cancel`; defunding approve-only). The
   token-issuance wallet is treated as an **infinite** source.
 
-### 2.11 Direct RTGS Payment ⚪
+### 2.11 Direct RTGS Payment 🟡
 
-A payment settling directly on RTGS (TARGET2), NRO-signed.
+A payment settling directly on RTGS (TARGET2), NRO-signed. Modelled in the mock
+as a **composite** of a *defunding on the payer* + a *funding on the receiver*.
 
 - Fields (`triggermanagement.DirectRTGSPaymentInstruction`): `id`,
   `correlationId`, `amount`, `currency`, `payerBank`, `receiverBank`,
@@ -211,7 +212,9 @@ A payment settling directly on RTGS (TARGET2), NRO-signed.
 - NRO signing string: `id + amount + payerBank + receiverBank`.
 - States: `PENDING_APPROVAL` → `SETTLED` / `CANCELED` (2-step) for the
   `tms/direct-rtgs/payments` variant; the `bridge/direct-rtgs/payments` variant
-  is 1-step. **Not implemented.**
+  is 1-step. **Implemented** as `DirectRtgsWorkflow` (checked debit of the payer
+  + credit of the receiver): 2-step checks availability + debit rights at approval
+  with four-eyes; 1-step checks immediately.
 
 ### 2.12 Bridge 1-step Payment 🟢 (cash-token) / ⚪ (PFoD, XvP)
 
@@ -284,14 +287,16 @@ In the mock this is implemented for **transactions** and **funding/defunding**
 not implemented. Behaviour: `404` on unknown draft, `409` if not `PENDING_APPROVAL`.
 
 **Generic Workflow engine.** All money-movement operations (2-step transfer,
-funding, defunding and the 1-step bridge payment — and, later, XvP) share a
-single `Workflow` base (`src/workflows/`) that implements exactly this state
-machine plus two extension points: `conditions(phase)` (validate/authorise a
-transition) and `apply()` (the DCW debit/credit effect at settlement). One-step
+funding, defunding, direct-RTGS and the 1-step bridge payment — and, later, XvP)
+share a single `Workflow` base (`src/workflows/`) that implements exactly this
+state machine plus two extension points: `conditions(phase)` (validate/authorise
+a transition) and `apply()` (the DCW debit/credit effect at settlement). One-step
 workflows collapse `create`+`approve` into a single `execute()`. Consistent with
 the availability policy, **two-step workflows do not reserve funds** — a debit's
-availability is only ever checked at the approval step; only XvP (§4) locks funds
-up-front via the DCW `lock`/`release` ops. Workflow records and settled
+availability and debit **rights** are checked **only at the approval step** (via
+the checked DCW op, returning `403` for rights / `422` for insufficient funds),
+and approval enforces **four-eyes** (approver ≠ initiator). Only XvP (§4) locks
+funds up-front via the DCW `lock`/`release` ops. Workflow records and settled
 transactions persist to Redis when `REDIS_URL` is set.
 
 ### 3.2 Settlement / payment status
