@@ -20,6 +20,10 @@ let cache: CacheInterface | null = null;
 let usingRedis = false;
 
 const EC_ALG: EcKeyGenParams = { name: "ECDSA", namedCurve: "P-256" };
+// Node 24's `crypto.webcrypto.subtle` is typed with node-specific key types
+// (extra KeyUsage members). @peculiar/x509 expects the DOM WebCrypto types, so
+// bridge them once here — the runtime objects are identical.
+const subtle = crypto.webcrypto.subtle as unknown as SubtleCrypto;
 const SIGNING_ALG: EcdsaParams = { name: "ECDSA", hash: "SHA-256" };
 
 function delay(ms: number): Promise<void> {
@@ -87,16 +91,16 @@ function validateBundle(raw: unknown): RuntimePkiBundle | null {
 }
 
 async function exportKeyToPem(key: CryptoKey): Promise<string> {
-  const pkcs8 = await crypto.webcrypto.subtle.exportKey("pkcs8", key);
+  const pkcs8 = await subtle.exportKey("pkcs8", key);
   return x509.PemConverter.encode(pkcs8, "PRIVATE KEY");
 }
 
 async function generateCa(commonName: string, organization: string): Promise<{ keyPem: string; certPem: string }> {
-  const keys = await crypto.webcrypto.subtle.generateKey(EC_ALG, true, ["sign", "verify"]);
+  const keys = await subtle.generateKey(EC_ALG, true, ["sign", "verify"]);
 
   const cert = await x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: crypto.randomBytes(16).toString("hex"),
-    name: `CN=${commonName}, O=${organization}, C=LU`,
+    name: `CN=${commonName}, O=${organization}, C=DEV`,
     notBefore: new Date(),
     notAfter: new Date(Date.now() + 10 * 365.25 * 24 * 60 * 60 * 1000),
     signingAlgorithm: SIGNING_ALG,
@@ -119,7 +123,7 @@ async function generateCa(commonName: string, organization: string): Promise<{ k
 async function importCaKey(caKeyPem: string): Promise<CryptoKey> {
   // Normalize any PEM format (SEC1 "EC PRIVATE KEY" or PKCS#8 "PRIVATE KEY") to PKCS#8 DER
   const pkcs8Der = crypto.createPrivateKey(caKeyPem).export({ type: "pkcs8", format: "der" });
-  return crypto.webcrypto.subtle.importKey("pkcs8", pkcs8Der, EC_ALG, false, ["sign"]);
+  return subtle.importKey("pkcs8", pkcs8Der, EC_ALG, false, ["sign"]);
 }
 
 /**
@@ -148,7 +152,7 @@ function parseSanEntries(): x509.JsonGeneralName[] {
 
 function resolveTlsSubject(sans: x509.JsonGeneralName[]): string {
   return process.env.TLS_SUBJECT
-    || `CN=${sans.find((s) => s.type === "dns")?.value ?? "localhost"}, O=MockPontes, C=LU`;
+    || `CN=${sans.find((s) => s.type === "dns")?.value ?? "localhost"}, O=MockPontes, C=DEV`;
 }
 
 /**
@@ -166,7 +170,7 @@ async function generateServerCertificate(
   serverCaKeyPem: string,
   serverCaCertPem: string,
 ): Promise<{ keyPem: string; certPem: string }> {
-  const serverKeys = await crypto.webcrypto.subtle.generateKey(EC_ALG, true, ["sign", "verify"]);
+  const serverKeys = await subtle.generateKey(EC_ALG, true, ["sign", "verify"]);
   const caKey = await importCaKey(serverCaKeyPem);
   const caCert = new x509.X509Certificate(serverCaCertPem);
 

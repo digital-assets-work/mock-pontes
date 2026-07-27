@@ -187,7 +187,7 @@ Inspect the issued certificate (or use the **Inspect** button in `/ui/enroll`):
 ```bash
 openssl x509 -in user.crt -noout -subject -issuer -dates
 # subject=CN=PFRBSUIFRPPXXX0001
-# issuer=CN=MockPontes-ClientCA, O=MockPontes, C=LU
+# issuer=CN=MockPontes-ClientCA, O=MockPontes, C=DEV
 # notBefore/notAfter … 24-month validity
 
 openssl x509 -in user.crt -noout -text | grep -A1 "1.2.3.4.5.6.7.8.1"

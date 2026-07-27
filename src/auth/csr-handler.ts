@@ -33,6 +33,9 @@ export interface CSRResponse {
 }
 
 const EC_ALG: EcKeyGenParams = { name: "ECDSA", namedCurve: "P-256" };
+// See runtime-pki.ts: bridge Node's webcrypto key types to the DOM types that
+// @peculiar/x509 expects.
+const subtle = crypto.webcrypto.subtle as unknown as SubtleCrypto;
 const SIGNING_ALG: EcdsaParams = { name: "ECDSA", hash: "SHA-256" };
 
 /**
@@ -55,7 +58,7 @@ export async function signCsr(
 
   // Normalize any PEM format (SEC1 "EC PRIVATE KEY" or PKCS#8 "PRIVATE KEY") to PKCS#8 DER
   const pkcs8Der = crypto.createPrivateKey(caKeyPem).export({ type: "pkcs8", format: "der" });
-  const caKey = await crypto.webcrypto.subtle.importKey("pkcs8", pkcs8Der, EC_ALG, false, ["sign"]);
+  const caKey = await subtle.importKey("pkcs8", pkcs8Der, EC_ALG, false, ["sign"]);
 
   // Real Pontes certificates are valid for 24 months from issuance (SDD v1.0 §6.3.5,
   // Connectivity Training §"Certificate Renewal"). Mirror that here — unless a

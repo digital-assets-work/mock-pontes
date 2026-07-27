@@ -46,7 +46,7 @@ curl -sk https://localhost:3001/check/ip
 
 ## Quick start (from source)
 
-Requires Node.js 22+.
+Requires Node.js 24+.
 
 ```bash
 git clone https://github.com/digital-assets-work/mock-pontes.git
@@ -76,17 +76,12 @@ Browse them interactively via the embedded Swagger UI at `/ui/docs`.
 These mimic the real Pontes A2A API so a client can target the mock by pointing
 its Pontes base URL at this service.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/dlt/{ncb}/api/octopus/health` | Health check |
-| GET | `/dlt/{ncb}/api/octopus/ams/wallets` | List dedicated cash wallets |
-| GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}` | Wallet details |
-| GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}/transactions` | Wallet transactions |
-| POST | `/dlt/{ncb}/api/octopus/rvs/transactions-requests` | Create transfer draft |
-| PUT | `/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{id}/approve` | Approve draft |
-| POST | `/dlt/{ncb}/api/octopus/tms/funding-requests` | Create funding draft |
-| POST | `/dlt/{ncb}/api/octopus/tms/defunding-requests` | Create defunding draft |
-| GET | `/dlt/{ncb}/api/bridge/current-business-window` | Business window |
+**[`docs/ENDPOINT-COVERAGE.md`](docs/ENDPOINT-COVERAGE.md) is the single source of
+truth** for the full Pontes surface (every method + path, implemented/partial/not,
+and the controls enforced). The served OpenAPI at `/openapi.json` (and the
+Swagger UI at `/ui/docs`) is generated from the same routes and tags anything
+unimplemented `NotImplemented`. To avoid drift, this README intentionally does
+**not** duplicate that table.
 
 Transport troubleshooting endpoints (served at the domain root, mirroring the
 real Pontes gateway): `GET /check/ip`, `GET /check/mtls`.
@@ -158,6 +153,10 @@ Configuration is via environment variables (see [`.env.example`](.env.example)):
 | `TLS_SAN` | `dns:localhost;ip:127.0.0.1` | Subject Alternative Names for the runtime server cert |
 | `TLS_SUBJECT` | `CN=localhost O=MockPontes C=DEV` | Subject for the runtime server cert |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | — | Serve an externally-provided (e.g. Let's Encrypt) server cert instead of the self-signed one |
+
+> The `TLS_SUBJECT` default above is for **local** use (`C=DEV`). A **deployed**
+> instance sets `TLS_SUBJECT` to the real identity, e.g.
+> `CN=<server FQDN>, O=MockPontes, C=FR`.
 
 State is kept in memory by default. Set `REDIS_URL` to persist runtime PKI and
 enrolled users across restarts and to run multiple replicas.

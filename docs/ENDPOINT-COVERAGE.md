@@ -6,8 +6,8 @@
 > funding / defunding / direct-RTGS / PFoD / XvP money movements — see the closed
 > workflow issues) so the tables below reflect the current routes exactly.
 > **Official spec:** ECB Pontes Pilot *EII API* **v1.0.0**
-> (`src/ui/spec/pontes-official-v1.0.json`; YAML reference:
-> `../mock-pontes-workbench/docs/pontes-reference/pontes-pilot-v1.0.yaml`).
+> (vendored in this repo at `src/ui/spec/pontes-official-v1.0.json`; source: the
+> ECB Pontes Pilot OpenAPI v1.0 publication).
 > **Mock release baseline:** rows marked `v0.1.0` shipped in the **initial
 > public release** (git tag `v0.1.0`, `package.json` version `1.0.0`, 2026-07-26).
 > Rows marked `unreleased` have landed on `main` since and will carry the next
@@ -321,8 +321,8 @@ official funding/defunding/transaction/wallet endpoints instead.
   confirmation string) are served. Both are **NRO-signed on create** (signature
   over `id + amount + payerBank + receiverBank`, `signerPEM` = presented mTLS
   cert). Availability + debit rights are checked at approval (two-step) or
-  immediately (one-step). *(Mock-defined paths; distinct from the `/igw/…`
-  direct-RTGS/XvP surface, which is still not implemented.)*
+  immediately (one-step). *(Mock-defined bridge paths, distinct from the
+  `/igw/…` XvP surface — which **is** implemented; see the XvP section below.)*
 - **PFoD (matched, 2-sided).** The deliver (`POST .../bridge/initpfoddeli`,
   seller) and receive (`POST .../bridge/initpfodrece`, buyer) legs (EXTERNAL_USER)
   are submitted independently and persisted as `PENDING_MATCH` PFOD drafts keyed
