@@ -17,6 +17,19 @@
 This document is an **audit only** — it reports what exists today and does not
 change behaviour. Gaps are listed, not fixed.
 
+## Response markers (issue #41)
+
+Every response carries a marker header so a client accidentally pointed at the
+mock notices immediately:
+
+- `X-Mock-Pontes: true`
+- `X-Mock-Pontes-Version: <release version>` (same source as the UI badge — the
+  release tag via `PUBLIC_GIT_REF_NAME`, else the package version, else `dev`).
+
+Set via the h3 `onRequest` hook in [`src/app.ts`](../src/app.ts) so it is present
+on **all** responses, including errors. The health response keeps its `"mock": true`
+body marker.
+
 ## Served OpenAPI (`GET /openapi.json`) — derived from the official spec (issue #34)
 
 The mock no longer hand-writes its OpenAPI. `GET /openapi.json` is generated at

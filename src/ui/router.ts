@@ -37,16 +37,7 @@ import officialSpec from "./spec/pontes-official-v1.0.json";
 
 /** Release version — from the release build's baked git ref, falling back to the
  *  npm package version (dev) so the UI always shows something meaningful. */
-function mockVersion(): string {
-  const ref = process.env.PUBLIC_GIT_REF_NAME;
-  if (ref && ref !== "no_ref_name") return ref.replace(/^v/, "");
-  return process.env.npm_package_version || "dev";
-}
-/** Short commit hash baked at build time, when available. */
-function mockCommit(): string | undefined {
-  const c = process.env.PUBLIC_COMMIT_HASH;
-  return c && c !== "no_commit_hash" ? c.slice(0, 7) : undefined;
-}
+import { mockVersion, mockCommit } from "../version.js";
 
 // The served spec is derived from the official spec + the route registry, so it
 // must be built AFTER all routes are registered. Build lazily on first request
