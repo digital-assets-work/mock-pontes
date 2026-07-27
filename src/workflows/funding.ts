@@ -24,6 +24,7 @@ export class FundingWorkflow extends Workflow {
 export class DefundingWorkflow extends Workflow {
   readonly type = "DEFUNDING" as const;
   protected readonly notFoundLabel = "Defunding draft";
+  protected readonly debitsSource = true;
 
   protected apply(record: Draft, caller?: DcwCaller): void {
     this.checkedDebit(record.debitedWalletAlias, record.amount, caller);

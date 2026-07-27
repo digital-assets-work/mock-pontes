@@ -16,6 +16,7 @@ import { Workflow } from "./workflow.js";
 export class DirectRtgsWorkflow extends Workflow {
   readonly type = "DIRECT_RTGS" as const;
   protected readonly notFoundLabel = "Direct RTGS payment";
+  protected readonly debitsSource = true;
 
   protected apply(record: Draft, caller?: DcwCaller): void {
     // defund(source/payer): checked debit — rights + availability

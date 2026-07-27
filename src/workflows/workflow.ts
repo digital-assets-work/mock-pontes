@@ -89,6 +89,13 @@ export abstract class Workflow {
   protected readonly notFoundCode: string = "HL-GER-001";
   protected readonly stateCode: string = "HL-GER-002";
 
+  /**
+   * True when this workflow debits its `debitedWalletAlias`. Debit-side wallets
+   * are **never** auto-created (issue #23) — they must already exist, otherwise a
+   * condition error is raised.
+   */
+  protected readonly debitsSource: boolean = false;
+
   constructor(protected readonly store: MockStore) {}
 
   // --- extension points -----------------------------------------------------
@@ -110,6 +117,7 @@ export abstract class Workflow {
   create(init: WorkflowInit): Draft {
     const record = this.buildRecord(init, "PENDING_APPROVAL");
     this.conditions("create", record);
+    this.assertDebitWalletExists(record);
     this.store.addDraft(record);
     return record;
   }
@@ -129,6 +137,7 @@ export abstract class Workflow {
       );
     }
     this.conditions("approve", record, actor.caller);
+    this.assertDebitWalletExists(record);
     this.apply(record, actor.caller);
     this.store.updateDraft(id, { status: "SETTLED", approverUserUUID: actor.approverUserUUID });
     this.recordTransaction(record);
@@ -147,6 +156,7 @@ export abstract class Workflow {
   execute(init: WorkflowInit, actor: WorkflowActor = {}): Draft {
     const record = this.buildRecord(init, "SETTLED");
     this.conditions("create", record, actor.caller);
+    this.assertDebitWalletExists(record);
     this.apply(record, actor.caller);
     this.recordTransaction(record);
     return record;
@@ -184,6 +194,19 @@ export abstract class Workflow {
       );
     }
     return record;
+  }
+
+  /**
+   * Enforce that the debit-side wallet exists. Debit-side DCWs are never
+   * auto-created (issue #23) — only credit-side wallets are. A missing debit
+   * wallet is a condition failure.
+   */
+  protected assertDebitWalletExists(record: Draft): void {
+    if (!this.debitsSource) return;
+    const alias = record.debitedWalletAlias;
+    if (alias && !this.store.getWallet(alias)) {
+      throw new WorkflowRejection(422, "HL-WAL-002", `Debit wallet ${alias} does not exist`);
+    }
   }
 
   protected recordTransaction(record: Draft): void {

@@ -134,13 +134,8 @@ export function createFundingRouter(store: MockStore) {
       const seq = String(Math.floor(Math.random() * 999999)).padStart(6, "0");
       const id = `DRQ${now.slice(2, 10).replace(/-/g, "")}${seq}`;
 
-      // Auto-create debited (source) wallet if it doesn't exist. Default its
-      // owner to the initiator's entity so the approval debit-right check passes.
-      const initiatorEntity = (event.context.auth as AuthContext | undefined)?.entityBIC;
-      if (!body.debitedCashWalletOwnerID && initiatorEntity) {
-        body.debitedCashWalletOwnerID = initiatorEntity;
-      }
-      ensureWallet(store, body.debitedCashWalletAlias, body);
+      // Defunding debits the source (debit side) — per issue #23 it is NOT
+      // auto-created; the workflow raises a condition error if it doesn't exist.
 
       const draft = defunding.create({
         id,

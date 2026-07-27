@@ -55,15 +55,10 @@ export function createDirectRtgsRouter(store: MockStore) {
   const router = createRouter();
   const workflow = new DirectRtgsWorkflow(store);
 
-  function buildInit(body: any, event: H3Event, id: string) {
-    const initiatorEntity = (event.context.auth as AuthContext | undefined)?.entityBIC;
+  function buildInit(body: any, id: string) {
+    // Auto-create only the CREDIT-side wallet (issue #23); the debit-side payer
+    // must already exist or the workflow raises a condition error.
     ensureWallet(store, body.creditedCashWalletAlias, body.creditedCashWalletManagerID || "UNKNOWN");
-    ensureWallet(
-      store,
-      body.debitedCashWalletAlias,
-      body.debitedCashWalletManagerID || "UNKNOWN",
-      body.debitedCashWalletOwnerID || initiatorEntity,
-    );
     return {
       id,
       amount: body.amount || "0.00",
@@ -81,7 +76,7 @@ export function createDirectRtgsRouter(store: MockStore) {
       const body = await readBody(event);
       const now = new Date().toISOString();
       const id = `DRTGS${now.slice(2, 10).replace(/-/g, "")}${String(Math.floor(Math.random() * 999999)).padStart(6, "0")}`;
-      const draft = workflow.create(buildInit(body, event, id));
+      const draft = workflow.create(buildInit(body, id));
       setResponseStatus(event, 201);
       return rtgsView(draft, { createdAt: draft.createdAt });
     }),
@@ -141,7 +136,7 @@ export function createDirectRtgsRouter(store: MockStore) {
       const body = await readBody(event);
       const id = body.id || body.paymentID || randomUUID();
       try {
-        workflow.execute(buildInit(body, event, id), { caller: callerOf(event) });
+        workflow.execute(buildInit(body, id), { caller: callerOf(event) });
       } catch (e) {
         return sendRejection(event, e);
       }
