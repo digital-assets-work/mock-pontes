@@ -61,12 +61,9 @@ export function createTransfersRouter(store: MockStore) {
       const now = new Date().toISOString();
       const id = `TR${now.slice(2, 10).replace(/-/g, "")}${String(Math.floor(Math.random() * 999999)).padStart(6, "0")}`;
 
-      // Auto-create wallets if they don't exist (mock convenience). The debited
-      // (source) wallet defaults to being owned by the initiator's entity so the
-      // debit-rights check passes at approval when no explicit owner is given.
-      const initiatorEntity = (event.context.auth as AuthContext | undefined)?.entityBIC;
+      // Auto-create only the CREDIT-side wallet (issue #23). The debit-side
+      // wallet must already exist; the workflow raises a condition error if not.
       ensureWallet(store, body.creditedCashWalletAlias, body.creditedCashWalletOwnerID || "UNKNOWN", body.creditedCashWalletManagerID || "UNKNOWN");
-      ensureWallet(store, body.debitedCashWalletAlias, body.debitedCashWalletOwnerID || initiatorEntity || "UNKNOWN", body.debitedCashWalletManagerID || "UNKNOWN");
 
       const draft = workflow.create({
         id,

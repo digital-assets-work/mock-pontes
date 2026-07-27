@@ -461,6 +461,53 @@ describe("XvpWorkflow (hash-lock — issue #21)", () => {
   });
 });
 
+describe("Debit-side wallet must pre-exist (issue #23)", () => {
+  it("transfer create rejects with 422 when the debit wallet does not exist", () => {
+    const store = new MemoryStore();
+    store.ensureWallet("DST", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDFEFR" }); // credit side only
+    const wf = new TransferWorkflow(store);
+    try {
+      wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(422);
+      expect(r.errorCode).toBe("HL-WAL-002");
+    }
+    expect(store.getDraft("TR1")).toBeUndefined();
+  });
+
+  it("one-step payment rejects with 422 when the debit wallet does not exist", () => {
+    const store = new MemoryStore();
+    store.ensureWallet("DST", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDFEFR" });
+    const wf = new PaymentWorkflow(store);
+    try {
+      wf.execute(
+        { id: "PAY1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" },
+        { caller: { entityBIC: "BANKAXXXXXX" } },
+      );
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(422);
+    }
+    expect(store.getTransactions()).toHaveLength(0);
+  });
+
+  it("funding (credit-only) still settles when the target is created on the credit side", () => {
+    const store = new MemoryStore();
+    store.ensureWallet("DST", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDFEFR" });
+    const wf = new FundingWorkflow(store);
+    wf.create({
+      id: "FRQ1",
+      amount: "25.00",
+      creditedWalletAlias: "DST",
+      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", // debit side never touched
+    });
+    wf.approve("FRQ1");
+    expect(store.getWallet("DST")?.balance).toBe("25.00");
+  });
+});
+
 describe("Workflow persistence (memory/Redis-style cache)", () => {
   it("persists drafts and transactions and rehydrates them", async () => {
     const cache = new CacheMemory();

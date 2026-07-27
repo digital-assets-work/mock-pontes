@@ -54,7 +54,9 @@ export function createXvpRouter(store: MockStore) {
       };
     }
 
-    ensureWallet(store, source, sellerBic);
+    // Auto-create only the CREDIT-side (buyer) wallet (issue #23). The seller's
+    // source wallet is the debit/lock side and must already exist; init raises a
+    // condition error (rights/availability check) if it does not.
     ensureWallet(store, target, buyerBic);
 
     try {

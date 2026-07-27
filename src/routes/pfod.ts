@@ -123,8 +123,9 @@ export function createPfodRouter(store: MockStore) {
         setResponseStatus(event, 400);
         return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, sellerCashTokenWalletRef" }] };
       }
-      const sellerEntity = body.sellerID || (event.context.auth as AuthContext | undefined)?.entityBIC;
-      ensureWallet(store, sellerCashTokenWalletRef, body.sellerCAMBIC || "UNKNOWN", sellerEntity);
+      // The seller cash wallet is the DEBIT side of the matched settlement — per
+      // issue #23 it is NOT auto-created; the match raises a condition error if
+      // it does not exist.
       storeLeg(deliverId(tradeID), tradeID, amount, currency, sellerCashTokenWalletRef, "", body.initiatorUserUUID);
       setResponseStatus(event, 201);
       return tryMatch(event, tradeID);

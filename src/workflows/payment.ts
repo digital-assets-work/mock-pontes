@@ -11,6 +11,7 @@ import { Workflow } from "./workflow.js";
  */
 export class PaymentWorkflow extends Workflow {
   readonly type = "TRANSFER" as const;
+  protected readonly debitsSource = true;
 
   protected apply(record: Draft, caller?: DcwCaller): void {
     this.checkedDebit(record.debitedWalletAlias, record.amount, caller);

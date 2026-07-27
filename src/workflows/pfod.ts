@@ -13,6 +13,7 @@ import { Workflow } from "./workflow.js";
 export class PfodWorkflow extends Workflow {
   readonly type = "PFOD" as const;
   protected readonly notFoundLabel = "PFoD trade";
+  protected readonly debitsSource = true;
 
   protected apply(record: Draft, caller?: DcwCaller): void {
     this.checkedDebit(record.debitedWalletAlias, record.amount, caller);

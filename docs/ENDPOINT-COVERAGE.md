@@ -304,9 +304,12 @@ official funding/defunding/transaction/wallet endpoints instead.
   deployment would keep the execution secret with the initiator.)* NRO-signed on
   init (`xvpTransactionId + amount + buyer.bic + seller.bic`). The `/igw` surface
   is not behind the JWT layer; the caller's entity is taken from the seller BIC.
-- **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
-  wallet (via the DCW create primitive: zero balances, same-entity debit rights,
-  no PoA/whitelist) instead of requiring the official AMS wallet-creation flow.
+- **Auto-created wallets (credit side only).** RVS/TMS/bridge/IGW handlers
+  auto-create a referenced wallet only when it is on the **credit side** (via the
+  DCW create primitive: zero balances, same-entity debit rights, no PoA/whitelist)
+  instead of requiring the official AMS wallet-creation flow. A **debit-side**
+  wallet is **never** auto-created (issue #23): if it does not exist the workflow
+  raises a condition error (`422 HL-WAL-002`) before any state change.
 - **Infinite funding source.** The token-issuance wallet
   `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` that sources funding is treated as
   having an infinite balance: funding approvals credit the target wallet without
