@@ -126,8 +126,10 @@ The cash-token account holding a balance.
   per currency; linked to **0..\*** T2 Accounts.
 - Official: create (2-step), list, get, get settled transactions, total-under-mgmt.
 - Mock: **read** (`GET .../ams/wallets`, `.../{walias}`, `.../transactions`)
-  implemented; wallets are **auto-created** on first reference (no creation
-  draft). As of #13 the DCW is properly modelled: **`availableBalance` +
+  implemented; wallets are **auto-created on first reference — credit side only**
+  (issue #23): a referenced wallet is created when it is the credit target, but a
+  missing **debit-side** wallet raises a condition error (`422`) rather than being
+  created. As of #13 the DCW is properly modelled: **`availableBalance` +
   `lockedBalance`** (invariant available + locked = total), per-currency
   holdings, `isBlocked`/validity, and **debit rights** (only a user of the owning
   entity may debit by default; PoA grantees / whitelisted operators too). The
@@ -216,19 +218,17 @@ as a **composite** of a *defunding on the payer* + a *funding on the receiver*.
   + credit of the receiver): 2-step checks availability + debit rights at approval
   with four-eyes; 1-step checks immediately.
 
-### 2.12 Bridge 1-step Payment 🟢 (cash-token) / ⚪ (PFoD, XvP)
+### 2.12 Bridge 1-step Payment 🟢 (cash-token) / 🟢 (PFoD) / 🟢 (XvP)
 
 Immediate settlement, no draft/approve cycle.
 
 - Key fields (`bridge.PaymentRequest`): `paymentID`, `amount`, `currency`,
   `creditedCashWalletAlias`/`ManagerID`, `debitedCashWalletAlias`/`ManagerID`.
 - Mock: `POST .../bridge/payments` implemented (EXTERNAL_USER).
-- **PFoD** (Payment-Free-of-Delivery) — **not implemented**:
-  - `bridge.PFoDDeliRequest` (deliver): `tradeID`, `amount`, `currency`,
-    `sellerCashTokenWalletRef`, `sellerID`, `sellerCAMBIC`, `buyerID`.
-  - `bridge.PFoDReceRequest` (receive): `tradeID`, `amount`, `currency`,
-    `buyerCashTokenWalletRef`, `buyerID`, `buyerCAMBIC`, `sellerCAMBIC`.
-- **XvP** (`/igw/**`) — **not implemented**; see §4 for the full protocol.
+- **PFoD** (Payment-Free-of-Delivery) — **implemented** as two matched legs on
+  `tradeID` (deliver=`bridge.PFoDDeliRequest`, receive=`bridge.PFoDReceRequest`);
+  the matched wallet payment fires once both legs are present and consistent.
+- **XvP** (`/igw/**`) — **implemented**; see §4 for the full protocol.
 
 ### 2.13 Market DLT Operator & Whitelist ⚪
 
@@ -287,8 +287,8 @@ In the mock this is implemented for **transactions** and **funding/defunding**
 not implemented. Behaviour: `404` on unknown draft, `409` if not `PENDING_APPROVAL`.
 
 **Generic Workflow engine.** All money-movement operations (2-step transfer,
-funding, defunding, direct-RTGS and the 1-step bridge payment — and, later, XvP)
-share a single `Workflow` base (`src/workflows/`) that implements exactly this
+funding, defunding, direct-RTGS, the 1-step bridge payment, matched PFoD and the
+fund-locking XvP) share a single `Workflow` base (`src/workflows/`) that implements exactly this
 state machine plus two extension points: `conditions(phase)` (validate/authorise
 a transition) and `apply()` (the DCW debit/credit effect at settlement). One-step
 workflows collapse `create`+`approve` into a single `execute()`. Consistent with
@@ -325,7 +325,7 @@ stateDiagram-v2
 
 ---
 
-## 4. XvP (Hash-Link) protocol ⚪ — not implemented
+## 4. XvP (Hash-Link) protocol 🟢 — implemented
 
 **XvP** ("eXchange versus Payment") atomically settles the **cash leg** on Pontes
 against a **delivery/other leg** on a separate (market) DLT — i.e. **DvP**
@@ -388,10 +388,12 @@ stateDiagram-v2
   CANCELLED --> [*]
 ```
 
-> To implement XvP the mock would need: an XvP store keyed by `xvpTransactionId`,
-> generation of `executionHash`/`cancellationHash` (+ their keys) and a `timeout`,
-> preimage verification on the payment call, and the `PaymentStatus` transitions
-> above — for both the cash-token and direct-RTGS variants.
+> **Implemented** as `XvpWorkflow` — the only workflow that reserves funds: init
+> locks the seller's available balance (DCW `lock`), generates
+> `executionHash`/`cancellationHash` (SHA-256) + a `timeout`, and persists an
+> `XVP` record keyed by `xvpTransactionId`; the payment call verifies the
+> preimage and either `settleLocked`+credits (EXECUTION) or `release`s
+> (CANCELLATION/timeout), for both the cash-token and direct-RTGS variants.
 
 ---
 
