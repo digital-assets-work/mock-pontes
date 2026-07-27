@@ -40,6 +40,7 @@ import {
   normalizeReturnedErrorBody,
   normalizeThrownError,
 } from "./http/error-response.js";
+import { mockVersion } from "./version.js";
 
 /** API patterns that require NRO signature verification (CREATE endpoints only). */
 export const nroRoutePatterns: readonly RegExp[] = [
@@ -69,6 +70,12 @@ export interface AppDeps {
  */
 export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): App {
   const app = createApp({
+    // Mark every response as coming from the mock (issue #41) — a cheap safety
+    // net so production config accidentally pointed at the mock is obvious.
+    onRequest: (event) => {
+      event.node.res.setHeader("X-Mock-Pontes", "true");
+      event.node.res.setHeader("X-Mock-Pontes-Version", mockVersion());
+    },
     onError: (error, event) => {
       if (event.handled) return;
       const body = normalizeThrownError(error);

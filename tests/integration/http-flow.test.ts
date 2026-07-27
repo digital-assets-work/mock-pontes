@@ -63,6 +63,7 @@ interface Res {
   status: number;
   json: any;
   text: string;
+  headers: http.IncomingHttpHeaders;
 }
 
 function request(
@@ -86,7 +87,7 @@ function request(
           } catch {
             json = undefined;
           }
-          resolve({ status: res.statusCode || 0, json, text: data });
+          resolve({ status: res.statusCode || 0, json, text: data, headers: res.headers });
         });
       },
     );
@@ -213,6 +214,12 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     const res = await request(server.port, "GET", `/dlt/ZZZZ/api/octopus/ams/wallets`);
     expect(res.status).toBe(404);
     expect(res.json.businessErrors[0].errorCode).toBe("HL-GER-001");
+  });
+
+  it("marks every response with the X-Mock-Pontes header (#41)", async () => {
+    const res = await request(server.port, "GET", `${BASE}/ams/wallets`);
+    expect(res.headers["x-mock-pontes"]).toBe("true");
+    expect(res.headers["x-mock-pontes-version"]).toBeDefined();
   });
 
   it("401s a protected route without a token (normalised, #33)", async () => {
