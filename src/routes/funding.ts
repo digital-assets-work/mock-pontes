@@ -6,29 +6,47 @@ import {
   setResponseStatus,
   createError,
 } from "h3";
-import type { MockStore, Draft, Wallet } from "../state/mock-store.js";
+import type { H3Event } from "h3";
+import type { MockStore } from "../state/mock-store.js";
+import type { AuthContext } from "../auth/jwt-middleware.js";
+import { FundingWorkflow, DefundingWorkflow } from "../workflows/funding.js";
+import { isWorkflowRejection } from "../workflows/workflow.js";
+
+/** Convert a workflow rejection into the h3 createError shape used by this router. */
+function rejectAsError(e: unknown): never {
+  if (isWorkflowRejection(e)) {
+    throw createError({
+      statusCode: e.statusCode,
+      data: { businessErrors: [{ errorDescription: e.errorDescription }] },
+    });
+  }
+  throw e;
+}
+
+/** UUID of the approving user (for the four-eyes check). */
+function approverUUID(event: H3Event): string | undefined {
+  return (event.context.auth as AuthContext | undefined)?.userUUID;
+}
 
 /**
  * Auto-create a wallet if it doesn't exist (mock-only convenience).
  */
 function ensureWallet(store: MockStore, alias: string, body: any): void {
   if (!alias || store.getWallet(alias)) return;
-  const wallet: Wallet = {
-    alias,
-    ownerBIC: body.creditedCashWalletOwnerID || body.debitedCashWalletOwnerID || "UNKNOWN",
-    ownerEntityID: body.creditedCashWalletOwnerID || body.debitedCashWalletOwnerID || "UNKNOWN",
+  const owner = body.creditedCashWalletOwnerID || body.debitedCashWalletOwnerID || "UNKNOWN";
+  store.ensureWallet(alias, {
+    ownerBIC: owner,
+    ownerEntityID: owner,
     managerNCB: body.creditedCashWalletManagerID || body.debitedCashWalletManagerID || "UNKNOWN",
-    balance: "0.00",
     currency: body.currency || "EUR",
-    isMainWallet: true,
-    createdAt: new Date().toISOString(),
-  };
-  store.upsertWallet(wallet);
+  });
   console.log(`[mock-pontes] Auto-created wallet ${alias}`);
 }
 
 export function createFundingRouter(store: MockStore) {
   const router = createRouter();
+  const funding = new FundingWorkflow(store);
+  const defunding = new DefundingWorkflow(store);
 
   // Funding source model (mock):
   // The token-issuance wallet `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` is the DCA
@@ -51,19 +69,14 @@ export function createFundingRouter(store: MockStore) {
       // Auto-create credited wallet if it doesn't exist (mock convenience)
       ensureWallet(store, body.creditedCashWalletAlias, body);
 
-      const draft: Draft = {
+      const draft = funding.create({
         id,
-        type: "FUNDING",
-        status: "PENDING_APPROVAL",
         amount: body.amount || "0.00",
         currency: "EUR",
         creditedWalletAlias: body.creditedCashWalletAlias || "",
         debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-        createdAt: now,
-        updatedAt: now,
         initiatorUserUUID: body.initiatorUserUUID,
-      };
-      store.addDraft(draft);
+      });
 
       setResponseStatus(event, 201);
       return {
@@ -84,37 +97,31 @@ export function createFundingRouter(store: MockStore) {
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/approve — Approve funding draft
+  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/:status — Transition
+  // funding draft. Generic {status} per the official spec: approve|cancel
+  // (case-insensitive, plus APPROVED/CANCELED). Approval enforces four-eyes and
+  // credits the target from the infinite issuance wallet (no availability check).
   router.put(
-    "/dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/approve",
-    defineEventHandler(async (event) => {
+    "/dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/:status",
+    defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
-      const draft = store.getDraft(id);
-      if (!draft || draft.type !== "FUNDING") {
-        throw createError({ statusCode: 404, data: { businessErrors: [{ errorDescription: `Funding draft ${id} not found` }] } });
+      const status = (getRouterParam(event, "status") || "").toLowerCase();
+      try {
+        if (status === "approve" || status === "approved") {
+          funding.approve(id, { approverUserUUID: approverUUID(event) });
+          return { fundingRequestID: id, status: "SETTLED" };
+        }
+        if (status === "cancel" || status === "canceled" || status === "cancelled") {
+          funding.cancel(id);
+          return { fundingRequestID: id, status: "CANCELED" };
+        }
+        throw createError({
+          statusCode: 400,
+          data: { businessErrors: [{ errorDescription: `Unsupported status transition '${status}'` }] },
+        });
+      } catch (e) {
+        rejectAsError(e);
       }
-      if (draft.status !== "PENDING_APPROVAL") {
-        throw createError({ statusCode: 409, data: { businessErrors: [{ errorDescription: `Draft ${id} is in status ${draft.status}, cannot approve` }] } });
-      }
-      // Credit the target wallet
-      const creditedWallet = store.getWallet(draft.creditedWalletAlias);
-      if (creditedWallet) {
-        const newBalance = (parseFloat(creditedWallet.balance) + parseFloat(draft.amount)).toFixed(2);
-        store.upsertWallet({ ...creditedWallet, balance: newBalance });
-      }
-      store.updateDraft(id, { status: "SETTLED" });
-      store.addTransaction({
-        id: `TX-${id}`,
-        type: "FUNDING",
-        status: "SETTLED",
-        amount: draft.amount,
-        currency: draft.currency,
-        creditedWalletAlias: draft.creditedWalletAlias,
-        debitedWalletAlias: draft.debitedWalletAlias,
-        createdAt: draft.createdAt,
-        settledAt: new Date().toISOString(),
-      });
-      return { fundingRequestID: id, status: "SETTLED" };
     }),
   );
 
@@ -127,22 +134,17 @@ export function createFundingRouter(store: MockStore) {
       const seq = String(Math.floor(Math.random() * 999999)).padStart(6, "0");
       const id = `DRQ${now.slice(2, 10).replace(/-/g, "")}${seq}`;
 
-      // Auto-create debited wallet if it doesn't exist (mock convenience)
-      ensureWallet(store, body.debitedCashWalletAlias, body);
+      // Defunding debits the source (debit side) — per issue #23 it is NOT
+      // auto-created; the workflow raises a condition error if it doesn't exist.
 
-      const draft: Draft = {
+      const draft = defunding.create({
         id,
-        type: "DEFUNDING",
-        status: "PENDING_APPROVAL",
         amount: body.amount || "0.00",
         currency: "EUR",
         creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
         debitedWalletAlias: body.debitedCashWalletAlias || "",
-        createdAt: now,
-        updatedAt: now,
         initiatorUserUUID: body.initiatorUserUUID,
-      };
-      store.addDraft(draft);
+      });
 
       setResponseStatus(event, 201);
       return {
@@ -157,57 +159,68 @@ export function createFundingRouter(store: MockStore) {
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/approve — Approve defunding draft
+  // PUT /dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/:status — Transition
+  // defunding draft. Generic {status}: approve|cancel (case-insensitive +
+  // APPROVED/CANCELED). Approval enforces four-eyes and debits the source via the
+  // checked DCW op (availability + debit rights verified now).
   router.put(
-    "/dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/approve",
-    defineEventHandler(async (event) => {
+    "/dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/:status",
+    defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
-      const draft = store.getDraft(id);
-      if (!draft || draft.type !== "DEFUNDING") {
-        throw createError({ statusCode: 404, data: { businessErrors: [{ errorDescription: `Defunding draft ${id} not found` }] } });
+      const status = (getRouterParam(event, "status") || "").toLowerCase();
+      const auth = event.context.auth as AuthContext | undefined;
+      try {
+        if (status === "approve" || status === "approved") {
+          defunding.approve(id, {
+            caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
+            approverUserUUID: auth?.userUUID,
+          });
+          return { defundingRequestID: id, status: "SETTLED" };
+        }
+        if (status === "cancel" || status === "canceled" || status === "cancelled") {
+          defunding.cancel(id);
+          return { defundingRequestID: id, status: "CANCELED" };
+        }
+        throw createError({
+          statusCode: 400,
+          data: { businessErrors: [{ errorDescription: `Unsupported status transition '${status}'` }] },
+        });
+      } catch (e) {
+        rejectAsError(e);
       }
-      if (draft.status !== "PENDING_APPROVAL") {
-        throw createError({ statusCode: 409, data: { businessErrors: [{ errorDescription: `Draft ${id} is in status ${draft.status}, cannot approve` }] } });
-      }
-      // Debit the source wallet
-      const debitedWallet = store.getWallet(draft.debitedWalletAlias);
-      if (debitedWallet) {
-        const newBalance = (parseFloat(debitedWallet.balance) - parseFloat(draft.amount)).toFixed(2);
-        store.upsertWallet({ ...debitedWallet, balance: newBalance });
-      }
-      store.updateDraft(id, { status: "SETTLED" });
-      store.addTransaction({
-        id: `TX-${id}`,
-        type: "DEFUNDING",
-        status: "SETTLED",
-        amount: draft.amount,
-        currency: draft.currency,
-        creditedWalletAlias: draft.creditedWalletAlias,
-        debitedWalletAlias: draft.debitedWalletAlias,
-        createdAt: draft.createdAt,
-        settledAt: new Date().toISOString(),
-      });
-      return { defundingRequestID: id, status: "SETTLED" };
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/cancel — Cancel funding draft
-  // Initiator-only in the real API; the mock unwinds the draft without settling.
-  router.put(
-    "/dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/cancel",
-    defineEventHandler(async (event) => {
-      const id = getRouterParam(event, "id")!;
-      const draft = store.getDraft(id);
-      if (!draft || draft.type !== "FUNDING") {
-        throw createError({ statusCode: 404, data: { businessErrors: [{ errorDescription: `Funding draft ${id} not found` }] } });
-      }
-      if (draft.status !== "PENDING_APPROVAL") {
-        throw createError({ statusCode: 409, data: { businessErrors: [{ errorDescription: `Draft ${id} is in status ${draft.status}, cannot cancel` }] } });
-      }
-      store.updateDraft(id, { status: "CANCELED" });
-      return { fundingRequestID: id, status: "CANCELED" };
-    }),
-  );
+  // GET /dlt/:ncb/api/octopus/tms/funding-defunding-requests-drafts/:id — Read a
+  // funding OR defunding draft by id. Also served without the `-drafts` suffix.
+  const readByIdHandler = defineEventHandler((event: H3Event) => {
+    const id = getRouterParam(event, "id")!;
+    const draft = store.getDraft(id);
+    if (!draft || (draft.type !== "FUNDING" && draft.type !== "DEFUNDING")) {
+      throw createError({
+        statusCode: 404,
+        data: { businessErrors: [{ errorDescription: `Request ${id} not found` }] },
+      });
+    }
+    const isFunding = draft.type === "FUNDING";
+    return {
+      [isFunding ? "fundingRequestID" : "defundingRequestID"]: draft.id,
+      status: draft.status,
+      type: draft.type,
+      amount: draft.amount,
+      currency: draft.currency,
+      creditedCashWalletAlias: draft.creditedWalletAlias,
+      debitedCashWalletAlias: draft.debitedWalletAlias,
+      initiatorUserUUID: draft.initiatorUserUUID,
+      approverUserUUID: draft.approverUserUUID,
+      createdAt: draft.createdAt,
+    };
+  });
+  router.get("/dlt/:ncb/api/octopus/tms/funding-defunding-requests-drafts/:id", readByIdHandler);
+  router.get("/dlt/:ncb/api/octopus/tms/funding-defunding-requests/:id", readByIdHandler);
+
+  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/cancel — handled by
+  // the generic {status} route above (kept as a comment for endpoint discoverability).
 
   return router;
 }

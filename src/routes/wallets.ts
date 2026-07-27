@@ -4,26 +4,27 @@ import {
   getRouterParam,
   setResponseStatus,
 } from "h3";
-import type { MockStore } from "../state/mock-store.js";
+import type { MockStore, Wallet } from "../state/mock-store.js";
+import { totalOf } from "../state/dcw.js";
 
-function toWalletResponse(wallet: {
-  alias: string;
-  ownerEntityID: string;
-  ownerBIC: string;
-  managerNCB: string;
-  balance: string;
-  currency: string;
-  isMainWallet: boolean;
-  createdAt: string;
-}) {
+function toWalletResponse(wallet: Wallet) {
   return {
     walletAlias: wallet.alias,
     ownerEntityID: wallet.ownerEntityID,
     ownerBIC: wallet.ownerBIC,
     managerNCB: wallet.managerNCB,
+    // `balance` kept for backward compatibility (= available balance).
     balance: wallet.balance,
+    availableBalance: wallet.balance,
+    lockedBalance: wallet.lockedBalance,
+    totalBalance: totalOf(wallet).toFixed(2),
     currency: wallet.currency,
     isMainWallet: wallet.isMainWallet,
+    isBlocked: wallet.isBlocked,
+    holdingTable: [
+      { holdingID: `${wallet.alias}-${wallet.currency}-AVAILABLE`, walletAlias: wallet.alias, type: "AVAILABLE", amount: wallet.balance },
+      { holdingID: `${wallet.alias}-${wallet.currency}-LOCKED`, walletAlias: wallet.alias, type: "LOCKED", amount: wallet.lockedBalance },
+    ],
     createdAt: wallet.createdAt,
   };
 }
@@ -57,16 +58,7 @@ export function createWalletsRouter(store: MockStore) {
           ],
         };
       }
-      return {
-        walletAlias: wallet.alias,
-        ownerEntityID: wallet.ownerEntityID,
-        ownerBIC: wallet.ownerBIC,
-        managerNCB: wallet.managerNCB,
-        balance: wallet.balance,
-        currency: wallet.currency,
-        isMainWallet: wallet.isMainWallet,
-        createdAt: wallet.createdAt,
-      };
+      return toWalletResponse(wallet);
     }),
   );
 

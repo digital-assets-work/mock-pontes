@@ -5,21 +5,15 @@ import {
   setResponseStatus,
 } from "h3";
 import { randomUUID } from "node:crypto";
-import type { MockStore, Wallet } from "../state/mock-store.js";
+import type { MockStore } from "../state/mock-store.js";
+import type { AuthContext } from "../auth/jwt-middleware.js";
+import { PaymentWorkflow } from "../workflows/payment.js";
+import { isWorkflowRejection } from "../workflows/workflow.js";
 
-function ensureWallet(store: MockStore, alias: string, managerNCB: string): void {
+/** Auto-create a wallet, owned by `ownerEntityID` when known (for debit rights). */
+function ensureWallet(store: MockStore, alias: string, managerNCB: string, ownerEntityID?: string): void {
   if (!alias || store.getWallet(alias)) return;
-  const wallet: Wallet = {
-    alias,
-    ownerBIC: "UNKNOWN",
-    ownerEntityID: "UNKNOWN",
-    managerNCB,
-    balance: "0.00",
-    currency: "EUR",
-    isMainWallet: true,
-    createdAt: new Date().toISOString(),
-  };
-  store.upsertWallet(wallet);
+  store.ensureWallet(alias, { managerNCB, ownerEntityID, ownerBIC: ownerEntityID });
   console.log(`[mock-pontes] Auto-created wallet ${alias}`);
 }
 
@@ -35,12 +29,12 @@ function ensureWallet(store: MockStore, alias: string, managerNCB: string): void
  */
 export function createBridgePaymentsRouter(store: MockStore) {
   const router = createRouter();
+  const workflow = new PaymentWorkflow(store);
 
   router.post(
     "/dlt/:ncb/api/bridge/payments",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
 
       const {
         paymentID,
@@ -72,38 +66,31 @@ export function createBridgePaymentsRouter(store: MockStore) {
         };
       }
 
-      // Auto-create wallets if needed
-      ensureWallet(store, debitedCashWalletAlias, debitedCashWalletManagerID || "UNKNOWN");
+      // Auto-create only the CREDIT-side wallet (issue #23). The debit-side
+      // source must already exist; the workflow raises a condition error if not.
+      const auth = event.context.auth as AuthContext | undefined;
+      const callerEntity = auth?.entityBIC;
       ensureWallet(store, creditedCashWalletAlias, creditedCashWalletManagerID || "UNKNOWN");
 
-      // Execute payment immediately (1-step)
-      const debitedWallet = store.getWallet(debitedCashWalletAlias);
-      const creditedWallet = store.getWallet(creditedCashWalletAlias);
-      const amountNum = parseFloat(amount);
-
-      if (debitedWallet) {
-        const newBalance = (parseFloat(debitedWallet.balance) - amountNum).toFixed(2);
-        store.upsertWallet({ ...debitedWallet, balance: newBalance });
+      // Execute the 1-step payment via the shared workflow engine (checked debit).
+      try {
+        workflow.execute(
+          {
+            id: paymentID || randomUUID(),
+            amount,
+            currency: currency || "EUR",
+            creditedWalletAlias: creditedCashWalletAlias,
+            debitedWalletAlias: debitedCashWalletAlias,
+          },
+          { caller: callerEntity ? { entityBIC: callerEntity } : undefined },
+        );
+      } catch (e) {
+        if (isWorkflowRejection(e)) {
+          setResponseStatus(event, e.statusCode);
+          return { businessErrors: e.businessErrors };
+        }
+        throw e;
       }
-      if (creditedWallet) {
-        const newBalance = (parseFloat(creditedWallet.balance) + amountNum).toFixed(2);
-        store.upsertWallet({ ...creditedWallet, balance: newBalance });
-      }
-
-      const finalPaymentID = paymentID || randomUUID();
-
-      // Record as a settled transaction
-      store.addTransaction({
-        id: `TX-${finalPaymentID}`,
-        type: "TRANSFER",
-        status: "SETTLED",
-        amount: amount,
-        currency: currency || "EUR",
-        creditedWalletAlias: creditedCashWalletAlias,
-        debitedWalletAlias: debitedCashWalletAlias,
-        createdAt: now,
-        settledAt: now,
-      });
 
       // The official endpoint returns HTTP 200 with a plain-text confirmation.
       setResponseStatus(event, 200);

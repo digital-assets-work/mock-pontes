@@ -5,27 +5,53 @@ import {
   readBody,
   setResponseStatus,
 } from "h3";
-import { randomUUID } from "node:crypto";
-import type { MockStore, Draft, Wallet } from "../state/mock-store.js";
+import type { H3Event } from "h3";
+import type { MockStore, Draft } from "../state/mock-store.js";
+import type { AuthContext } from "../auth/jwt-middleware.js";
+import type { DcwCaller } from "../state/dcw.js";
+import { TransferWorkflow } from "../workflows/transfer.js";
+import { isWorkflowRejection } from "../workflows/workflow.js";
 
 function ensureWallet(store: MockStore, alias: string, ownerBIC: string, managerNCB: string): void {
   if (!alias || store.getWallet(alias)) return;
-  const wallet: Wallet = {
-    alias,
-    ownerBIC,
-    ownerEntityID: ownerBIC,
-    managerNCB,
-    balance: "0.00",
-    currency: "EUR",
-    isMainWallet: true,
-    createdAt: new Date().toISOString(),
-  };
-  store.upsertWallet(wallet);
+  store.ensureWallet(alias, { ownerBIC, ownerEntityID: ownerBIC, managerNCB });
   console.log(`[mock-pontes] Auto-created wallet ${alias}`);
+}
+
+/** Build the DCW debit-rights caller from the authenticated request. */
+function authCaller(event: H3Event): { caller?: DcwCaller; approverUserUUID?: string } {
+  const auth = event.context.auth as AuthContext | undefined;
+  return {
+    caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
+    approverUserUUID: auth?.userUUID,
+  };
+}
+
+/** Translate a workflow rejection into this router's error response shape. */
+function sendRejection(event: H3Event, e: unknown): { businessErrors: unknown } {
+  if (isWorkflowRejection(e)) {
+    setResponseStatus(event, e.statusCode);
+    return { businessErrors: e.businessErrors };
+  }
+  throw e;
+}
+
+function transferView(d: Draft, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    instructionID: d.id,
+    status: d.status,
+    type: "TRANSFER",
+    amountTransferred: d.amount,
+    currency: d.currency,
+    creditedCashWalletAlias: d.creditedWalletAlias,
+    debitedCashWalletAlias: d.debitedWalletAlias,
+    ...extra,
+  };
 }
 
 export function createTransfersRouter(store: MockStore) {
   const router = createRouter();
+  const workflow = new TransferWorkflow(store);
 
   // POST /dlt/:ncb/api/octopus/rvs/transactions-requests — Create transfer draft
   router.post(
@@ -35,37 +61,25 @@ export function createTransfersRouter(store: MockStore) {
       const now = new Date().toISOString();
       const id = `TR${now.slice(2, 10).replace(/-/g, "")}${String(Math.floor(Math.random() * 999999)).padStart(6, "0")}`;
 
-      // Auto-create wallets if they don't exist (mock convenience)
+      // Auto-create only the CREDIT-side wallet (issue #23). The debit-side
+      // wallet must already exist; the workflow raises a condition error if not.
       ensureWallet(store, body.creditedCashWalletAlias, body.creditedCashWalletOwnerID || "UNKNOWN", body.creditedCashWalletManagerID || "UNKNOWN");
-      ensureWallet(store, body.debitedCashWalletAlias, body.debitedCashWalletOwnerID || "UNKNOWN", body.debitedCashWalletManagerID || "UNKNOWN");
 
-      const draft: Draft = {
+      const draft = workflow.create({
         id,
-        type: "TRANSFER",
-        status: "PENDING_APPROVAL",
         amount: body.amountTransferred || "0.00",
         currency: "EUR",
         creditedWalletAlias: body.creditedCashWalletAlias || "",
         debitedWalletAlias: body.debitedCashWalletAlias || "",
-        createdAt: now,
-        updatedAt: now,
         initiatorUserUUID: body.initiatorUserUUID,
         supplementaryData: body.supplementaryData,
-      };
-      store.addDraft(draft);
+      });
 
       setResponseStatus(event, 201);
-      return {
-        instructionID: draft.id,
-        status: draft.status,
-        type: "TRANSFER",
-        amountTransferred: draft.amount,
-        currency: draft.currency,
-        creditedCashWalletAlias: draft.creditedWalletAlias,
-        debitedCashWalletAlias: draft.debitedWalletAlias,
+      return transferView(draft, {
         createdAt: draft.createdAt,
         supplementaryData: draft.supplementaryData,
-      };
+      });
     }),
   );
 
@@ -89,114 +103,51 @@ export function createTransfersRouter(store: MockStore) {
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/approve — Approve draft
-  router.put(
-    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/approve",
-    defineEventHandler(async (event) => {
+  // GET /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id — Read a single draft
+  router.get(
+    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id",
+    defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
       const draft = store.getDraft(id);
-      if (!draft) {
+      if (!draft || draft.type !== "TRANSFER") {
         setResponseStatus(event, 404);
-        return {
-          businessErrors: [
-            { errorCode: "HL-GER-001", errorDescription: `Draft ${id} not found` },
-          ],
-        };
+        return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Draft ${id} not found` }] };
       }
-      if (draft.status !== "PENDING_APPROVAL") {
-        setResponseStatus(event, 409);
-        return {
-          businessErrors: [
-            {
-              errorCode: "HL-GER-002",
-              errorDescription: `Draft ${id} is in status ${draft.status}, cannot approve`,
-            },
-          ],
-        };
-      }
-
-      // Settle the transfer immediately in the mock
-      const creditedWallet = store.getWallet(draft.creditedWalletAlias);
-      const debitedWallet = store.getWallet(draft.debitedWalletAlias);
-
-      if (debitedWallet) {
-        const newBalance = (
-          parseFloat(debitedWallet.balance) - parseFloat(draft.amount)
-        ).toFixed(2);
-        store.upsertWallet({ ...debitedWallet, balance: newBalance });
-      }
-      if (creditedWallet) {
-        const newBalance = (
-          parseFloat(creditedWallet.balance) + parseFloat(draft.amount)
-        ).toFixed(2);
-        store.upsertWallet({ ...creditedWallet, balance: newBalance });
-      }
-
-      store.updateDraft(id, { status: "SETTLED" });
-      store.addTransaction({
-        id: `TX-${randomUUID()}`,
-        type: "TRANSFER",
-        status: "SETTLED",
-        amount: draft.amount,
-        currency: draft.currency,
-        creditedWalletAlias: draft.creditedWalletAlias,
-        debitedWalletAlias: draft.debitedWalletAlias,
+      return transferView(draft, {
         createdAt: draft.createdAt,
-        settledAt: new Date().toISOString(),
+        initiatorUserUUID: draft.initiatorUserUUID,
+        approverUserUUID: draft.approverUserUUID,
         supplementaryData: draft.supplementaryData,
       });
-
-      const updated = store.getDraft(id)!;
-      return {
-        instructionID: updated.id,
-        status: updated.status,
-        type: "TRANSFER",
-        amountTransferred: updated.amount,
-        currency: updated.currency,
-        creditedCashWalletAlias: updated.creditedWalletAlias,
-        debitedCashWalletAlias: updated.debitedWalletAlias,
-        settledAt: new Date().toISOString(),
-      };
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/cancel — Cancel draft
+  // PUT /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/:status — Transition draft.
+  // Generic {status} path per the official spec; `approve`/`cancel` (and the
+  // uppercase target states APPROVED/CANCELED) are accepted as aliases.
   router.put(
-    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/cancel",
-    defineEventHandler(async (event) => {
+    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/:status",
+    defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
-      const draft = store.getDraft(id);
-      if (!draft) {
-        setResponseStatus(event, 404);
+      const status = (getRouterParam(event, "status") || "").toLowerCase();
+      try {
+        if (status === "approve" || status === "approved") {
+          const { caller, approverUserUUID } = authCaller(event);
+          const settled = workflow.approve(id, { caller, approverUserUUID });
+          return transferView(settled, { settledAt: new Date().toISOString() });
+        }
+        if (status === "cancel" || status === "canceled" || status === "cancelled") {
+          return transferView(workflow.cancel(id));
+        }
+        setResponseStatus(event, 400);
         return {
           businessErrors: [
-            { errorCode: "HL-GER-001", errorDescription: `Draft ${id} not found` },
+            { errorCode: "HL-VAL-003", errorDescription: `Unsupported status transition '${status}'` },
           ],
         };
+      } catch (e) {
+        return sendRejection(event, e);
       }
-      if (draft.status !== "PENDING_APPROVAL") {
-        setResponseStatus(event, 409);
-        return {
-          businessErrors: [
-            {
-              errorCode: "HL-GER-002",
-              errorDescription: `Draft ${id} is in status ${draft.status}, cannot cancel`,
-            },
-          ],
-        };
-      }
-
-      store.updateDraft(id, { status: "CANCELED" });
-      const updated = store.getDraft(id)!;
-      return {
-        instructionID: updated.id,
-        status: updated.status,
-        type: "TRANSFER",
-        amountTransferred: updated.amount,
-        currency: updated.currency,
-        creditedCashWalletAlias: updated.creditedWalletAlias,
-        debitedCashWalletAlias: updated.debitedWalletAlias,
-      };
     }),
   );
 

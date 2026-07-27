@@ -5,6 +5,19 @@ import type {
   Draft,
   BusinessWindow,
 } from "./mock-store.js";
+import type { CacheInterface } from "../cache/index.js";
+import {
+  createDcw,
+  canDebit as canDebitDcw,
+  withCredit,
+  withDebit,
+  withLock,
+  withRelease,
+  withSettleLocked,
+  type CreateDcwOptions,
+  type DcwCaller,
+  type CanDebitResult,
+} from "./dcw.js";
 
 const DEFAULT_BUSINESS_WINDOW: BusinessWindow = {
   currentWindow: "OPEN_FOR_ALL",
@@ -13,11 +26,56 @@ const DEFAULT_BUSINESS_WINDOW: BusinessWindow = {
   closeTime: "18:00",
 };
 
+/** Redis keys for persisted state (no expiry — mock state must not drop). */
+const WALLETS_KEY = "wallets";
+const DRAFTS_KEY = "drafts";
+const TRANSACTIONS_KEY = "transactions";
+const PERSIST_TTL_SEC = 0; // 0 = no expiry
+
 export class MemoryStore implements MockStore {
   private wallets: Map<string, Wallet> = new Map();
   private transactions: Transaction[] = [];
   private drafts: Map<string, Draft> = new Map();
   private businessWindow: BusinessWindow = { ...DEFAULT_BUSINESS_WINDOW };
+
+  /**
+   * Optional cache for persistence. When provided (Redis when REDIS_URL is set)
+   * wallet state is written through on every mutation and reloaded via hydrate().
+   */
+  constructor(private readonly cache?: CacheInterface) {}
+
+  /** Load persisted state (call once at startup). */
+  async hydrate(): Promise<void> {
+    if (!this.cache) return;
+    const wallets = await this.cache.get<Wallet[]>(WALLETS_KEY);
+    if (Array.isArray(wallets)) {
+      this.wallets = new Map(wallets.map((w) => [w.alias, w]));
+    }
+    const drafts = await this.cache.get<Draft[]>(DRAFTS_KEY);
+    if (Array.isArray(drafts)) {
+      this.drafts = new Map(drafts.map((d) => [d.id, d]));
+    }
+    const transactions = await this.cache.get<Transaction[]>(TRANSACTIONS_KEY);
+    if (Array.isArray(transactions)) {
+      this.transactions = transactions;
+    }
+  }
+
+  private persistWallets(): void {
+    if (!this.cache) return;
+    // Fire-and-forget write-through; the in-memory map is the sync source of truth.
+    void this.cache.put(WALLETS_KEY, [...this.wallets.values()], PERSIST_TTL_SEC);
+  }
+
+  private persistDrafts(): void {
+    if (!this.cache) return;
+    void this.cache.put(DRAFTS_KEY, [...this.drafts.values()], PERSIST_TTL_SEC);
+  }
+
+  private persistTransactions(): void {
+    if (!this.cache) return;
+    void this.cache.put(TRANSACTIONS_KEY, [...this.transactions], PERSIST_TTL_SEC);
+  }
 
   // --- Wallets ---
 
@@ -31,6 +89,62 @@ export class MemoryStore implements MockStore {
 
   upsertWallet(wallet: Wallet): void {
     this.wallets.set(wallet.alias, wallet);
+    this.persistWallets();
+  }
+
+  // --- DCW lifecycle & operations ---
+
+  ensureWallet(alias: string, opts: CreateDcwOptions = {}): Wallet {
+    const existing = this.wallets.get(alias);
+    if (existing) return existing;
+    const wallet = createDcw(alias, opts);
+    this.upsertWallet(wallet);
+    return wallet;
+  }
+
+  private requireWallet(alias: string): Wallet {
+    const w = this.wallets.get(alias);
+    if (!w) throw new Error(`WALLET_NOT_FOUND:${alias}`);
+    return w;
+  }
+
+  credit(alias: string, amount: string): Wallet {
+    const next = withCredit(this.requireWallet(alias), amount);
+    this.upsertWallet(next);
+    return next;
+  }
+
+  debit(alias: string, amount: string, caller: DcwCaller = {}): Wallet {
+    const wallet = this.requireWallet(alias);
+    const permitted = canDebitDcw(wallet, caller);
+    if (!permitted.ok) throw new Error(`DCW_DEBIT_DENIED:${permitted.reason}`);
+    const next = withDebit(wallet, amount);
+    this.upsertWallet(next);
+    return next;
+  }
+
+  lock(alias: string, amount: string): Wallet {
+    const next = withLock(this.requireWallet(alias), amount);
+    this.upsertWallet(next);
+    return next;
+  }
+
+  release(alias: string, amount: string): Wallet {
+    const next = withRelease(this.requireWallet(alias), amount);
+    this.upsertWallet(next);
+    return next;
+  }
+
+  settleLocked(alias: string, amount: string): Wallet {
+    const next = withSettleLocked(this.requireWallet(alias), amount);
+    this.upsertWallet(next);
+    return next;
+  }
+
+  canDebit(alias: string, caller: DcwCaller = {}): CanDebitResult {
+    const wallet = this.wallets.get(alias);
+    if (!wallet) return { ok: false, reason: "WALLET_NOT_FOUND" };
+    return canDebitDcw(wallet, caller);
   }
 
   // --- Transactions ---
@@ -51,6 +165,7 @@ export class MemoryStore implements MockStore {
 
   addTransaction(tx: Transaction): void {
     this.transactions.push(tx);
+    this.persistTransactions();
   }
 
   // --- Drafts ---
@@ -65,12 +180,14 @@ export class MemoryStore implements MockStore {
 
   addDraft(draft: Draft): void {
     this.drafts.set(draft.id, draft);
+    this.persistDrafts();
   }
 
   updateDraft(id: string, update: Partial<Draft>): void {
     const existing = this.drafts.get(id);
     if (existing) {
       this.drafts.set(id, { ...existing, ...update, updatedAt: new Date().toISOString() });
+      this.persistDrafts();
     }
   }
 
@@ -91,5 +208,8 @@ export class MemoryStore implements MockStore {
     this.transactions = [];
     this.drafts.clear();
     this.businessWindow = { ...DEFAULT_BUSINESS_WINDOW };
+    this.persistWallets();
+    this.persistDrafts();
+    this.persistTransactions();
   }
 }

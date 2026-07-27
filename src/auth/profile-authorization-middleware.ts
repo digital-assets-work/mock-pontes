@@ -18,6 +18,8 @@ import {
 /** Route patterns requiring EXTERNAL_USER (1-step bridge operations) */
 const BRIDGE_1STEP_PATTERNS: readonly RegExp[] = [
   /\/dlt\/[^/]+\/api\/bridge\/payments/,
+  /\/dlt\/[^/]+\/api\/bridge\/direct-rtgs\//,
+  /\/dlt\/[^/]+\/api\/bridge\/initpfod/,
   // PFoD / XvP bridge endpoints (reserved for future)
   /\/dlt\/[^/]+\/api\/bridge\/pfod\//,
   /\/dlt\/[^/]+\/api\/bridge\/xvp\//,
@@ -32,6 +34,7 @@ const DRAFT_APPROVE_PATTERNS: readonly RegExp[] = [
   /\/dlt\/[^/]+\/api\/octopus\/tms\/funding-requests-drafts\//,
   /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests/,
   /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests-drafts\//,
+  /\/dlt\/[^/]+\/api\/octopus\/tms\/direct-rtgs\//,
 ];
 
 function matchesAny(path: string, patterns: readonly RegExp[]): boolean {

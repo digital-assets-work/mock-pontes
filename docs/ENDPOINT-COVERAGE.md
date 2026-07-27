@@ -157,11 +157,11 @@ change behaviour. Gaps are listed, not fixed.
 
 | Method | Official path | Status | Mock path | Controls | Since |
 |--------|---------------|--------|-----------|----------|-------|
-| POST | `/igw/{ncb}/v1/xvps` | NOT IMPLEMENTED | — | — | — |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
-| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
-| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | NOT IMPLEMENTED | — | — | — |
+| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | init locks funds, NRO | XvP |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | — | XvP |
+| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | preimage | XvP |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | — | XvP |
+| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | init locks funds, NRO | XvP |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
 | POST | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
@@ -231,17 +231,85 @@ official funding/defunding/transaction/wallet endpoints instead.
 ### PARTIAL — path-shape differences
 
 - **Draft status updates.** The official spec uses a generic
-  `.../{...-drafts}/{id}/{status}` path where `{status}` is the target state
-  (e.g. `APPROVED`, `CANCELED`). The mock instead exposes literal
-  `/approve` and `/cancel` sub-paths for RVS transactions and TMS funding, and
-  only `/approve` for TMS defunding (no `cancel`). Behaviour: `404` if the draft
-  is unknown, `409` if it is not in `PENDING_APPROVAL`.
+  `.../{...-drafts}/{id}/{status}` path where `{status}` is the target state.
+  RVS transactions now serve the **generic `{status}`** transition
+  (`approve`/`cancel`, case-insensitive, plus the `APPROVED`/`CANCELED` target
+  states) alongside a `GET .../transactions-drafts/{id}` read-by-id. TMS funding
+  also serves the **generic `{status}`** (approve|cancel) plus a
+  `GET .../tms/funding-defunding-requests(-drafts)/{id}` read; TMS defunding
+  likewise serves the generic `{status}` (approve **and cancel**, newly added).
+  Behaviour: `404` if the draft is unknown, `409` if it is not
+  in `PENDING_APPROVAL`. Two-step **approval** enforces **four-eyes** (approver
+  `≠` initiator → `403`) and, for debiting workflows, checks the source **debit
+  right** (`403`) and **available balance** (`422`) *at approval only*.
 
 ### Behavioural simplifications on implemented endpoints
 
-- **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
-  wallet instead of requiring the official AMS wallet-creation flow. There is no
-  balance/overdraft check — debits can drive a balance negative.
+- **DCW object model.** Dedicated Cash Wallets are modelled with an
+  `availableBalance` + `lockedBalance` (invariant `available + locked = total`),
+  per-currency holdings, an `isBlocked` flag/validity window, and **debit rights**
+  (by default only a user of the owning entity may debit; PoA grantees and
+  whitelisted market DLT operators are also allowed). The store exposes
+  `credit`/`debit`/`lock`/`release`/`settleLocked` + `canDebit`, and wallet reads
+  expose the available/locked/holdings model. State **persists to Redis** when
+  `REDIS_URL` is set. *(Money-movement handlers are migrated onto these ops in the
+  workflow issues; see the tracking epic.)*
+- **Generic workflow engine.** Every settlement operation (2-step transfer,
+  funding, defunding, 1-step bridge payment — and, later, XvP) runs on a shared
+  `Workflow` base (`src/workflows/`) with one state machine
+  (`INITIALIZED → PENDING_APPROVAL → SETTLED | CANCELED`) and two extension
+  points: `conditions(phase)` (validate/authorise a transition) and `apply()`
+  (the DCW debit/credit effect at settlement). Two-step workflows persist a
+  `PENDING_APPROVAL` record and settle on approval; one-step workflows settle in
+  a single call. Consistent with the availability policy, **two-step workflows do
+  not reserve funds** — availability is only ever checked at the approval step,
+  and only XvP locks funds up-front. Workflow records (drafts) and settled
+  transactions **persist to Redis** when `REDIS_URL` is set.
+- **One-step payment enforces funds + rights.** `POST .../bridge/payments`
+  (EXTERNAL_USER) now debits via the checked DCW op: the caller must have a
+  **debit right** on the source (owner / PoA / whitelisted operator, and the
+  wallet not blocked/out-of-validity) and it must hold **sufficient available
+  balance now**. Failures return `403` (rights) or `422` (insufficient balance);
+  missing fields still return `400`; success returns `200` + the confirmation
+  string. The source DCW is auto-created **owned by the caller's entity** so a
+  party paying from its own wallet passes the rights check.
+- **Direct RTGS payment (composite).** A direct-RTGS payment is modelled as a
+  **defund(source) + fund(target)** composite workflow — net effect: checked
+  debit of the payer + credit of the receiver. Both a **two-step** variant
+  (`POST/PUT/GET .../octopus/tms/direct-rtgs/payments(-drafts)/{id}/{status}`,
+  PILOT_READ_WRITE) and a **one-step** variant
+  (`POST .../bridge/direct-rtgs/payments`, EXTERNAL_USER, returns `200` + a
+  confirmation string) are served. Both are **NRO-signed on create** (signature
+  over `id + amount + payerBank + receiverBank`, `signerPEM` = presented mTLS
+  cert). Availability + debit rights are checked at approval (two-step) or
+  immediately (one-step). *(Mock-defined paths; distinct from the `/igw/…`
+  direct-RTGS/XvP surface, which is still not implemented.)*
+- **PFoD (matched, 2-sided).** The deliver (`POST .../bridge/initpfoddeli`,
+  seller) and receive (`POST .../bridge/initpfodrece`, buyer) legs (EXTERNAL_USER)
+  are submitted independently and persisted as `PENDING_MATCH` PFOD drafts keyed
+  by `tradeID`. When both legs are present with consistent `amount`/`currency`,
+  the matched wallet payment fires (checked debit of the seller + credit of the
+  buyer) → `SETTLED`; inconsistent legs → `422`; an unmatched leg past its window
+  (`PONTES_PFOD_MATCH_WINDOW_SEC`, default 1h) is lazily marked `EXPIRED` (`410`).
+- **XvP (hash-link / hashed time-lock) — the only fund-locking workflow.** On the
+  IGW surface: `POST /igw/{ncb}/v1/xvps` (and `.../direct-rtgs/xvps`) **locks** the
+  seller's available balance (checked rights + availability → DCW `lock`) and
+  issues an `executionHash`, a `cancellationHash` and a `timeout` (persisted as an
+  `XVP` draft). `POST .../xvps/{id}/payment` reveals a preimage: hashing to the
+  execution hash → `settleLocked(source)` + credit(target) → `SETTLED` (the key is
+  echoed back); hashing to the cancellation hash — or a passed `timeout` — →
+  `release(source)` → `CANCELLED`/`EXPIRED`. `GET .../xvps/{id}` and
+  `.../payment` report status. *(Mock convenience: the init response also returns
+  the two preimage keys so a client can drive execution/cancellation; a real
+  deployment would keep the execution secret with the initiator.)* NRO-signed on
+  init (`xvpTransactionId + amount + buyer.bic + seller.bic`). The `/igw` surface
+  is not behind the JWT layer; the caller's entity is taken from the seller BIC.
+- **Auto-created wallets (credit side only).** RVS/TMS/bridge/IGW handlers
+  auto-create a referenced wallet only when it is on the **credit side** (via the
+  DCW create primitive: zero balances, same-entity debit rights, no PoA/whitelist)
+  instead of requiring the official AMS wallet-creation flow. A **debit-side**
+  wallet is **never** auto-created (issue #23): if it does not exist the workflow
+  raises a condition error (`422 HL-WAL-002`) before any state change.
 - **Infinite funding source.** The token-issuance wallet
   `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` that sources funding is treated as
   having an infinite balance: funding approvals credit the target wallet without
@@ -263,5 +331,11 @@ official funding/defunding/transaction/wallet endpoints instead.
 
 ### Gaps worth follow-up (not fixed here)
 
-- **No NRO on cancel.** `NRO` is applied to funding/defunding **create** POSTs
-  only; approve/cancel PUTs are not signature-checked.
+- **NRO is create-only (by design).** `NRO` is verified on funding/defunding
+  **create** POSTs only (signature over
+  `techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID`,
+  with `signerPEM` matched to the presented mTLS cert). The `-drafts/{id}/{status}`
+  approve/cancel PUTs are **not** signature-checked — the route patterns are now
+  anchored to the create paths so approval is no longer erroneously rejected for a
+  missing signature (fixed in the funding issue). Four-eyes (approver ≠ initiator)
+  is enforced on funding/defunding approval instead.
