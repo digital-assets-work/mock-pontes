@@ -21,6 +21,8 @@ function seededStore(): MemoryStore {
 }
 
 describe("TransferWorkflow (two-step)", () => {
+  const CALLER = { entityBIC: "BANKAXXXXXX" };
+
   it("creates a PENDING_APPROVAL draft persisted in the store", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
@@ -35,11 +37,20 @@ describe("TransferWorkflow (two-step)", () => {
     expect(store.getDraft("TR1")?.status).toBe("PENDING_APPROVAL");
   });
 
+  it("create does not check availability (may exceed the source balance)", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    // 500 > 100 available, but create must still succeed (checked only at approve)
+    const draft = wf.create({ id: "TR1", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    expect(draft.status).toBe("PENDING_APPROVAL");
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
+  });
+
   it("approve settles: debits source, credits target, records a TX-", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
     wf.create({ id: "TR1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
-    const settled = wf.approve("TR1");
+    const settled = wf.approve("TR1", { caller: CALLER });
     expect(settled.status).toBe("SETTLED");
     expect(store.getWallet("SRC")?.balance).toBe("60.00");
     expect(store.getWallet("DST")?.balance).toBe("40.00");
@@ -47,6 +58,46 @@ describe("TransferWorkflow (two-step)", () => {
     expect(txs).toHaveLength(1);
     expect(txs[0].id.startsWith("TX-")).toBe(true);
     expect(txs[0].type).toBe("TRANSFER");
+  });
+
+  it("approve rejects with 422 when the source is short at approval time", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    try {
+      wf.approve("TR1", { caller: CALLER });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(422);
+    }
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
+    expect(store.getDraft("TR1")?.status).toBe("PENDING_APPROVAL");
+  });
+
+  it("approve rejects with 403 when approver has no debit right on the source", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    try {
+      wf.approve("TR1", { caller: { entityBIC: "OTHERBANKXX" } });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(403);
+    }
+  });
+
+  it("approve rejects with 403 when the approver equals the initiator (four-eyes)", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
+    try {
+      wf.approve("TR1", { caller: CALLER, approverUserUUID: "user-1" });
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(403);
+      expect(r.errorCode).toBe("HL-GER-003");
+    }
   });
 
   it("cancel moves the draft to CANCELED without touching balances", () => {
@@ -63,7 +114,7 @@ describe("TransferWorkflow (two-step)", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
     try {
-      wf.approve("NOPE");
+      wf.approve("NOPE", { caller: CALLER });
       throw new Error("expected rejection");
     } catch (e) {
       expect(isWorkflowRejection(e)).toBe(true);
@@ -77,9 +128,9 @@ describe("TransferWorkflow (two-step)", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
     wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
-    wf.approve("TR1");
+    wf.approve("TR1", { caller: CALLER });
     try {
-      wf.approve("TR1");
+      wf.approve("TR1", { caller: CALLER });
       throw new Error("expected rejection");
     } catch (e) {
       const r = e as WorkflowRejection;
@@ -203,7 +254,7 @@ describe("Workflow persistence (memory/Redis-style cache)", () => {
     store.credit("SRC", "100.00");
     const wf = new TransferWorkflow(store);
     wf.create({ id: "TR1", amount: "20.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
-    wf.approve("TR1");
+    wf.approve("TR1", { caller: { entityBIC: "BANKAXXXXXX" } });
 
     const reloaded = new MemoryStore(cache);
     await reloaded.hydrate();

@@ -7,6 +7,8 @@ import {
 } from "h3";
 import type { H3Event } from "h3";
 import type { MockStore, Draft } from "../state/mock-store.js";
+import type { AuthContext } from "../auth/jwt-middleware.js";
+import type { DcwCaller } from "../state/dcw.js";
 import { TransferWorkflow } from "../workflows/transfer.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
@@ -14,6 +16,15 @@ function ensureWallet(store: MockStore, alias: string, ownerBIC: string, manager
   if (!alias || store.getWallet(alias)) return;
   store.ensureWallet(alias, { ownerBIC, ownerEntityID: ownerBIC, managerNCB });
   console.log(`[mock-pontes] Auto-created wallet ${alias}`);
+}
+
+/** Build the DCW debit-rights caller from the authenticated request. */
+function authCaller(event: H3Event): { caller?: DcwCaller; approverUserUUID?: string } {
+  const auth = event.context.auth as AuthContext | undefined;
+  return {
+    caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
+    approverUserUUID: auth?.userUUID,
+  };
 }
 
 /** Translate a workflow rejection into this router's error response shape. */
@@ -50,9 +61,12 @@ export function createTransfersRouter(store: MockStore) {
       const now = new Date().toISOString();
       const id = `TR${now.slice(2, 10).replace(/-/g, "")}${String(Math.floor(Math.random() * 999999)).padStart(6, "0")}`;
 
-      // Auto-create wallets if they don't exist (mock convenience)
+      // Auto-create wallets if they don't exist (mock convenience). The debited
+      // (source) wallet defaults to being owned by the initiator's entity so the
+      // debit-rights check passes at approval when no explicit owner is given.
+      const initiatorEntity = (event.context.auth as AuthContext | undefined)?.entityBIC;
       ensureWallet(store, body.creditedCashWalletAlias, body.creditedCashWalletOwnerID || "UNKNOWN", body.creditedCashWalletManagerID || "UNKNOWN");
-      ensureWallet(store, body.debitedCashWalletAlias, body.debitedCashWalletOwnerID || "UNKNOWN", body.debitedCashWalletManagerID || "UNKNOWN");
+      ensureWallet(store, body.debitedCashWalletAlias, body.debitedCashWalletOwnerID || initiatorEntity || "UNKNOWN", body.debitedCashWalletManagerID || "UNKNOWN");
 
       const draft = workflow.create({
         id,
@@ -92,28 +106,48 @@ export function createTransfersRouter(store: MockStore) {
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/approve — Approve draft
-  router.put(
-    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/approve",
+  // GET /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id — Read a single draft
+  router.get(
+    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id",
     defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
-      try {
-        const settled = workflow.approve(id, undefined);
-        return transferView(settled, { settledAt: new Date().toISOString() });
-      } catch (e) {
-        return sendRejection(event, e);
+      const draft = store.getDraft(id);
+      if (!draft || draft.type !== "TRANSFER") {
+        setResponseStatus(event, 404);
+        return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Draft ${id} not found` }] };
       }
+      return transferView(draft, {
+        createdAt: draft.createdAt,
+        initiatorUserUUID: draft.initiatorUserUUID,
+        approverUserUUID: draft.approverUserUUID,
+        supplementaryData: draft.supplementaryData,
+      });
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/cancel — Cancel draft
+  // PUT /dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/:status — Transition draft.
+  // Generic {status} path per the official spec; `approve`/`cancel` (and the
+  // uppercase target states APPROVED/CANCELED) are accepted as aliases.
   router.put(
-    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/cancel",
+    "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id/:status",
     defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
+      const status = (getRouterParam(event, "status") || "").toLowerCase();
       try {
-        const canceled = workflow.cancel(id);
-        return transferView(canceled);
+        if (status === "approve" || status === "approved") {
+          const { caller, approverUserUUID } = authCaller(event);
+          const settled = workflow.approve(id, { caller, approverUserUUID });
+          return transferView(settled, { settledAt: new Date().toISOString() });
+        }
+        if (status === "cancel" || status === "canceled" || status === "cancelled") {
+          return transferView(workflow.cancel(id));
+        }
+        setResponseStatus(event, 400);
+        return {
+          businessErrors: [
+            { errorCode: "HL-VAL-003", errorDescription: `Unsupported status transition '${status}'` },
+          ],
+        };
       } catch (e) {
         return sendRejection(event, e);
       }

@@ -231,11 +231,15 @@ official funding/defunding/transaction/wallet endpoints instead.
 ### PARTIAL — path-shape differences
 
 - **Draft status updates.** The official spec uses a generic
-  `.../{...-drafts}/{id}/{status}` path where `{status}` is the target state
-  (e.g. `APPROVED`, `CANCELED`). The mock instead exposes literal
-  `/approve` and `/cancel` sub-paths for RVS transactions and TMS funding, and
-  only `/approve` for TMS defunding (no `cancel`). Behaviour: `404` if the draft
-  is unknown, `409` if it is not in `PENDING_APPROVAL`.
+  `.../{...-drafts}/{id}/{status}` path where `{status}` is the target state.
+  RVS transactions now serve the **generic `{status}`** transition
+  (`approve`/`cancel`, case-insensitive, plus the `APPROVED`/`CANCELED` target
+  states) alongside a `GET .../transactions-drafts/{id}` read-by-id. TMS funding
+  keeps `/approve`+`/cancel`; TMS defunding `/approve` (+ `/cancel` added in the
+  defunding issue). Behaviour: `404` if the draft is unknown, `409` if it is not
+  in `PENDING_APPROVAL`. Two-step **approval** enforces **four-eyes** (approver
+  `≠` initiator → `403`) and, for debiting workflows, checks the source **debit
+  right** (`403`) and **available balance** (`422`) *at approval only*.
 
 ### Behavioural simplifications on implemented endpoints
 
