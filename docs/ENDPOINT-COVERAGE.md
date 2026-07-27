@@ -157,11 +157,11 @@ change behaviour. Gaps are listed, not fixed.
 
 | Method | Official path | Status | Mock path | Controls | Since |
 |--------|---------------|--------|-----------|----------|-------|
-| POST | `/igw/{ncb}/v1/xvps` | NOT IMPLEMENTED | — | — | — |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
-| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
-| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | NOT IMPLEMENTED | — | — | — |
+| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | init locks funds, NRO | XvP |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | — | XvP |
+| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | preimage | XvP |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | — | XvP |
+| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | init locks funds, NRO | XvP |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
 | POST | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
@@ -291,6 +291,19 @@ official funding/defunding/transaction/wallet endpoints instead.
   the matched wallet payment fires (checked debit of the seller + credit of the
   buyer) → `SETTLED`; inconsistent legs → `422`; an unmatched leg past its window
   (`PONTES_PFOD_MATCH_WINDOW_SEC`, default 1h) is lazily marked `EXPIRED` (`410`).
+- **XvP (hash-link / hashed time-lock) — the only fund-locking workflow.** On the
+  IGW surface: `POST /igw/{ncb}/v1/xvps` (and `.../direct-rtgs/xvps`) **locks** the
+  seller's available balance (checked rights + availability → DCW `lock`) and
+  issues an `executionHash`, a `cancellationHash` and a `timeout` (persisted as an
+  `XVP` draft). `POST .../xvps/{id}/payment` reveals a preimage: hashing to the
+  execution hash → `settleLocked(source)` + credit(target) → `SETTLED` (the key is
+  echoed back); hashing to the cancellation hash — or a passed `timeout` — →
+  `release(source)` → `CANCELLED`/`EXPIRED`. `GET .../xvps/{id}` and
+  `.../payment` report status. *(Mock convenience: the init response also returns
+  the two preimage keys so a client can drive execution/cancellation; a real
+  deployment would keep the execution secret with the initiator.)* NRO-signed on
+  init (`xvpTransactionId + amount + buyer.bic + seller.bic`). The `/igw` surface
+  is not behind the JWT layer; the caller's entity is taken from the seller BIC.
 - **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
   wallet (via the DCW create primitive: zero balances, same-entity debit rights,
   no PoA/whitelist) instead of requiring the official AMS wallet-creation flow.

@@ -12,6 +12,7 @@ import { FundingWorkflow, DefundingWorkflow } from "../src/workflows/funding.js"
 import { PaymentWorkflow } from "../src/workflows/payment.js";
 import { DirectRtgsWorkflow } from "../src/workflows/direct-rtgs.js";
 import { PfodWorkflow } from "../src/workflows/pfod.js";
+import { XvpWorkflow } from "../src/workflows/xvp.js";
 import { isWorkflowRejection, WorkflowRejection } from "../src/workflows/workflow.js";
 
 function seededStore(): MemoryStore {
@@ -378,6 +379,85 @@ describe("PfodWorkflow (matched settlement — issue #20)", () => {
       expect((e as WorkflowRejection).statusCode).toBe(422);
     }
     expect(store.getWallet("SRC")?.balance).toBe("100.00");
+  });
+});
+
+describe("XvpWorkflow (hash-lock — issue #21)", () => {
+  const SELLER = { entityBIC: "BANKAXXXXXX" };
+
+  function init(store = seededStore(), amount = "40.00") {
+    const wf = new XvpWorkflow(store);
+    const r = wf.init({
+      xvpTransactionId: "XVP1",
+      transactionType: "DVP",
+      amount,
+      currency: "EUR",
+      sourceWalletAlias: "SRC",
+      targetWalletAlias: "DST",
+      caller: SELLER,
+    });
+    return { store, wf, r };
+  }
+
+  it("init locks the seller's funds and issues hashes + timeout", () => {
+    const { store, r } = init();
+    expect(r.status).toBe("INITIALIZED");
+    expect(r.executionHash).toHaveLength(64);
+    expect(r.cancellationHash).toHaveLength(64);
+    expect(r.timeout).toBeDefined();
+    expect(store.getWallet("SRC")?.balance).toBe("60.00");
+    expect(store.getWallet("SRC")?.lockedBalance).toBe("40.00");
+  });
+
+  it("EXECUTION preimage settles the lock, credits the buyer and reveals the key", () => {
+    const { store, wf, r } = init();
+    const p = wf.payment("XVP1", r.executionKey);
+    expect(p.status).toBe("SETTLED");
+    expect(p.keyType).toBe("EXECUTION");
+    expect(p.executionKey).toBe(r.executionKey);
+    expect(store.getWallet("SRC")?.lockedBalance).toBe("0.00");
+    expect(store.getWallet("SRC")?.balance).toBe("60.00");
+    expect(store.getWallet("DST")?.balance).toBe("40.00");
+    expect(store.getTransactions()[0].type).toBe("XVP");
+  });
+
+  it("CANCELLATION preimage releases the lock", () => {
+    const { store, wf, r } = init();
+    const p = wf.payment("XVP1", r.cancellationKey);
+    expect(p.status).toBe("CANCELLED");
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
+    expect(store.getWallet("SRC")?.lockedBalance).toBe("0.00");
+  });
+
+  it("rejects an invalid preimage with 400 and keeps funds locked", () => {
+    const { store, wf } = init();
+    try {
+      wf.payment("XVP1", "not-a-valid-preimage");
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(400);
+    }
+    expect(store.getWallet("SRC")?.lockedBalance).toBe("40.00");
+  });
+
+  it("init rejects with 422 when the seller has insufficient available balance", () => {
+    const store = seededStore();
+    const wf = new XvpWorkflow(store);
+    try {
+      wf.init({
+        xvpTransactionId: "XVP2",
+        transactionType: "DVP",
+        amount: "500.00",
+        currency: "EUR",
+        sourceWalletAlias: "SRC",
+        targetWalletAlias: "DST",
+        caller: SELLER,
+      });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(422);
+    }
+    expect(store.getWallet("SRC")?.lockedBalance).toBe("0.00");
   });
 });
 
