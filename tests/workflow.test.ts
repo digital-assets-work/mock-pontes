@@ -165,6 +165,27 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
     }
   });
 
+  it("funding approve enforces four-eyes (approver ≠ initiator)", () => {
+    const store = seededStore();
+    const wf = new FundingWorkflow(store);
+    wf.create({
+      id: "FRQ1",
+      amount: "10.00",
+      creditedWalletAlias: "DST",
+      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      initiatorUserUUID: "user-1",
+    });
+    try {
+      wf.approve("FRQ1", { approverUserUUID: "user-1" });
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(403);
+      expect(r.errorCode).toBe("HL-GER-003");
+    }
+    expect(store.getDraft("FRQ1")?.status).toBe("PENDING_APPROVAL");
+  });
+
   it("defunding approve debits the source only", () => {
     const store = seededStore();
     const wf = new DefundingWorkflow(store);
