@@ -1,4 +1,5 @@
 import type { Draft } from "../state/mock-store.js";
+import type { DcwCaller } from "../state/dcw.js";
 import { Workflow } from "./workflow.js";
 
 /**
@@ -16,14 +17,15 @@ export class FundingWorkflow extends Workflow {
 }
 
 /**
- * Two-step defunding: debits the target wallet on approval and (conceptually)
- * returns the cash to the infinite issuance wallet.
+ * Two-step defunding: debits (burns) the target DCW on approval and returns the
+ * cash to the infinite issuance wallet. The debit is **checked** (issue #18):
+ * availability + debit rights on the source are verified at approval time.
  */
 export class DefundingWorkflow extends Workflow {
   readonly type = "DEFUNDING" as const;
   protected readonly notFoundLabel = "Defunding draft";
 
-  protected apply(record: Draft): void {
-    this.rawDebit(record.debitedWalletAlias, record.amount);
+  protected apply(record: Draft, caller?: DcwCaller): void {
+    this.checkedDebit(record.debitedWalletAlias, record.amount, caller);
   }
 }

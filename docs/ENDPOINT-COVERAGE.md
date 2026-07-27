@@ -237,7 +237,8 @@ official funding/defunding/transaction/wallet endpoints instead.
   states) alongside a `GET .../transactions-drafts/{id}` read-by-id. TMS funding
   also serves the **generic `{status}`** (approve|cancel) plus a
   `GET .../tms/funding-defunding-requests(-drafts)/{id}` read; TMS defunding
-  `/approve` (+ `/cancel` added in the defunding issue). Behaviour: `404` if the draft is unknown, `409` if it is not
+  likewise serves the generic `{status}` (approve **and cancel**, newly added).
+  Behaviour: `404` if the draft is unknown, `409` if it is not
   in `PENDING_APPROVAL`. Two-step **approval** enforces **four-eyes** (approver
   `≠` initiator → `403`) and, for debiting workflows, checks the source **debit
   right** (`403`) and **available balance** (`422`) *at approval only*.

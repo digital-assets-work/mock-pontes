@@ -195,8 +195,48 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
       creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
       debitedWalletAlias: "SRC",
     });
-    wf.approve("DRQ1");
+    wf.approve("DRQ1", { caller: { entityBIC: "BANKAXXXXXX" } });
     expect(store.getWallet("SRC")?.balance).toBe("70.00");
+  });
+
+  it("defunding approve rejects with 422 when the source is short", () => {
+    const store = seededStore();
+    const wf = new DefundingWorkflow(store);
+    wf.create({
+      id: "DRQ1",
+      amount: "500.00",
+      creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      debitedWalletAlias: "SRC",
+    });
+    try {
+      wf.approve("DRQ1", { caller: { entityBIC: "BANKAXXXXXX" } });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(422);
+    }
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
+    expect(store.getDraft("DRQ1")?.status).toBe("PENDING_APPROVAL");
+  });
+
+  it("defunding approve enforces four-eyes and can be canceled", () => {
+    const store = seededStore();
+    const wf = new DefundingWorkflow(store);
+    wf.create({
+      id: "DRQ1",
+      amount: "10.00",
+      creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      debitedWalletAlias: "SRC",
+      initiatorUserUUID: "user-1",
+    });
+    try {
+      wf.approve("DRQ1", { caller: { entityBIC: "BANKAXXXXXX" }, approverUserUUID: "user-1" });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(403);
+    }
+    const canceled = wf.cancel("DRQ1");
+    expect(canceled.status).toBe("CANCELED");
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
   });
 
   it("does not confuse a funding draft with a defunding workflow (type guard)", () => {

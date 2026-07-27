@@ -134,7 +134,12 @@ export function createFundingRouter(store: MockStore) {
       const seq = String(Math.floor(Math.random() * 999999)).padStart(6, "0");
       const id = `DRQ${now.slice(2, 10).replace(/-/g, "")}${seq}`;
 
-      // Auto-create debited wallet if it doesn't exist (mock convenience)
+      // Auto-create debited (source) wallet if it doesn't exist. Default its
+      // owner to the initiator's entity so the approval debit-right check passes.
+      const initiatorEntity = (event.context.auth as AuthContext | undefined)?.entityBIC;
+      if (!body.debitedCashWalletOwnerID && initiatorEntity) {
+        body.debitedCashWalletOwnerID = initiatorEntity;
+      }
       ensureWallet(store, body.debitedCashWalletAlias, body);
 
       const draft = defunding.create({
@@ -159,17 +164,35 @@ export function createFundingRouter(store: MockStore) {
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/approve — Approve defunding draft
+  // PUT /dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/:status — Transition
+  // defunding draft. Generic {status}: approve|cancel (case-insensitive +
+  // APPROVED/CANCELED). Approval enforces four-eyes and debits the source via the
+  // checked DCW op (availability + debit rights verified now).
   router.put(
-    "/dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/approve",
+    "/dlt/:ncb/api/octopus/tms/defunding-requests-drafts/:id/:status",
     defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
+      const status = (getRouterParam(event, "status") || "").toLowerCase();
+      const auth = event.context.auth as AuthContext | undefined;
       try {
-        defunding.approve(id, { approverUserUUID: approverUUID(event) });
+        if (status === "approve" || status === "approved") {
+          defunding.approve(id, {
+            caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
+            approverUserUUID: auth?.userUUID,
+          });
+          return { defundingRequestID: id, status: "SETTLED" };
+        }
+        if (status === "cancel" || status === "canceled" || status === "cancelled") {
+          defunding.cancel(id);
+          return { defundingRequestID: id, status: "CANCELED" };
+        }
+        throw createError({
+          statusCode: 400,
+          data: { businessErrors: [{ errorDescription: `Unsupported status transition '${status}'` }] },
+        });
       } catch (e) {
         rejectAsError(e);
       }
-      return { defundingRequestID: id, status: "SETTLED" };
     }),
   );
 
