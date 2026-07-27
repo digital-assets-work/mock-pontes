@@ -35,7 +35,7 @@ function callerOf(event: H3Event): DcwCaller | undefined {
 
 function rtgsView(d: Draft, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    directRtgsPaymentID: d.id,
+    id: d.id,
     status: d.status,
     type: "DIRECT_RTGS",
     amount: d.amount,

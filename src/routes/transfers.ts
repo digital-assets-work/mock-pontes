@@ -38,7 +38,7 @@ function sendRejection(event: H3Event, e: unknown): { businessErrors: unknown } 
 
 function transferView(d: Draft, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    instructionID: d.id,
+    id: d.id,
     status: d.status,
     type: "TRANSFER",
     amountTransferred: d.amount,
@@ -91,7 +91,7 @@ export function createTransfersRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/ims/transactions",
     defineEventHandler(() => {
       return store.getDrafts().map((d) => ({
-        instructionLTID: d.id,
+        id: d.id,
         type: d.type,
         etatsUX: d.status,
         amountTransferred: d.amount,

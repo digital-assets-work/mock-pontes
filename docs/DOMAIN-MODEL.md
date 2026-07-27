@@ -173,7 +173,8 @@ Authorises a party to operate a DCW on behalf of the owner.
 
 A wallet-to-wallet cash-token transfer/payment (2-step).
 
-- Key fields: `instructionID`/`instructionLTID`, `amountTransferred`, `currency`
+- Key fields: `id` (the draft/transaction identifier, matching the official
+  `*.Response` schemas), `amountTransferred`, `currency`
   (`EUR`), `creditedCashWalletAlias`, `debitedCashWalletAlias`,
   `creditedCashWalletManagerID`, `debitedCashWalletManagerID`, `type`,
   `cbdcRequestType`, `instructingPartyID`, `status`, and the non-official
