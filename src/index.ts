@@ -45,12 +45,15 @@ import { createInMemoryAuthUsersRepository, createPersistedAuthUsersRepository }
 import { RedisCache } from "./cache/index.js";
 
 // --- State ---
-const store = new MemoryStore();
+const redisUrl = process.env.REDIS_URL;
+const store = new MemoryStore(
+  redisUrl ? new RedisCache(redisUrl, "mock-pontes:state") : undefined,
+);
+await store.hydrate();
 const runtimePki = await getRuntimePkiBundle();
 
 
 // --- Auth users repository (Redis-backed if available) ---
-const redisUrl = process.env.REDIS_URL;
 const authUsersRepository = redisUrl
   ? await createPersistedAuthUsersRepository(new RedisCache(redisUrl, "mock-pontes:users"))
   : createInMemoryAuthUsersRepository();

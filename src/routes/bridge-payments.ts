@@ -5,21 +5,11 @@ import {
   setResponseStatus,
 } from "h3";
 import { randomUUID } from "node:crypto";
-import type { MockStore, Wallet } from "../state/mock-store.js";
+import type { MockStore } from "../state/mock-store.js";
 
 function ensureWallet(store: MockStore, alias: string, managerNCB: string): void {
   if (!alias || store.getWallet(alias)) return;
-  const wallet: Wallet = {
-    alias,
-    ownerBIC: "UNKNOWN",
-    ownerEntityID: "UNKNOWN",
-    managerNCB,
-    balance: "0.00",
-    currency: "EUR",
-    isMainWallet: true,
-    createdAt: new Date().toISOString(),
-  };
-  store.upsertWallet(wallet);
+  store.ensureWallet(alias, { managerNCB });
   console.log(`[mock-pontes] Auto-created wallet ${alias}`);
 }
 
