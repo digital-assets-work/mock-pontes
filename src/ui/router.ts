@@ -158,7 +158,7 @@ const HOME_BODY = `
     var strict = c.runtime.strictProfile ? "<span class=\\"pill ok\\">STRICT</span>" : "<span class=\\"pill warn\\">LENIENT</span>";
     var redis = c.runtime.redis ? "<span class=\\"pill ok\\">on</span>" : "<span class=\\"pill\\">off (in-memory)</span>";
     document.getElementById("cfg").innerHTML =
-      row("Release version", "<code>"+c.version+"</code>"+(c.commit?" <span class=\"hint\">("+c.commit+")</span>":"")) +
+      row("Release version", "<code>"+c.version+"</code>"+(c.commit?" <span class=\\"hint\\">("+c.commit+")</span>":"")) +
       row("External URL", "<code>"+c.externalUrl+"</code>") +
       row("Base URL", "<code>"+c.baseUrl+"</code>") +
       row("Default NCB / ORG", "<code>"+c.ncb+"</code>") +
