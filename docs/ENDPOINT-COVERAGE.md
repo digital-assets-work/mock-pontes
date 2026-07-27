@@ -168,9 +168,13 @@ change behaviour. Gaps are listed, not fixed.
 
 ### Coverage summary
 
-- **IMPLEMENTED:** 12 official operations.
+- **IMPLEMENTED:** 17 official operations — incl. the 5 XvP IGW operations
+  (`/igw/{ncb}/v1/xvps` init/status/payment + `direct-rtgs/xvps` init).
 - **PARTIAL:** 3 (path-shape differences — see §3).
-- **NOT IMPLEMENTED:** the remainder of the EII API (T2 accounts, GRS registry/entities/mDLT, PoA, instruct-on-behalf, direct-RTGS, XvP/IGW, extracts, stats).
+- **Mock-defined money movements** (behaviourally complete, mock paths): direct-RTGS
+  (`.../tms/direct-rtgs/payments`, `.../bridge/direct-rtgs/payments`) and PFoD
+  (`.../bridge/initpfoddeli`/`initpfodrece`).
+- **NOT IMPLEMENTED:** the remainder of the EII API (T2 accounts, GRS registry/entities/mDLT, PoA, instruct-on-behalf, the `direct-rtgs/xvps` GET/status IGW rows, extracts, stats).
 
 ---
 
