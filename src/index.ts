@@ -1,7 +1,7 @@
 // @peculiar/x509's CJS build depends on tsyringe which requires a reflect polyfill
 import "reflect-metadata";
 import "dotenv/config";
-import { createApp, toNodeListener, setResponseStatus } from "h3";
+import { toNodeListener } from "h3";
 import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
@@ -10,47 +10,10 @@ import * as x509 from "@peculiar/x509";
 
 
 import { MemoryStore } from "./state/memory-store.js";
-
-// Auth layer
-import {
-  createJwtMiddleware,
-  createEnrollmentAuthRouter,
-  createNroMiddleware,
-  createProfileAuthorizationMiddleware,
-} from "./auth/index.js";
-
-// Route factories
-import { createWalletsRouter } from "./routes/wallets.js";
-import { createTransfersRouter } from "./routes/transfers.js";
-import { createFundingRouter } from "./routes/funding.js";
-import { createBusinessWindowRouter } from "./routes/business-window.js";
-import { createHealthRouter } from "./routes/health.js";
-import { createBridgePaymentsRouter } from "./routes/bridge-payments.js";
-import { createDirectRtgsRouter } from "./routes/direct-rtgs.js";
-import { createPfodRouter } from "./routes/pfod.js";
-import { createXvpRouter } from "./routes/xvp.js";
-
-// UI (native, no-build) served directly from the backend
-import { createUiRouter } from "./ui/router.js";
-
-// Admin route factories
-// Only mock-only controls with no official-API equivalent remain: business-window
-// simulation config and the test-harness reset. State-changing/querying admin
-// endpoints (fund/defund/transfer/list) were removed in favour of the official
-// Pontes endpoints (see docs/ENDPOINT-COVERAGE.md).
-import { createAdminBusinessWindowRouter } from "./admin/business-window.js";
-import { createAdminResetRouter } from "./admin/reset.js";
+import { buildApp } from "./app.js";
 import { getRuntimePkiBundle, closeRuntimePkiPersistence, getTlsCertConfig } from "./auth/runtime-pki.js";
-import { createNroCertCheckMiddleware } from "./auth/nro-middleware.js";
-import { createLoggingMiddleware } from "./logger/middleware.js";
-import { createMtlsConsistencyMiddleware } from "./auth/middleware.js";
-import { createNcbValidationMiddleware } from "./auth/ncb-middleware.js";
 import { createInMemoryAuthUsersRepository, createPersistedAuthUsersRepository } from "./auth/users-repository.js";
 import { RedisCache } from "./cache/index.js";
-import {
-  normalizeReturnedErrorBody,
-  normalizeThrownError,
-} from "./http/error-response.js";
 
 // --- State ---
 const redisUrl = process.env.REDIS_URL;
@@ -69,105 +32,8 @@ if (redisUrl) {
   console.log(`[mock-pontes] Users persistence enabled via Redis (${redisUrl})`);
 }
 
-// List of the API patterns that need NRO signature verification.
-// Anchored to the CREATE endpoints only: the `-drafts/{id}/{status}` approval and
-// cancel PUTs must NOT require an NRO signature (fixed for issue #17).
-const nroRoutePatterns: readonly RegExp[] = [
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/funding-requests(?:$|\?)/,
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests(?:$|\?)/,
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/direct-rtgs\/payments(?:$|\?)/,
-  /\/dlt\/[^/]+\/api\/bridge\/direct-rtgs\/payments(?:$|\?)/,
-  /\/igw\/[^/]+\/v1\/xvps(?:$|\?)/,
-  /\/igw\/[^/]+\/v1\/direct-rtgs\/xvps(?:$|\?)/,
-];
-
 // --- H3 App ---
-// Every error is normalised to the official Pontes `ErrorResponse` shape
-// ({ status, title, businessErrors[] }) — thrown errors via `onError`, returned
-// error bodies via `onBeforeResponse`. Stacks are never exposed (issue #33).
-const app = createApp({
-  onError: (error, event) => {
-    if (event.handled) return;
-    const body = normalizeThrownError(error);
-    setResponseStatus(event, body.status);
-    event.node.res.setHeader("content-type", "application/json");
-    event.node.res.end(JSON.stringify(body));
-  },
-  onBeforeResponse: (event, response) => {
-    const normalised = normalizeReturnedErrorBody(
-      event.node.res.statusCode,
-      event.path || "",
-      response.body,
-    );
-    if (normalised) response.body = normalised;
-  },
-});
-
-// --- Global request logging + mTLS context enrichment middleware ---
-// Attaches certificate-derived context (e.g. presented client cert, fingerprint, validity)
-// and emits request/response logs used by downstream auth and troubleshooting.
-app.use(createLoggingMiddleware());
-
-// --- Health endpoint (unauthenticated, before JWT middleware) ---
-app.use(createHealthRouter().handler);
-
-// --- Native UI (unauthenticated, dev only) ---
-// Registered before the auth middlewares so the control panel, API docs and CSR
-// enrollment page are reachable without a client certificate or token.
-app.use(createUiRouter().handler);
-
-app.use(
-  createEnrollmentAuthRouter({
-    runtimePki,
-    authUsersRepository,
-  }).handler,
-);
-
-// --- NCB path-parameter validation ---
-// Validates the {ncb} segment of /dlt/** and /igw/** against the official NCB
-// enum (case-insensitive) and 404s an unknown NCB. Before JWT so a bad NCB is
-// rejected regardless of auth. Skipped when PONTES_MOCK_LENIENT_NCB=true.
-app.use(createNcbValidationMiddleware());
-
-// --- JWT auth middleware ---
-// Validates bearer tokens and populates event.context.auth so identity-aware checks
-// and route handlers can enforce user-scoped certificate associations.
-app.use(createJwtMiddleware(["/dlt"]));
-
-// --- mTLS/JWT consistency middleware ---
-// For authenticated calls, ensures the presented mTLS client certificate matches
-// the certificate previously associated with the authenticated username.
-app.use(createMtlsConsistencyMiddleware(authUsersRepository));
-
-// --- Profile authorization middleware ---
-// Enforces that 1-step bridge endpoints require EXTERNAL_USER and
-// 2-step draft/approve/funding/defunding require PILOT_READ_WRITE.
-// Skipped when PONTES_MOCK_LENIENT_PROFILE=true.
-app.use(createProfileAuthorizationMiddleware());
-
-// --- NRO signer certificate vs mTLS certificate consistency middleware ---
-// On NRO-protected write routes, checks that signerPEM and the current mTLS cert
-// represent the same certificate before the cryptographic signature verification step.
-app.use(createNroCertCheckMiddleware(nroRoutePatterns));
-
-// --- NRO signature verification middleware ---
-// On NRO-protected write routes, verifies signature fields against signerPEM
-// using the Pontes canonical payload construction rules.
-app.use(createNroMiddleware(nroRoutePatterns));
-
-// Pontes-compatible routes
-app.use(createWalletsRouter(store).handler);
-app.use(createTransfersRouter(store).handler);
-app.use(createFundingRouter(store).handler);
-app.use(createBusinessWindowRouter(store).handler);
-app.use(createBridgePaymentsRouter(store).handler);
-app.use(createDirectRtgsRouter(store).handler);
-app.use(createPfodRouter(store).handler);
-app.use(createXvpRouter(store).handler);
-
-// Admin routes (mock-only, no official equivalent)
-app.use(createAdminBusinessWindowRouter(store).handler);
-app.use(createAdminResetRouter(store).handler);
+const app = buildApp({ store, runtimePki, authUsersRepository });
 
 // --- Server ---
 const port = Number(process.env.PORT || 3001);

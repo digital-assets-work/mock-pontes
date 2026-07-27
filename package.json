@@ -16,6 +16,7 @@
     "dev-tee": "tsx watch src/index.ts 2>&1 | tee /tmp/mock-pontes.log",
     "start": "tsx src/index.ts",
     "test": "jest",
+    "test:coverage": "jest --coverage",
     "build": "./ts-esm-build.sh src/index.ts",
     "run": "node ./dist/index.js"
   },
