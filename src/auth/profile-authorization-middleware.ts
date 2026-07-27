@@ -19,6 +19,7 @@ import {
 const BRIDGE_1STEP_PATTERNS: readonly RegExp[] = [
   /\/dlt\/[^/]+\/api\/bridge\/payments/,
   /\/dlt\/[^/]+\/api\/bridge\/direct-rtgs\//,
+  /\/dlt\/[^/]+\/api\/bridge\/initpfod/,
   // PFoD / XvP bridge endpoints (reserved for future)
   /\/dlt\/[^/]+\/api\/bridge\/pfod\//,
   /\/dlt\/[^/]+\/api\/bridge\/xvp\//,
