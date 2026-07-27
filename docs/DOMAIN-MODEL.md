@@ -402,19 +402,20 @@ stateDiagram-v2
 | Concept | Status | Mock surface |
 |---------|--------|--------------|
 | User (IAM) | 🟢 | token / csr / certs / enrolled-users |
-| Cash-Token Transaction | 🟢 | rvs transactions-requests + approve/cancel |
-| Funding / Defunding | 🟢 | tms funding/defunding-requests + approve |
-| Bridge 1-step payment | 🟢 | bridge/payments |
+| Cash-Token Transaction | 🟢 | rvs transactions-requests + generic `{status}` + GET-by-id |
+| Funding / Defunding | 🟢 | tms funding/defunding-requests + generic `{status}` (incl. cancel) |
+| Bridge 1-step payment | 🟢 | bridge/payments (checked availability + rights) |
+| Direct RTGS Payment | 🟡 | tms + bridge `direct-rtgs/payments` (defund+fund composite) |
+| PFoD (matched) | 🟢 | bridge/initpfoddeli + initpfodrece (matched on tradeID) |
+| XvP (hash-lock) | 🟢 | `/igw/{ncb}/v1/xvps(+payment)` — the only fund-locking flow |
 | Settlement query | 🟢 | ims/transactions (drafts) |
-| Dedicated Cash Wallet | 🟡 | read + auto-create; no creation draft |
-| Holding / balance | 🟡 | single EUR balance per wallet |
+| Dedicated Cash Wallet | 🟡 | read + **credit-side** auto-create; available/locked, debit rights, Redis |
+| Holding / balance | 🟡 | available + locked balance per wallet |
 | Business Window / Date | 🟡 | read only, not enforced |
 | Market Participant Entity | ⚪ | — |
 | NCB registry | ⚪ | — |
 | T2 Account | ⚪ | — |
 | Power of Attorney | ⚪ | — |
-| Direct RTGS Payment | ⚪ | — |
-| PFoD / XvP | ⚪ | — |
 | Market DLT Operator / Whitelist | ⚪ | — |
 | Instruct-on-behalf | ⚪ | — |
 | Closed days | ⚪ | — |
