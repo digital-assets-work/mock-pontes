@@ -27,7 +27,7 @@ export interface Wallet {
 
 export interface Transaction {
   id: string;
-  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS" | "PFOD";
+  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS" | "PFOD" | "XVP";
   status: "SETTLED" | "PENDING" | "FAILED";
   amount: string;
   currency: string;
@@ -41,7 +41,7 @@ export interface Transaction {
 
 export interface Draft {
   id: string;
-  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS" | "PFOD";
+  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS" | "PFOD" | "XVP";
   status:
     | "INITIALIZED"
     | "PENDING_APPROVAL"

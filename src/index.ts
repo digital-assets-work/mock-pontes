@@ -28,6 +28,7 @@ import { createHealthRouter } from "./routes/health.js";
 import { createBridgePaymentsRouter } from "./routes/bridge-payments.js";
 import { createDirectRtgsRouter } from "./routes/direct-rtgs.js";
 import { createPfodRouter } from "./routes/pfod.js";
+import { createXvpRouter } from "./routes/xvp.js";
 
 // UI (native, no-build) served directly from the backend
 import { createUiRouter } from "./ui/router.js";
@@ -71,6 +72,8 @@ const nroRoutePatterns: readonly RegExp[] = [
   /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests(?:$|\?)/,
   /\/dlt\/[^/]+\/api\/octopus\/tms\/direct-rtgs\/payments(?:$|\?)/,
   /\/dlt\/[^/]+\/api\/bridge\/direct-rtgs\/payments(?:$|\?)/,
+  /\/igw\/[^/]+\/v1\/xvps(?:$|\?)/,
+  /\/igw\/[^/]+\/v1\/direct-rtgs\/xvps(?:$|\?)/,
 ];
 
 // --- H3 App ---
@@ -130,6 +133,7 @@ app.use(createBusinessWindowRouter(store).handler);
 app.use(createBridgePaymentsRouter(store).handler);
 app.use(createDirectRtgsRouter(store).handler);
 app.use(createPfodRouter(store).handler);
+app.use(createXvpRouter(store).handler);
 
 // Admin routes (mock-only, no official equivalent)
 app.use(createAdminBusinessWindowRouter(store).handler);
