@@ -75,7 +75,8 @@ export function createFundingRouter(store: MockStore) {
         currency: "EUR",
         creditedWalletAlias: body.creditedCashWalletAlias || "",
         debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-        initiatorUserUUID: body.initiatorUserUUID,
+        // Initiator is the authenticated caller (four-eyes), never the body (#28).
+        initiatorUserUUID: approverUUID(event),
       });
 
       setResponseStatus(event, 201);
@@ -143,7 +144,8 @@ export function createFundingRouter(store: MockStore) {
         currency: "EUR",
         creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
         debitedWalletAlias: body.debitedCashWalletAlias || "",
-        initiatorUserUUID: body.initiatorUserUUID,
+        // Initiator is the authenticated caller (four-eyes), never the body (#28).
+        initiatorUserUUID: approverUUID(event),
       });
 
       setResponseStatus(event, 201);

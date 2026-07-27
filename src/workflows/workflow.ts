@@ -125,11 +125,26 @@ export abstract class Workflow {
   /** `PENDING_APPROVAL` → `SETTLED`: run conditions, apply the effect, record a transaction. */
   approve(id: string, actor: WorkflowActor = {}): Draft {
     const record = this.loadPending(id, "approve");
-    if (
-      actor.approverUserUUID &&
-      record.initiatorUserUUID &&
-      actor.approverUserUUID === record.initiatorUserUUID
-    ) {
+    // Four-eyes (separation of duties): the approver must be an authenticated
+    // user distinct from the recorded initiator. Fail CLOSED — refuse approval
+    // when either identity is unknown, rather than allowing self-approval to slip
+    // through (issue #28). Both identities are sourced from the JWT, never from
+    // client-supplied request bodies.
+    if (!actor.approverUserUUID) {
+      throw new WorkflowRejection(
+        403,
+        "HL-GER-003",
+        "Approver identity is required for approval (four-eyes control)",
+      );
+    }
+    if (!record.initiatorUserUUID) {
+      throw new WorkflowRejection(
+        403,
+        "HL-GER-003",
+        "Initiator identity is unknown; cannot verify four-eyes control",
+      );
+    }
+    if (actor.approverUserUUID === record.initiatorUserUUID) {
       throw new WorkflowRejection(
         403,
         "HL-GER-003",

@@ -52,8 +52,8 @@ describe("TransferWorkflow (two-step)", () => {
   it("approve settles: debits source, credits target, records a TX-", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
-    wf.create({ id: "TR1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
-    const settled = wf.approve("TR1", { caller: CALLER });
+    wf.create({ id: "TR1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
+    const settled = wf.approve("TR1", { caller: CALLER, approverUserUUID: "user-2" });
     expect(settled.status).toBe("SETTLED");
     expect(store.getWallet("SRC")?.balance).toBe("60.00");
     expect(store.getWallet("DST")?.balance).toBe("40.00");
@@ -66,9 +66,9 @@ describe("TransferWorkflow (two-step)", () => {
   it("approve rejects with 422 when the source is short at approval time", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
-    wf.create({ id: "TR1", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    wf.create({ id: "TR1", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
     try {
-      wf.approve("TR1", { caller: CALLER });
+      wf.approve("TR1", { caller: CALLER, approverUserUUID: "user-2" });
       throw new Error("expected rejection");
     } catch (e) {
       expect((e as WorkflowRejection).statusCode).toBe(422);
@@ -80,9 +80,9 @@ describe("TransferWorkflow (two-step)", () => {
   it("approve rejects with 403 when approver has no debit right on the source", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
-    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
     try {
-      wf.approve("TR1", { caller: { entityBIC: "OTHERBANKXX" } });
+      wf.approve("TR1", { caller: { entityBIC: "OTHERBANKXX" }, approverUserUUID: "user-2" });
       throw new Error("expected rejection");
     } catch (e) {
       expect((e as WorkflowRejection).statusCode).toBe(403);
@@ -130,10 +130,10 @@ describe("TransferWorkflow (two-step)", () => {
   it("rejects approve of an already-settled draft with 409", () => {
     const store = seededStore();
     const wf = new TransferWorkflow(store);
-    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
-    wf.approve("TR1", { caller: CALLER });
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
+    wf.approve("TR1", { caller: CALLER, approverUserUUID: "user-2" });
     try {
-      wf.approve("TR1", { caller: CALLER });
+      wf.approve("TR1", { caller: CALLER, approverUserUUID: "user-2" });
       throw new Error("expected rejection");
     } catch (e) {
       const r = e as WorkflowRejection;
@@ -152,8 +152,9 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
       amount: "25.00",
       creditedWalletAlias: "DST",
       debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      initiatorUserUUID: "user-1",
     });
-    wf.approve("FRQ1");
+    wf.approve("FRQ1", { approverUserUUID: "user-2" });
     expect(store.getWallet("DST")?.balance).toBe("25.00");
   });
 
@@ -197,8 +198,9 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
       amount: "30.00",
       creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
       debitedWalletAlias: "SRC",
+      initiatorUserUUID: "user-1",
     });
-    wf.approve("DRQ1", { caller: { entityBIC: "BANKAXXXXXX" } });
+    wf.approve("DRQ1", { caller: { entityBIC: "BANKAXXXXXX" }, approverUserUUID: "user-2" });
     expect(store.getWallet("SRC")?.balance).toBe("70.00");
   });
 
@@ -210,9 +212,10 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
       amount: "500.00",
       creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
       debitedWalletAlias: "SRC",
+      initiatorUserUUID: "user-1",
     });
     try {
-      wf.approve("DRQ1", { caller: { entityBIC: "BANKAXXXXXX" } });
+      wf.approve("DRQ1", { caller: { entityBIC: "BANKAXXXXXX" }, approverUserUUID: "user-2" });
       throw new Error("expected rejection");
     } catch (e) {
       expect((e as WorkflowRejection).statusCode).toBe(422);
@@ -315,9 +318,9 @@ describe("DirectRtgsWorkflow (composite defund + fund — issue #19)", () => {
   it("two-step: create reserves nothing; approve debits payer and credits receiver", () => {
     const store = seededStore();
     const wf = new DirectRtgsWorkflow(store);
-    wf.create({ id: "DRTGS1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    wf.create({ id: "DRTGS1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
     expect(store.getWallet("SRC")?.balance).toBe("100.00"); // nothing reserved at create
-    const settled = wf.approve("DRTGS1", { caller: CALLER });
+    const settled = wf.approve("DRTGS1", { caller: CALLER, approverUserUUID: "user-2" });
     expect(settled.status).toBe("SETTLED");
     expect(store.getWallet("SRC")?.balance).toBe("60.00");
     expect(store.getWallet("DST")?.balance).toBe("40.00");
@@ -327,9 +330,9 @@ describe("DirectRtgsWorkflow (composite defund + fund — issue #19)", () => {
   it("two-step: approve rejects with 422 when the payer is short at approval", () => {
     const store = seededStore();
     const wf = new DirectRtgsWorkflow(store);
-    wf.create({ id: "DRTGS1", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    wf.create({ id: "DRTGS1", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
     try {
-      wf.approve("DRTGS1", { caller: CALLER });
+      wf.approve("DRTGS1", { caller: CALLER, approverUserUUID: "user-2" });
       throw new Error("expected rejection");
     } catch (e) {
       expect((e as WorkflowRejection).statusCode).toBe(422);
@@ -502,9 +505,52 @@ describe("Debit-side wallet must pre-exist (issue #23)", () => {
       amount: "25.00",
       creditedWalletAlias: "DST",
       debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", // debit side never touched
+      initiatorUserUUID: "user-1",
     });
-    wf.approve("FRQ1");
+    wf.approve("FRQ1", { approverUserUUID: "user-2" });
     expect(store.getWallet("DST")?.balance).toBe("25.00");
+  });
+});
+
+describe("Four-eyes fails closed (issue #28)", () => {
+  const CALLER = { entityBIC: "BANKAXXXXXX" };
+
+  it("rejects approval when the approver identity is missing (no JWT)", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
+    try {
+      wf.approve("TR1", { caller: CALLER }); // no approverUserUUID
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(403);
+      expect(r.errorCode).toBe("HL-GER-003");
+    }
+    expect(store.getDraft("TR1")?.status).toBe("PENDING_APPROVAL");
+  });
+
+  it("rejects approval when the recorded initiator is unknown", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" }); // no initiator
+    try {
+      wf.approve("TR1", { caller: CALLER, approverUserUUID: "user-2" });
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(403);
+      expect(r.errorCode).toBe("HL-GER-003");
+    }
+    expect(store.getDraft("TR1")?.status).toBe("PENDING_APPROVAL");
+  });
+
+  it("allows approval by a distinct authenticated user", () => {
+    const store = seededStore();
+    const wf = new TransferWorkflow(store);
+    wf.create({ id: "TR1", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
+    const settled = wf.approve("TR1", { caller: CALLER, approverUserUUID: "user-2" });
+    expect(settled.status).toBe("SETTLED");
   });
 });
 
@@ -516,8 +562,8 @@ describe("Workflow persistence (memory/Redis-style cache)", () => {
     store.ensureWallet("DST", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDFEFR" });
     store.credit("SRC", "100.00");
     const wf = new TransferWorkflow(store);
-    wf.create({ id: "TR1", amount: "20.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
-    wf.approve("TR1", { caller: { entityBIC: "BANKAXXXXXX" } });
+    wf.create({ id: "TR1", amount: "20.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC", initiatorUserUUID: "user-1" });
+    wf.approve("TR1", { caller: { entityBIC: "BANKAXXXXXX" }, approverUserUUID: "user-2" });
 
     const reloaded = new MemoryStore(cache);
     await reloaded.hydrate();
