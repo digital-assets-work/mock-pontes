@@ -26,7 +26,7 @@ import {
   setResponseHeader,
   setResponseStatus,
 } from "h3";
-import { openapiSpec } from "./openapi.js";
+import { buildServedSpec } from "./openapi.js";
 import { inspectPem } from "./inspect.js";
 import { buildP12 } from "./p12.js";
 import { stringify as stringifyYaml } from "yaml";
@@ -48,12 +48,22 @@ function mockCommit(): string | undefined {
   return c && c !== "no_commit_hash" ? c.slice(0, 7) : undefined;
 }
 
-// The specs are static, so serialize them to YAML once at module load rather
-// than on every request. `lineWidth: 0` disables line folding so long strings
-// (e.g. multi-line endpoint descriptions) round-trip byte-for-byte to the JSON.
-// `info.version` is stamped with the running release so the docs match the build.
-const servedSpec = { ...openapiSpec, info: { ...openapiSpec.info, version: mockVersion() } };
-const openapiYaml = stringifyYaml(servedSpec, { lineWidth: 0 });
+// The served spec is derived from the official spec + the route registry, so it
+// must be built AFTER all routes are registered. Build lazily on first request
+// and memoize (routes are stable once the app has started). `info.version` is
+// stamped with the running release so the docs match the build.
+let _servedSpec: ReturnType<typeof buildServedSpec> | undefined;
+let _openapiYaml: string | undefined;
+function getServedSpec(): ReturnType<typeof buildServedSpec> {
+  if (!_servedSpec) _servedSpec = buildServedSpec(mockVersion());
+  return _servedSpec;
+}
+function getOpenapiYaml(): string {
+  if (_openapiYaml === undefined) {
+    _openapiYaml = stringifyYaml(getServedSpec(), { lineWidth: 0 });
+  }
+  return _openapiYaml;
+}
 const officialYaml = stringifyYaml(officialSpec, { lineWidth: 0 });
 
 function baseUrlFor(event: Parameters<typeof getRequestURL>[0]): string {
@@ -495,14 +505,14 @@ export function createUiRouter() {
 
   router.get(
     "/openapi.json",
-    defineEventHandler(() => servedSpec),
+    defineEventHandler(() => getServedSpec()),
   );
 
   router.get(
     "/openapi.yaml",
     defineEventHandler((event) => {
       setResponseHeader(event, "content-type", "application/yaml; charset=utf-8");
-      return openapiYaml;
+      return getOpenapiYaml();
     }),
   );
 

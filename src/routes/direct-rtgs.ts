@@ -13,6 +13,7 @@ import type { DcwCaller } from "../state/dcw.js";
 import { resolveDraftId } from "../state/draft-id.js";
 import { DirectRtgsWorkflow } from "../workflows/direct-rtgs.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
+import { track } from "../http/route-registry.js";
 
 /** Auto-create a wallet, owned by `ownerEntityID` when known (for debit rights). */
 function ensureWallet(store: MockStore, alias: string, managerNCB: string, ownerEntityID?: string): void {
@@ -53,7 +54,7 @@ function rtgsView(d: Draft, extra: Record<string, unknown> = {}): Record<string,
  * create (signature over `id + amount + payerBank + receiverBank`).
  */
 export function createDirectRtgsRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
   const workflow = new DirectRtgsWorkflow(store);
 
   function buildInit(body: any, id: string, initiatorUserUUID?: string) {

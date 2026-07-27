@@ -10,6 +10,7 @@ import type { MockStore, Draft } from "../state/mock-store.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import type { DcwCaller } from "../state/dcw.js";
 import { resolveDraftId } from "../state/draft-id.js";
+import { track } from "../http/route-registry.js";
 import { TransferWorkflow } from "../workflows/transfer.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
@@ -51,7 +52,7 @@ function transferView(d: Draft, extra: Record<string, unknown> = {}): Record<str
 }
 
 export function createTransfersRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
   const workflow = new TransferWorkflow(store);
 
   // POST /dlt/:ncb/api/octopus/rvs/transactions-requests — Create transfer draft

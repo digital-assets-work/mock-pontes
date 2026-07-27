@@ -6,6 +6,7 @@ import {
 } from "h3";
 import { randomUUID } from "node:crypto";
 import type { MockStore } from "../state/mock-store.js";
+import { track } from "../http/route-registry.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { PaymentWorkflow } from "../workflows/payment.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
@@ -28,7 +29,7 @@ function ensureWallet(store: MockStore, alias: string, managerNCB: string, owner
  * HTTP 200 with the plain-text confirmation string used by the real API.
  */
 export function createBridgePaymentsRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
   const workflow = new PaymentWorkflow(store);
 
   router.post(

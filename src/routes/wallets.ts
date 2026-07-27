@@ -6,6 +6,7 @@ import {
 } from "h3";
 import type { MockStore, Wallet } from "../state/mock-store.js";
 import { totalOf } from "../state/dcw.js";
+import { track } from "../http/route-registry.js";
 
 function toWalletResponse(wallet: Wallet) {
   return {
@@ -30,7 +31,7 @@ function toWalletResponse(wallet: Wallet) {
 }
 
 export function createWalletsRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
 
   // GET /dlt/:ncb/api/octopus/ams/wallets — Retrieve Dedicated Cash Wallet list
   // Official AMS query. Replaces the former mock-only `GET /admin/wallets`.

@@ -17,6 +17,20 @@
 This document is an **audit only** — it reports what exists today and does not
 change behaviour. Gaps are listed, not fixed.
 
+## Served OpenAPI (`GET /openapi.json`) — derived from the official spec (issue #34)
+
+The mock no longer hand-writes its OpenAPI. `GET /openapi.json` is generated at
+runtime from the vendored **official** ECB Pontes EII spec (full request /
+response / error schemas), annotated against the routes the mock actually
+declares:
+
+- implemented operations keep the official schemas and get `x-mock-implemented: true`;
+- unimplemented operations are tagged **`NotImplemented`** with `x-mock-implemented: false` (kept visible, not removed);
+- every operation gains a default error response referencing the official `ErrorResponse`;
+- mock-only helpers (CSR enrolment, connectivity checks, `/admin/**`) are appended under `Mock ·` tags.
+
+The implemented-set comes from a **route registry** ([`src/http/route-registry.ts`](../src/http/route-registry.ts)) populated as routes are declared (via `track()`), matched param-name-agnostically (`:id` ↔ `{instructionID}`), so it cannot drift from the live routes. The builder is [`src/ui/openapi.ts`](../src/ui/openapi.ts) (`buildServedSpec`). The pristine official spec stays at `/openapi/official.json`.
+
 ## Legend
 
 **Status**
