@@ -1,4 +1,5 @@
 import { createRouter, defineEventHandler } from "h3";
+import { track } from "../http/route-registry.js";
 import type { MockStore, BusinessWindow } from "../state/mock-store.js";
 
 /** Map internal window state name to a human-readable window name per Pontes spec */
@@ -24,7 +25,7 @@ function nextWindowName(bw: BusinessWindow): string {
 }
 
 export function createBusinessWindowRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
 
   // GET /dlt/:ncb/api/bridge/current-business-window
   // Response schema: globalregistry.GetCurrentBusinessWindowBridge { windowName, startTime, endTime }

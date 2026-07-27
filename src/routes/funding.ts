@@ -11,6 +11,7 @@ import type { MockStore } from "../state/mock-store.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { FundingWorkflow, DefundingWorkflow } from "../workflows/funding.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
+import { track } from "../http/route-registry.js";
 
 /** Convert a workflow rejection into the h3 createError shape used by this router. */
 function rejectAsError(e: unknown): never {
@@ -46,7 +47,7 @@ function ensureWallet(store: MockStore, alias: string, body: any): void {
 }
 
 export function createFundingRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
   const funding = new FundingWorkflow(store);
   const defunding = new DefundingWorkflow(store);
 

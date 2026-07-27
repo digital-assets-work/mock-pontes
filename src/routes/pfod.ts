@@ -6,6 +6,7 @@ import {
 } from "h3";
 import type { H3Event } from "h3";
 import type { MockStore, Draft } from "../state/mock-store.js";
+import { track } from "../http/route-registry.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { PfodWorkflow } from "../workflows/pfod.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
@@ -36,7 +37,7 @@ function expired(leg: Draft, now: number): boolean {
  * unmatched leg past its window is lazily marked `EXPIRED`.
  */
 export function createPfodRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
   const workflow = new PfodWorkflow(store);
 
   function reject(event: H3Event, e: unknown): { businessErrors: unknown } {

@@ -14,6 +14,7 @@ import { buildJwks, buildOpenIdConfiguration } from "./oidc.js";
 import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
 import { isStrictMode, validateClientIdForProfile } from "./profile-enforcement.js";
+import { track } from "../http/route-registry.js";
 import {
   adminTokenConfigured,
   enforceAdminToken,
@@ -44,7 +45,7 @@ function derCertificateToPem(raw: Buffer): string {
 }
 
 export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
-  const router = createRouter();
+  const router = track(createRouter());
 
   router.post(
     "/iam/realms/:ncb/protocol/openid-connect/token",

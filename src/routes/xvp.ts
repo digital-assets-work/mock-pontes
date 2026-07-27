@@ -7,6 +7,7 @@ import {
 } from "h3";
 import type { H3Event } from "h3";
 import type { MockStore } from "../state/mock-store.js";
+import { track } from "../http/route-registry.js";
 import { XvpWorkflow, type XvpTransactionType } from "../workflows/xvp.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
@@ -26,7 +27,7 @@ function ensureWallet(store: MockStore, alias: string, ownerEntityID?: string): 
  *   GET  /igw/{ncb}/v1/xvps/{id}/payment            → payment status
  */
 export function createXvpRouter(store: MockStore) {
-  const router = createRouter();
+  const router = track(createRouter());
   const workflow = new XvpWorkflow(store);
 
   function reject(event: H3Event, e: unknown): { businessErrors: unknown } {
