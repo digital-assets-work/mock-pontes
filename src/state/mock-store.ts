@@ -99,6 +99,13 @@ export interface MockStore {
   addDraft(draft: Draft): void;
   updateDraft(id: string, update: Partial<Draft>): void;
 
+  /**
+   * Mint a deterministic, monotonic id `${prefix}${yyMMdd}${seq:06}` using a
+   * per-(prefix, day) counter (replaces Math.random minting). Collision-safe
+   * and persisted with the rest of the state.
+   */
+  nextId(prefix: string): string;
+
   // Business Window
   getBusinessWindow(): BusinessWindow;
   setBusinessWindow(bw: Partial<BusinessWindow>): void;

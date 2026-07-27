@@ -173,13 +173,19 @@ Authorises a party to operate a DCW on behalf of the owner.
 
 A wallet-to-wallet cash-token transfer/payment (2-step).
 
-- Key fields: `instructionID`/`instructionLTID`, `amountTransferred`, `currency`
+- Key fields: `id` (the draft/transaction identifier, matching the official
+  `*.Response` schemas), `amountTransferred`, `currency`
   (`EUR`), `creditedCashWalletAlias`, `debitedCashWalletAlias`,
   `creditedCashWalletManagerID`, `debitedCashWalletManagerID`, `type`,
   `cbdcRequestType`, `instructingPartyID`, `status`, and the non-official
   `supplementaryData` ("reason of payment").
 - Cardinality: debits **1** DCW, credits **1** DCW; produces **1** Settlement.
 - Mock: `POST .../rvs/transactions-requests` (draft) + `PUT .../transactions-drafts/{id}/approve|cancel`.
+- **Id sourcing** (issue #32): a client-supplied instruction id is honoured where
+  the official request schema carries one (RVS transfer `instructionID`,
+  direct-RTGS `id`); otherwise the mock mints a deterministic **daily-sequence**
+  id `{PREFIX}{yyMMdd}{seq:06}` (`TR`/`FRQ`/`DRQ`/`DRTGS`) — monotonic and
+  collision-safe (no `Math.random`). A duplicate client id → `409 HL-GER-004`.
 
 ### 2.9 Settlement 🟢 (read) / octopus.Settlement
 

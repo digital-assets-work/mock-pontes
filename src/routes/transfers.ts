@@ -9,6 +9,7 @@ import type { H3Event } from "h3";
 import type { MockStore, Draft } from "../state/mock-store.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import type { DcwCaller } from "../state/dcw.js";
+import { resolveDraftId } from "../state/draft-id.js";
 import { TransferWorkflow } from "../workflows/transfer.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
@@ -38,7 +39,7 @@ function sendRejection(event: H3Event, e: unknown): { businessErrors: unknown } 
 
 function transferView(d: Draft, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    instructionID: d.id,
+    id: d.id,
     status: d.status,
     type: "TRANSFER",
     amountTransferred: d.amount,
@@ -58,8 +59,15 @@ export function createTransfersRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/rvs/transactions-requests",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
-      const id = `TR${now.slice(2, 10).replace(/-/g, "")}${String(Math.floor(Math.random() * 999999)).padStart(6, "0")}`;
+
+      // Honour a client-supplied instruction id (official OperationRequest
+      // `instructionID`); mint a daily-sequence id when absent. Duplicate → 409.
+      let id: string;
+      try {
+        id = resolveDraftId(store, "TR", body.instructionID);
+      } catch (e) {
+        return sendRejection(event, e);
+      }
 
       // Auto-create only the CREDIT-side wallet (issue #23). The debit-side
       // wallet must already exist; the workflow raises a condition error if not.
@@ -91,7 +99,7 @@ export function createTransfersRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/ims/transactions",
     defineEventHandler(() => {
       return store.getDrafts().map((d) => ({
-        instructionLTID: d.id,
+        id: d.id,
         type: d.type,
         etatsUX: d.status,
         amountTransferred: d.amount,

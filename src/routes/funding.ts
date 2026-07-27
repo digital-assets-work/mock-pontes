@@ -62,9 +62,7 @@ export function createFundingRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/tms/funding-requests",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
-      const seq = String(Math.floor(Math.random() * 999999)).padStart(6, "0");
-      const id = `FRQ${now.slice(2, 10).replace(/-/g, "")}${seq}`;
+      const id = store.nextId("FRQ");
 
       // Auto-create credited wallet if it doesn't exist (mock convenience)
       ensureWallet(store, body.creditedCashWalletAlias, body);
@@ -81,7 +79,7 @@ export function createFundingRouter(store: MockStore) {
 
       setResponseStatus(event, 201);
       return {
-        fundingRequestID: draft.id,
+        id: draft.id,
         techFundRequestID: body.techFundRequestID,
         status: draft.status,
         type: "FUNDING",
@@ -110,11 +108,11 @@ export function createFundingRouter(store: MockStore) {
       try {
         if (status === "approve" || status === "approved") {
           funding.approve(id, { approverUserUUID: approverUUID(event) });
-          return { fundingRequestID: id, status: "SETTLED" };
+          return { id, status: "SETTLED" };
         }
         if (status === "cancel" || status === "canceled" || status === "cancelled") {
           funding.cancel(id);
-          return { fundingRequestID: id, status: "CANCELED" };
+          return { id, status: "CANCELED" };
         }
         throw createError({
           statusCode: 400,
@@ -131,9 +129,7 @@ export function createFundingRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/tms/defunding-requests",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
-      const seq = String(Math.floor(Math.random() * 999999)).padStart(6, "0");
-      const id = `DRQ${now.slice(2, 10).replace(/-/g, "")}${seq}`;
+      const id = store.nextId("DRQ");
 
       // Defunding debits the source (debit side) — per issue #23 it is NOT
       // auto-created; the workflow raises a condition error if it doesn't exist.
@@ -150,7 +146,7 @@ export function createFundingRouter(store: MockStore) {
 
       setResponseStatus(event, 201);
       return {
-        defundingRequestID: draft.id,
+        id: draft.id,
         status: draft.status,
         type: "DEFUNDING",
         amount: draft.amount,
@@ -177,11 +173,11 @@ export function createFundingRouter(store: MockStore) {
             caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
             approverUserUUID: auth?.userUUID,
           });
-          return { defundingRequestID: id, status: "SETTLED" };
+          return { id, status: "SETTLED" };
         }
         if (status === "cancel" || status === "canceled" || status === "cancelled") {
           defunding.cancel(id);
-          return { defundingRequestID: id, status: "CANCELED" };
+          return { id, status: "CANCELED" };
         }
         throw createError({
           statusCode: 400,
@@ -204,9 +200,8 @@ export function createFundingRouter(store: MockStore) {
         data: { businessErrors: [{ errorDescription: `Request ${id} not found` }] },
       });
     }
-    const isFunding = draft.type === "FUNDING";
     return {
-      [isFunding ? "fundingRequestID" : "defundingRequestID"]: draft.id,
+      id: draft.id,
       status: draft.status,
       type: draft.type,
       amount: draft.amount,
