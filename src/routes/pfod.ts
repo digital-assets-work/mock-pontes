@@ -126,7 +126,7 @@ export function createPfodRouter(store: MockStore) {
       // The seller cash wallet is the DEBIT side of the matched settlement — per
       // issue #23 it is NOT auto-created; the match raises a condition error if
       // it does not exist.
-      storeLeg(deliverId(tradeID), tradeID, amount, currency, sellerCashTokenWalletRef, "", body.initiatorUserUUID);
+      storeLeg(deliverId(tradeID), tradeID, amount, currency, sellerCashTokenWalletRef, "", (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);
       return tryMatch(event, tradeID);
     }),
@@ -144,7 +144,7 @@ export function createPfodRouter(store: MockStore) {
       }
       const buyerEntity = body.buyerID || (event.context.auth as AuthContext | undefined)?.entityBIC;
       ensureWallet(store, buyerCashTokenWalletRef, body.buyerCAMBIC || "UNKNOWN", buyerEntity);
-      storeLeg(receiveId(tradeID), tradeID, amount, currency, "", buyerCashTokenWalletRef, body.initiatorUserUUID);
+      storeLeg(receiveId(tradeID), tradeID, amount, currency, "", buyerCashTokenWalletRef, (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);
       return tryMatch(event, tradeID);
     }),

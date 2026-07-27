@@ -71,7 +71,8 @@ export function createTransfersRouter(store: MockStore) {
         currency: "EUR",
         creditedWalletAlias: body.creditedCashWalletAlias || "",
         debitedWalletAlias: body.debitedCashWalletAlias || "",
-        initiatorUserUUID: body.initiatorUserUUID,
+        // Initiator is the authenticated caller (four-eyes), never the body (#28).
+        initiatorUserUUID: (event.context.auth as AuthContext | undefined)?.userUUID,
         supplementaryData: body.supplementaryData,
       });
 

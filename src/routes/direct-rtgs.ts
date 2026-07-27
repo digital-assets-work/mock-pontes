@@ -55,7 +55,7 @@ export function createDirectRtgsRouter(store: MockStore) {
   const router = createRouter();
   const workflow = new DirectRtgsWorkflow(store);
 
-  function buildInit(body: any, id: string) {
+  function buildInit(body: any, id: string, initiatorUserUUID?: string) {
     // Auto-create only the CREDIT-side wallet (issue #23); the debit-side payer
     // must already exist or the workflow raises a condition error.
     ensureWallet(store, body.creditedCashWalletAlias, body.creditedCashWalletManagerID || "UNKNOWN");
@@ -65,7 +65,8 @@ export function createDirectRtgsRouter(store: MockStore) {
       currency: body.currency || "EUR",
       creditedWalletAlias: body.creditedCashWalletAlias || "",
       debitedWalletAlias: body.debitedCashWalletAlias || "",
-      initiatorUserUUID: body.initiatorUserUUID,
+      // Initiator is the authenticated caller (four-eyes), never the body (#28).
+      initiatorUserUUID,
     };
   }
 
@@ -76,7 +77,7 @@ export function createDirectRtgsRouter(store: MockStore) {
       const body = await readBody(event);
       const now = new Date().toISOString();
       const id = `DRTGS${now.slice(2, 10).replace(/-/g, "")}${String(Math.floor(Math.random() * 999999)).padStart(6, "0")}`;
-      const draft = workflow.create(buildInit(body, id));
+      const draft = workflow.create(buildInit(body, id, (event.context.auth as AuthContext | undefined)?.userUUID));
       setResponseStatus(event, 201);
       return rtgsView(draft, { createdAt: draft.createdAt });
     }),
@@ -136,7 +137,7 @@ export function createDirectRtgsRouter(store: MockStore) {
       const body = await readBody(event);
       const id = body.id || body.paymentID || randomUUID();
       try {
-        workflow.execute(buildInit(body, id), { caller: callerOf(event) });
+        workflow.execute(buildInit(body, id, (event.context.auth as AuthContext | undefined)?.userUUID), { caller: callerOf(event) });
       } catch (e) {
         return sendRejection(event, e);
       }

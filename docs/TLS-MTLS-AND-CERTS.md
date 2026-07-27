@@ -111,6 +111,67 @@ Recent change (Phase 7) — the mock strictly validates the Pontes profile model
 
 ---
 
+## 5b. NRO signing — digest convention & signer↔mTLS binding ([`src/auth/nro-middleware.ts`](../src/auth/nro-middleware.ts))
+
+Funding, defunding, direct-RTGS and XvP write routes require an **NRO
+(Non-Repudiation of Origin)** signature: the body carries `signature` +
+`signerPEM`, verified with **ECDSA P-256 + SHA-256** against the signer's
+certificate.
+
+### Digest: single hash (`SHA256withECDSA`) — not a double hash
+
+The canonical form is **plain string concatenation** (no JSON, no separators) of
+the critical fields, in the v1.0 order:
+
+| Operation | Concatenated fields (in order) |
+|---|---|
+| Funding / Defunding | `techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID` |
+| Direct RTGS | `id + amount + payerBank + receiverBank` |
+| XvP | `"xvp"+xvpTransactionId(no dashes) + amount + buyer.bic + seller.bic` |
+
+SHA-256 is applied to that concatenated string **exactly once** and the result is
+signed with ECDSA P-256. This is the standard `SHA256withECDSA` primitive: feed
+the concatenated string *directly* to the signer, which hashes it internally.
+
+> **Do NOT double-hash.** The Service Description prose (§4.3) — "compute SHA-256
+> hash … then sign with SHA256withECDSA" — can be misread as two hashing rounds.
+> It is one. The reading is fixed by (a) the verification pseudocode §4.4 step 5
+> `verify(signature, critical_payload_fields)` which runs over the **raw** fields
+> (not a pre-hash), and (b) the reference snippet `sign.update(concatenatedString)`.
+> The mock **rejects** double-hash signatures (`HL-NRO-003`) so a client that
+> passes here also passes against the real platform.
+
+```ts
+// Producer (client)
+const data = techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID;
+const signature = createSign("SHA256").update(data).sign(privateKeyPem, "base64");
+
+// Verifier (mock)  →  createVerify("SHA256").update(data).verify(signerCertPem, signature, "base64")
+```
+
+Golden vectors and round-trip/negative tests: [`tests/nro.test.ts`](../tests/nro.test.ts).
+
+### Signer must equal the mTLS certificate — fail closed (issue #30)
+
+The NRO signer certificate (`signerPEM`) must be **the same certificate presented
+for mTLS** (raw-DER equality). The binding check **fails closed**:
+
+- No client certificate established (no mTLS peer cert **and** no trusted
+  forwarded cert) on an NRO request → **403 `HL-NRO-005`**. Previously the check
+  was silently skipped when no cert was present, letting a caller sign with an
+  arbitrary certificate.
+- Signer ≠ presented client cert → **400 `HL-NRO-004`**.
+
+When TLS/mTLS is terminated by a **trusted reverse proxy** in front of the mock,
+set `TRUST_PROXY_CLIENT_CERT=true` and forward the client certificate in the
+`x-forwarded-client-cert` (or `ssl-client-cert`) header. Raw PEM, URL-encoded PEM
+(nginx `$ssl_client_escaped_cert`) and Envoy XFCC `Cert="…"` syntax are accepted.
+
+For local development without mTLS, `PONTES_MOCK_LENIENT_MTLS=true` skips the
+binding check (default is strict/fail-closed).
+
+---
+
 ## 6. Native backend UI ([`src/ui/`](../src/ui))
 
 Served directly from the backend (no build step), unauthenticated (dev tooling):
@@ -156,4 +217,6 @@ const server = https.createServer({
 | `TLS_SAN` | Server cert SANs (`dns:`/`ip:`, `;`-separated) — composed by the chart |
 | `REDIS_URL` | Persist PKI + enrolled users across restarts/replicas |
 | `PONTES_MOCK_LENIENT_PROFILE` | `true` disables strict profile/client_id enforcement |
+| `TRUST_PROXY_CLIENT_CERT` | `true` trusts a client cert forwarded by a reverse proxy via `x-forwarded-client-cert` / `ssl-client-cert` for the NRO signer↔mTLS binding (§5b) |
+| `PONTES_MOCK_LENIENT_MTLS` | `true` skips the NRO signer↔mTLS binding check (dev without mTLS); default is strict/fail-closed |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | *(planned)* use an external (LE) server cert/key instead of self-signed |
