@@ -35,10 +35,25 @@ import { stringify as stringifyYaml } from "yaml";
 // Retrieved 2026-07-24; pristine (converted from YAML). Refresh from that URL when ECB updates the spec.
 import officialSpec from "./spec/pontes-official-v1.0.json";
 
+/** Release version — from the release build's baked git ref, falling back to the
+ *  npm package version (dev) so the UI always shows something meaningful. */
+function mockVersion(): string {
+  const ref = process.env.PUBLIC_GIT_REF_NAME;
+  if (ref && ref !== "no_ref_name") return ref.replace(/^v/, "");
+  return process.env.npm_package_version || "dev";
+}
+/** Short commit hash baked at build time, when available. */
+function mockCommit(): string | undefined {
+  const c = process.env.PUBLIC_COMMIT_HASH;
+  return c && c !== "no_commit_hash" ? c.slice(0, 7) : undefined;
+}
+
 // The specs are static, so serialize them to YAML once at module load rather
 // than on every request. `lineWidth: 0` disables line folding so long strings
 // (e.g. multi-line endpoint descriptions) round-trip byte-for-byte to the JSON.
-const openapiYaml = stringifyYaml(openapiSpec, { lineWidth: 0 });
+// `info.version` is stamped with the running release so the docs match the build.
+const servedSpec = { ...openapiSpec, info: { ...openapiSpec.info, version: mockVersion() } };
+const openapiYaml = stringifyYaml(servedSpec, { lineWidth: 0 });
 const officialYaml = stringifyYaml(officialSpec, { lineWidth: 0 });
 
 function baseUrlFor(event: Parameters<typeof getRequestURL>[0]): string {
@@ -105,7 +120,7 @@ function page(title: string, body: string): string {
 }
 
 const HOME_BODY = `
-<h1>Mock Pontes — control panel</h1>
+<h1>Mock Pontes — control panel <span class="pill ok" style="font-size:13px;vertical-align:middle">v${mockVersion()}</span></h1>
 <p class="hint">Local mock of the ECB Pontes A2A API. No authentication (dev only).</p>
 
 <div class="card">
@@ -133,6 +148,7 @@ const HOME_BODY = `
     var strict = c.runtime.strictProfile ? "<span class=\\"pill ok\\">STRICT</span>" : "<span class=\\"pill warn\\">LENIENT</span>";
     var redis = c.runtime.redis ? "<span class=\\"pill ok\\">on</span>" : "<span class=\\"pill\\">off (in-memory)</span>";
     document.getElementById("cfg").innerHTML =
+      row("Release version", "<code>"+c.version+"</code>"+(c.commit?" <span class=\"hint\">("+c.commit+")</span>":"")) +
       row("External URL", "<code>"+c.externalUrl+"</code>") +
       row("Base URL", "<code>"+c.baseUrl+"</code>") +
       row("Default NCB / ORG", "<code>"+c.ncb+"</code>") +
@@ -479,7 +495,7 @@ export function createUiRouter() {
 
   router.get(
     "/openapi.json",
-    defineEventHandler(() => openapiSpec),
+    defineEventHandler(() => servedSpec),
   );
 
   router.get(
@@ -512,6 +528,8 @@ export function createUiRouter() {
         baseUrl,
         externalUrl: process.env.PUBLIC_EXTERNAL_URL || baseUrl,
         ncb,
+        version: mockVersion(),
+        commit: mockCommit(),
         endpoints: {
           health: `${baseUrl}/dlt/${ncb}/api/octopus/health`,
           checkIp: `${baseUrl}/check/ip`,

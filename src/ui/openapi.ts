@@ -11,7 +11,7 @@ export const openapiSpec = {
   openapi: "3.0.3",
   info: {
     title: "Mock Pontes API",
-    version: "1.0.0",
+    version: "1.1.1",
     description:
       "Local mock of the ECB Pontes Pilot A2A API.\n\n" +
       "**Endpoint categories:**\n" +
@@ -29,9 +29,13 @@ export const openapiSpec = {
         "Pontes · Connectivity",
         "Pontes · IAM",
         "Pontes · Wallets",
+        "Pontes · Business Window",
         "Pontes · Transactions",
         "Pontes · Funding",
         "Pontes · Payments",
+        "Pontes · Direct RTGS",
+        "Pontes · PFoD",
+        "Pontes · XvP",
       ],
     },
     {
@@ -43,9 +47,13 @@ export const openapiSpec = {
     { name: "Pontes · Connectivity", description: "Official connectivity-test endpoints (SDD §6.3)." },
     { name: "Pontes · IAM", description: "Official OAuth2 token endpoint." },
     { name: "Pontes · Wallets", description: "Official DCW queries." },
-    { name: "Pontes · Transactions", description: "Official cash-token transaction endpoints." },
-    { name: "Pontes · Funding", description: "Official funding/defunding endpoints." },
+    { name: "Pontes · Business Window", description: "Official business-window / business-date queries." },
+    { name: "Pontes · Transactions", description: "Official cash-token transaction endpoints (2-step + queries)." },
+    { name: "Pontes · Funding", description: "Official funding/defunding endpoints (2-step, NRO-signed)." },
     { name: "Pontes · Payments", description: "Official 1-step bridge payments." },
+    { name: "Pontes · Direct RTGS", description: "Official direct-RTGS payments (defund+fund composite): 2-step and 1-step." },
+    { name: "Pontes · PFoD", description: "Official Payment-Free-of-Delivery matched legs (deliver + receive)." },
+    { name: "Pontes · XvP", description: "Official XvP hash-link (hashed time-lock) on the IGW surface." },
     {
       name: "Mock · Enrollment",
       description:
@@ -224,6 +232,79 @@ export const openapiSpec = {
         responses: { "200": { description: "Funding draft" } },
       },
     },
+    // ---------------- Pontes · Business Window ----------------
+    "/dlt/{ncb}/api/bridge/current-business-window": {
+      get: { tags: ["Pontes · Business Window"], summary: "Current business window (bridge)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], responses: { "200": { description: "Business window" } } },
+    },
+    "/dlt/{ncb}/api/octopus/grs/current-business-window": {
+      get: { tags: ["Pontes · Business Window"], summary: "Current business window (GRS)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], responses: { "200": { description: "Business window" } } },
+    },
+    "/dlt/{ncb}/api/octopus/grs/businessdate": {
+      get: { tags: ["Pontes · Business Window"], summary: "Current business date", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], responses: { "200": { description: "Business date" } } },
+    },
+    // ---------------- Pontes · Transactions (queries + lifecycle) ----------------
+    "/dlt/{ncb}/api/octopus/ims/transactions": {
+      get: { tags: ["Pontes · Transactions"], summary: "Query in-flight cash-token transactions (drafts)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], responses: { "200": { description: "Transactions / drafts list" } } },
+    },
+    "/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{id}": {
+      get: { tags: ["Pontes · Transactions"], summary: "Read a transfer draft by id", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }], responses: { "200": { description: "Draft" }, "404": { description: "Not found" } } },
+    },
+    "/dlt/{ncb}/api/octopus/rvs/transactions-drafts/{id}/{status}": {
+      put: { tags: ["Pontes · Transactions"], summary: "Approve or cancel a transfer draft (4-eyes; availability checked at approve)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }, { $ref: "#/components/parameters/status" }], responses: { "200": { description: "Transitioned" }, "403": { description: "Four-eyes / no debit right" }, "404": { description: "Unknown draft" }, "409": { description: "Wrong state" }, "422": { description: "Insufficient funds" } } },
+    },
+    // ---------------- Pontes · Funding (defunding + lifecycle + reads) ----------------
+    "/dlt/{ncb}/api/octopus/tms/funding-requests-drafts/{id}/{status}": {
+      put: { tags: ["Pontes · Funding"], summary: "Approve or cancel a funding draft (4-eyes)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }, { $ref: "#/components/parameters/status" }], responses: { "200": { description: "Transitioned" }, "403": { description: "Four-eyes" }, "404": { description: "Unknown draft" }, "409": { description: "Wrong state" } } },
+    },
+    "/dlt/{ncb}/api/octopus/tms/defunding-requests": {
+      post: { tags: ["Pontes · Funding"], summary: "Create a defunding draft (2-step, NRO-signed)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], requestBody: { content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": { description: "Defunding draft" } } },
+    },
+    "/dlt/{ncb}/api/octopus/tms/defunding-requests-drafts/{id}/{status}": {
+      put: { tags: ["Pontes · Funding"], summary: "Approve or cancel a defunding draft (4-eyes; availability checked at approve)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }, { $ref: "#/components/parameters/status" }], responses: { "200": { description: "Transitioned" }, "403": { description: "Four-eyes / no debit right" }, "404": { description: "Unknown draft" }, "409": { description: "Wrong state" }, "422": { description: "Insufficient funds" } } },
+    },
+    "/dlt/{ncb}/api/octopus/tms/funding-defunding-requests-drafts/{id}": {
+      get: { tags: ["Pontes · Funding"], summary: "Read a funding or defunding draft by id", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }], responses: { "200": { description: "Request" }, "404": { description: "Not found" } } },
+    },
+    "/dlt/{ncb}/api/octopus/tms/funding-defunding-requests/{id}": {
+      get: { tags: ["Pontes · Funding"], summary: "Read a funding or defunding request by id", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }], responses: { "200": { description: "Request" }, "404": { description: "Not found" } } },
+    },
+    // ---------------- Pontes · Direct RTGS ----------------
+    "/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments": {
+      post: { tags: ["Pontes · Direct RTGS"], summary: "Create a direct-RTGS payment draft (2-step, NRO-signed) — defund payer + fund receiver", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], requestBody: { content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": { description: "Draft" } } },
+    },
+    "/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}/{status}": {
+      put: { tags: ["Pontes · Direct RTGS"], summary: "Approve or cancel a direct-RTGS draft (4-eyes; availability at approve)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }, { $ref: "#/components/parameters/status" }], responses: { "200": { description: "Transitioned" }, "403": { description: "Four-eyes / no debit right" }, "404": { description: "Unknown draft" }, "409": { description: "Wrong state" }, "422": { description: "Insufficient funds" } } },
+    },
+    "/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}": {
+      get: { tags: ["Pontes · Direct RTGS"], summary: "Read a direct-RTGS draft by id", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }], responses: { "200": { description: "Draft" }, "404": { description: "Not found" } } },
+    },
+    "/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments/{id}": {
+      get: { tags: ["Pontes · Direct RTGS"], summary: "Read a direct-RTGS payment by id", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/draftId" }], responses: { "200": { description: "Payment" }, "404": { description: "Not found" } } },
+    },
+    "/dlt/{ncb}/api/bridge/direct-rtgs/payments": {
+      post: { tags: ["Pontes · Direct RTGS"], summary: "1-step direct-RTGS payment (EXTERNAL_USER, NRO-signed)", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], requestBody: { content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": { description: "Settled (plain-text confirmation)" }, "422": { description: "Insufficient funds" } } },
+    },
+    // ---------------- Pontes · PFoD ----------------
+    "/dlt/{ncb}/api/bridge/initpfoddeli": {
+      post: { tags: ["Pontes · PFoD"], summary: "PFoD deliver leg (seller). Matched with the receive leg on tradeID", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["tradeID", "amount", "currency", "sellerCashTokenWalletRef"], properties: { tradeID: { type: "string" }, amount: { type: "string", example: "100.00" }, currency: { type: "string", example: "EUR" }, sellerCashTokenWalletRef: { type: "string" }, sellerID: { type: "string" }, sellerCAMBIC: { type: "string" }, buyerID: { type: "string" } } } } } }, responses: { "201": { description: "Leg stored (PENDING_MATCH) or matched (SETTLED)" }, "400": { description: "Missing fields" }, "410": { description: "Expired" }, "422": { description: "Inconsistent legs / insufficient funds" } } },
+    },
+    "/dlt/{ncb}/api/bridge/initpfodrece": {
+      post: { tags: ["Pontes · PFoD"], summary: "PFoD receive leg (buyer). Matched with the deliver leg on tradeID", security: [{ bearerAuth: [] }], parameters: [{ $ref: "#/components/parameters/ncb" }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["tradeID", "amount", "currency", "buyerCashTokenWalletRef"], properties: { tradeID: { type: "string" }, amount: { type: "string", example: "100.00" }, currency: { type: "string", example: "EUR" }, buyerCashTokenWalletRef: { type: "string" }, buyerID: { type: "string" }, buyerCAMBIC: { type: "string" }, sellerCAMBIC: { type: "string" } } } } } }, responses: { "201": { description: "Leg stored (PENDING_MATCH) or matched (SETTLED)" }, "400": { description: "Missing fields" }, "410": { description: "Expired" }, "422": { description: "Inconsistent legs / insufficient funds" } } },
+    },
+    // ---------------- Pontes · XvP (IGW, hash-link) ----------------
+    "/igw/{ncb}/v1/xvps": {
+      post: { tags: ["Pontes · XvP"], summary: "XvP init (cash-token). Locks the seller's funds, returns execution/cancellation hashes + timeout", parameters: [{ $ref: "#/components/parameters/ncb" }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["xvpTransactionId", "amount", "currency"], properties: { xvpTransactionId: { type: "string" }, type: { type: "string", enum: ["DVP", "PVP"] }, amount: { type: "string", example: "10000.50" }, currency: { type: "string", example: "EUR" }, seller: { type: "object", properties: { bic: { type: "string" }, cashWalletAlias: { type: "string" } } }, buyer: { type: "object", properties: { bic: { type: "string" }, cashWalletAlias: { type: "string" } } } } } } } }, responses: { "201": { description: "XvPInitResponse (hashes, timeout, keys)" }, "403": { description: "No debit right" }, "422": { description: "Insufficient funds" } } },
+    },
+    "/igw/{ncb}/v1/direct-rtgs/xvps": {
+      post: { tags: ["Pontes · XvP"], summary: "XvP init (direct-RTGS variant)", parameters: [{ $ref: "#/components/parameters/ncb" }], requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": { description: "XvPInitResponse" } } },
+    },
+    "/igw/{ncb}/v1/xvps/{xvpTransactionId}": {
+      get: { tags: ["Pontes · XvP"], summary: "XvP status", parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/xvpTransactionId" }], responses: { "200": { description: "XvP status" }, "404": { description: "Not found" } } },
+    },
+    "/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment": {
+      post: { tags: ["Pontes · XvP"], summary: "XvP payment — reveal a preimage to EXECUTE (settle + reveal key) or CANCEL", parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/xvpTransactionId" }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["key"], properties: { key: { type: "string", description: "Preimage that hashes to the execution or cancellation hash" } } } } } }, responses: { "200": { description: "SETTLED (executionKey revealed) or CANCELLED" }, "400": { description: "Invalid preimage" }, "409": { description: "Already terminal" }, "410": { description: "Timed out" } } },
+      get: { tags: ["Pontes · XvP"], summary: "XvP payment status", parameters: [{ $ref: "#/components/parameters/ncb" }, { $ref: "#/components/parameters/xvpTransactionId" }], responses: { "200": { description: "PaymentStatus" }, "404": { description: "Not found" } } },
+    },
     // ---------------- Mock · Enrollment ----------------
     "/iam/realms/{ncb}/protocol/openid-connect/csr": {
       post: {
@@ -315,6 +396,27 @@ export const openapiSpec = {
         required: true,
         schema: { type: "string", example: "WFREURBSUIFRPPXXX-01" },
         description: "Wallet alias",
+      },
+      draftId: {
+        name: "id",
+        in: "path",
+        required: true,
+        schema: { type: "string", example: "TR260727123456" },
+        description: "Draft / request id",
+      },
+      status: {
+        name: "status",
+        in: "path",
+        required: true,
+        schema: { type: "string", enum: ["approve", "cancel"] },
+        description: "Target transition (also accepts the uppercase APPROVED/CANCELED target states).",
+      },
+      xvpTransactionId: {
+        name: "xvpTransactionId",
+        in: "path",
+        required: true,
+        schema: { type: "string", example: "517ae232-29e7-4efb-8743-0177bbe6d576" },
+        description: "XvP transaction id",
       },
     },
     schemas: {
