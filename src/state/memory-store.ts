@@ -26,8 +26,10 @@ const DEFAULT_BUSINESS_WINDOW: BusinessWindow = {
   closeTime: "18:00",
 };
 
-/** Redis key for the persisted wallet set (no expiry — wallets must not drop). */
+/** Redis keys for persisted state (no expiry — mock state must not drop). */
 const WALLETS_KEY = "wallets";
+const DRAFTS_KEY = "drafts";
+const TRANSACTIONS_KEY = "transactions";
 const PERSIST_TTL_SEC = 0; // 0 = no expiry
 
 export class MemoryStore implements MockStore {
@@ -42,12 +44,20 @@ export class MemoryStore implements MockStore {
    */
   constructor(private readonly cache?: CacheInterface) {}
 
-  /** Load persisted wallet state (call once at startup). */
+  /** Load persisted state (call once at startup). */
   async hydrate(): Promise<void> {
     if (!this.cache) return;
-    const stored = await this.cache.get<Wallet[]>(WALLETS_KEY);
-    if (Array.isArray(stored)) {
-      this.wallets = new Map(stored.map((w) => [w.alias, w]));
+    const wallets = await this.cache.get<Wallet[]>(WALLETS_KEY);
+    if (Array.isArray(wallets)) {
+      this.wallets = new Map(wallets.map((w) => [w.alias, w]));
+    }
+    const drafts = await this.cache.get<Draft[]>(DRAFTS_KEY);
+    if (Array.isArray(drafts)) {
+      this.drafts = new Map(drafts.map((d) => [d.id, d]));
+    }
+    const transactions = await this.cache.get<Transaction[]>(TRANSACTIONS_KEY);
+    if (Array.isArray(transactions)) {
+      this.transactions = transactions;
     }
   }
 
@@ -55,6 +65,16 @@ export class MemoryStore implements MockStore {
     if (!this.cache) return;
     // Fire-and-forget write-through; the in-memory map is the sync source of truth.
     void this.cache.put(WALLETS_KEY, [...this.wallets.values()], PERSIST_TTL_SEC);
+  }
+
+  private persistDrafts(): void {
+    if (!this.cache) return;
+    void this.cache.put(DRAFTS_KEY, [...this.drafts.values()], PERSIST_TTL_SEC);
+  }
+
+  private persistTransactions(): void {
+    if (!this.cache) return;
+    void this.cache.put(TRANSACTIONS_KEY, [...this.transactions], PERSIST_TTL_SEC);
   }
 
   // --- Wallets ---
@@ -145,6 +165,7 @@ export class MemoryStore implements MockStore {
 
   addTransaction(tx: Transaction): void {
     this.transactions.push(tx);
+    this.persistTransactions();
   }
 
   // --- Drafts ---
@@ -159,12 +180,14 @@ export class MemoryStore implements MockStore {
 
   addDraft(draft: Draft): void {
     this.drafts.set(draft.id, draft);
+    this.persistDrafts();
   }
 
   updateDraft(id: string, update: Partial<Draft>): void {
     const existing = this.drafts.get(id);
     if (existing) {
       this.drafts.set(id, { ...existing, ...update, updatedAt: new Date().toISOString() });
+      this.persistDrafts();
     }
   }
 
@@ -186,5 +209,7 @@ export class MemoryStore implements MockStore {
     this.drafts.clear();
     this.businessWindow = { ...DEFAULT_BUSINESS_WINDOW };
     this.persistWallets();
+    this.persistDrafts();
+    this.persistTransactions();
   }
 }

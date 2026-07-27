@@ -248,6 +248,17 @@ official funding/defunding/transaction/wallet endpoints instead.
   expose the available/locked/holdings model. State **persists to Redis** when
   `REDIS_URL` is set. *(Money-movement handlers are migrated onto these ops in the
   workflow issues; see the tracking epic.)*
+- **Generic workflow engine.** Every settlement operation (2-step transfer,
+  funding, defunding, 1-step bridge payment — and, later, XvP) runs on a shared
+  `Workflow` base (`src/workflows/`) with one state machine
+  (`INITIALIZED → PENDING_APPROVAL → SETTLED | CANCELED`) and two extension
+  points: `conditions(phase)` (validate/authorise a transition) and `apply()`
+  (the DCW debit/credit effect at settlement). Two-step workflows persist a
+  `PENDING_APPROVAL` record and settle on approval; one-step workflows settle in
+  a single call. Consistent with the availability policy, **two-step workflows do
+  not reserve funds** — availability is only ever checked at the approval step,
+  and only XvP locks funds up-front. Workflow records (drafts) and settled
+  transactions **persist to Redis** when `REDIS_URL` is set.
 - **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
   wallet (via the DCW create primitive: zero balances, same-entity debit rights,
   no PoA/whitelist) instead of requiring the official AMS wallet-creation flow.

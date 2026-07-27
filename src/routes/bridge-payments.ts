@@ -6,6 +6,7 @@ import {
 } from "h3";
 import { randomUUID } from "node:crypto";
 import type { MockStore } from "../state/mock-store.js";
+import { PaymentWorkflow } from "../workflows/payment.js";
 
 function ensureWallet(store: MockStore, alias: string, managerNCB: string): void {
   if (!alias || store.getWallet(alias)) return;
@@ -25,12 +26,12 @@ function ensureWallet(store: MockStore, alias: string, managerNCB: string): void
  */
 export function createBridgePaymentsRouter(store: MockStore) {
   const router = createRouter();
+  const workflow = new PaymentWorkflow(store);
 
   router.post(
     "/dlt/:ncb/api/bridge/payments",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
 
       const {
         paymentID,
@@ -66,33 +67,13 @@ export function createBridgePaymentsRouter(store: MockStore) {
       ensureWallet(store, debitedCashWalletAlias, debitedCashWalletManagerID || "UNKNOWN");
       ensureWallet(store, creditedCashWalletAlias, creditedCashWalletManagerID || "UNKNOWN");
 
-      // Execute payment immediately (1-step)
-      const debitedWallet = store.getWallet(debitedCashWalletAlias);
-      const creditedWallet = store.getWallet(creditedCashWalletAlias);
-      const amountNum = parseFloat(amount);
-
-      if (debitedWallet) {
-        const newBalance = (parseFloat(debitedWallet.balance) - amountNum).toFixed(2);
-        store.upsertWallet({ ...debitedWallet, balance: newBalance });
-      }
-      if (creditedWallet) {
-        const newBalance = (parseFloat(creditedWallet.balance) + amountNum).toFixed(2);
-        store.upsertWallet({ ...creditedWallet, balance: newBalance });
-      }
-
-      const finalPaymentID = paymentID || randomUUID();
-
-      // Record as a settled transaction
-      store.addTransaction({
-        id: `TX-${finalPaymentID}`,
-        type: "TRANSFER",
-        status: "SETTLED",
-        amount: amount,
+      // Execute the 1-step payment via the shared workflow engine.
+      workflow.execute({
+        id: paymentID || randomUUID(),
+        amount,
         currency: currency || "EUR",
         creditedWalletAlias: creditedCashWalletAlias,
         debitedWalletAlias: debitedCashWalletAlias,
-        createdAt: now,
-        settledAt: now,
       });
 
       // The official endpoint returns HTTP 200 with a plain-text confirmation.
