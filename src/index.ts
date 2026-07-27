@@ -44,6 +44,7 @@ import { getRuntimePkiBundle, closeRuntimePkiPersistence, getTlsCertConfig } fro
 import { createNroCertCheckMiddleware } from "./auth/nro-middleware.js";
 import { createLoggingMiddleware } from "./logger/middleware.js";
 import { createMtlsConsistencyMiddleware } from "./auth/middleware.js";
+import { createNcbValidationMiddleware } from "./auth/ncb-middleware.js";
 import { createInMemoryAuthUsersRepository, createPersistedAuthUsersRepository } from "./auth/users-repository.js";
 import { RedisCache } from "./cache/index.js";
 import {
@@ -121,6 +122,12 @@ app.use(
     authUsersRepository,
   }).handler,
 );
+
+// --- NCB path-parameter validation ---
+// Validates the {ncb} segment of /dlt/** and /igw/** against the official NCB
+// enum (case-insensitive) and 404s an unknown NCB. Before JWT so a bad NCB is
+// rejected regardless of auth. Skipped when PONTES_MOCK_LENIENT_NCB=true.
+app.use(createNcbValidationMiddleware());
 
 // --- JWT auth middleware ---
 // Validates bearer tokens and populates event.context.auth so identity-aware checks

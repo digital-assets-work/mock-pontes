@@ -220,6 +220,7 @@ const server = https.createServer({
 | `TRUST_PROXY_CLIENT_CERT` | `true` trusts a client cert forwarded by a reverse proxy via `x-forwarded-client-cert` / `ssl-client-cert` for the NRO signer↔mTLS binding (§5b) |
 | `PONTES_MOCK_LENIENT_MTLS` | `true` skips the NRO signer↔mTLS binding check (dev without mTLS); default is strict/fail-closed |
 | `ADMIN_TOKEN` | When set, gates the admin surface (§9). Unset → admin/enrolment behave as before (open) |
+| `PONTES_MOCK_LENIENT_NCB` | `true` disables `{ncb}` path-parameter validation (default: strict — unknown NCB → `404`, case-insensitive) |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | *(planned)* use an external (LE) server cert/key instead of self-signed |
 
 ---
