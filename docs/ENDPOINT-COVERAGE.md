@@ -284,6 +284,13 @@ official funding/defunding/transaction/wallet endpoints instead.
   cert). Availability + debit rights are checked at approval (two-step) or
   immediately (one-step). *(Mock-defined paths; distinct from the `/igw/…`
   direct-RTGS/XvP surface, which is still not implemented.)*
+- **PFoD (matched, 2-sided).** The deliver (`POST .../bridge/initpfoddeli`,
+  seller) and receive (`POST .../bridge/initpfodrece`, buyer) legs (EXTERNAL_USER)
+  are submitted independently and persisted as `PENDING_MATCH` PFOD drafts keyed
+  by `tradeID`. When both legs are present with consistent `amount`/`currency`,
+  the matched wallet payment fires (checked debit of the seller + credit of the
+  buyer) → `SETTLED`; inconsistent legs → `422`; an unmatched leg past its window
+  (`PONTES_PFOD_MATCH_WINDOW_SEC`, default 1h) is lazily marked `EXPIRED` (`410`).
 - **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
   wallet (via the DCW create primitive: zero balances, same-entity debit rights,
   no PoA/whitelist) instead of requiring the official AMS wallet-creation flow.

@@ -11,6 +11,7 @@ import { TransferWorkflow } from "../src/workflows/transfer.js";
 import { FundingWorkflow, DefundingWorkflow } from "../src/workflows/funding.js";
 import { PaymentWorkflow } from "../src/workflows/payment.js";
 import { DirectRtgsWorkflow } from "../src/workflows/direct-rtgs.js";
+import { PfodWorkflow } from "../src/workflows/pfod.js";
 import { isWorkflowRejection, WorkflowRejection } from "../src/workflows/workflow.js";
 
 function seededStore(): MemoryStore {
@@ -346,6 +347,37 @@ describe("DirectRtgsWorkflow (composite defund + fund — issue #19)", () => {
     expect(store.getWallet("DST")?.balance).toBe("25.00");
     expect(store.getDrafts()).toHaveLength(0);
     expect(store.getTransactions()).toHaveLength(1);
+  });
+});
+
+describe("PfodWorkflow (matched settlement — issue #20)", () => {
+  const SELLER = { entityBIC: "BANKAXXXXXX" };
+
+  it("matched settlement debits the seller and credits the buyer", () => {
+    const store = seededStore();
+    const wf = new PfodWorkflow(store);
+    wf.execute(
+      { id: "PFOD-T1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" },
+      { caller: SELLER },
+    );
+    expect(store.getWallet("SRC")?.balance).toBe("60.00");
+    expect(store.getWallet("DST")?.balance).toBe("40.00");
+    expect(store.getTransactions()[0].type).toBe("PFOD");
+  });
+
+  it("matched settlement rejects with 422 when the seller is short", () => {
+    const store = seededStore();
+    const wf = new PfodWorkflow(store);
+    try {
+      wf.execute(
+        { id: "PFOD-T2", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" },
+        { caller: SELLER },
+      );
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(422);
+    }
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
   });
 });
 

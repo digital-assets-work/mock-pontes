@@ -27,6 +27,7 @@ import { createBusinessWindowRouter } from "./routes/business-window.js";
 import { createHealthRouter } from "./routes/health.js";
 import { createBridgePaymentsRouter } from "./routes/bridge-payments.js";
 import { createDirectRtgsRouter } from "./routes/direct-rtgs.js";
+import { createPfodRouter } from "./routes/pfod.js";
 
 // UI (native, no-build) served directly from the backend
 import { createUiRouter } from "./ui/router.js";
@@ -128,6 +129,7 @@ app.use(createFundingRouter(store).handler);
 app.use(createBusinessWindowRouter(store).handler);
 app.use(createBridgePaymentsRouter(store).handler);
 app.use(createDirectRtgsRouter(store).handler);
+app.use(createPfodRouter(store).handler);
 
 // Admin routes (mock-only, no official equivalent)
 app.use(createAdminBusinessWindowRouter(store).handler);

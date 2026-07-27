@@ -27,7 +27,7 @@ export interface Wallet {
 
 export interface Transaction {
   id: string;
-  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS";
+  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS" | "PFOD";
   status: "SETTLED" | "PENDING" | "FAILED";
   amount: string;
   currency: string;
@@ -41,13 +41,15 @@ export interface Transaction {
 
 export interface Draft {
   id: string;
-  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS";
+  type: "FUNDING" | "DEFUNDING" | "TRANSFER" | "DIRECT_RTGS" | "PFOD";
   status:
     | "INITIALIZED"
     | "PENDING_APPROVAL"
+    | "PENDING_MATCH"
     | "ACCEPTED"
     | "CANCELED"
     | "SETTLED"
+    | "EXPIRED"
     | "FAILED";
   amount: string;
   currency: string;
@@ -57,6 +59,8 @@ export interface Draft {
   updatedAt: string;
   initiatorUserUUID?: string;
   approverUserUUID?: string;
+  /** Optional expiry (PFoD match window / XvP timeout). */
+  expiresAt?: string;
   /** Non-standard free-text reason carried from the transfer request (mock only). */
   supplementaryData?: string;
 }
