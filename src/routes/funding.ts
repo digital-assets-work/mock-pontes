@@ -62,9 +62,7 @@ export function createFundingRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/tms/funding-requests",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
-      const seq = String(Math.floor(Math.random() * 999999)).padStart(6, "0");
-      const id = `FRQ${now.slice(2, 10).replace(/-/g, "")}${seq}`;
+      const id = store.nextId("FRQ");
 
       // Auto-create credited wallet if it doesn't exist (mock convenience)
       ensureWallet(store, body.creditedCashWalletAlias, body);
@@ -131,9 +129,7 @@ export function createFundingRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/tms/defunding-requests",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
-      const seq = String(Math.floor(Math.random() * 999999)).padStart(6, "0");
-      const id = `DRQ${now.slice(2, 10).replace(/-/g, "")}${seq}`;
+      const id = store.nextId("DRQ");
 
       // Defunding debits the source (debit side) — per issue #23 it is NOT
       // auto-created; the workflow raises a condition error if it doesn't exist.

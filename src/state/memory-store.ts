@@ -30,12 +30,15 @@ const DEFAULT_BUSINESS_WINDOW: BusinessWindow = {
 const WALLETS_KEY = "wallets";
 const DRAFTS_KEY = "drafts";
 const TRANSACTIONS_KEY = "transactions";
+const SEQUENCES_KEY = "sequences";
 const PERSIST_TTL_SEC = 0; // 0 = no expiry
 
 export class MemoryStore implements MockStore {
   private wallets: Map<string, Wallet> = new Map();
   private transactions: Transaction[] = [];
   private drafts: Map<string, Draft> = new Map();
+  /** Per-(prefix, yyMMdd) monotonic counter backing nextId(). */
+  private sequences: Map<string, number> = new Map();
   private businessWindow: BusinessWindow = { ...DEFAULT_BUSINESS_WINDOW };
 
   /**
@@ -59,6 +62,10 @@ export class MemoryStore implements MockStore {
     if (Array.isArray(transactions)) {
       this.transactions = transactions;
     }
+    const sequences = await this.cache.get<[string, number][]>(SEQUENCES_KEY);
+    if (Array.isArray(sequences)) {
+      this.sequences = new Map(sequences);
+    }
   }
 
   private persistWallets(): void {
@@ -75,6 +82,11 @@ export class MemoryStore implements MockStore {
   private persistTransactions(): void {
     if (!this.cache) return;
     void this.cache.put(TRANSACTIONS_KEY, [...this.transactions], PERSIST_TTL_SEC);
+  }
+
+  private persistSequences(): void {
+    if (!this.cache) return;
+    void this.cache.put(SEQUENCES_KEY, [...this.sequences.entries()], PERSIST_TTL_SEC);
   }
 
   // --- Wallets ---
@@ -191,6 +203,15 @@ export class MemoryStore implements MockStore {
     }
   }
 
+  nextId(prefix: string): string {
+    const day = new Date().toISOString().slice(2, 10).replace(/-/g, ""); // yyMMdd
+    const key = `${prefix}:${day}`;
+    const next = (this.sequences.get(key) ?? 0) + 1;
+    this.sequences.set(key, next);
+    this.persistSequences();
+    return `${prefix}${day}${String(next).padStart(6, "0")}`;
+  }
+
   // --- Business Window ---
 
   getBusinessWindow(): BusinessWindow {
@@ -207,9 +228,11 @@ export class MemoryStore implements MockStore {
     this.wallets.clear();
     this.transactions = [];
     this.drafts.clear();
+    this.sequences.clear();
     this.businessWindow = { ...DEFAULT_BUSINESS_WINDOW };
     this.persistWallets();
     this.persistDrafts();
     this.persistTransactions();
+    this.persistSequences();
   }
 }

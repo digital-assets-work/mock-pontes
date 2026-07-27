@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { MockStore, Draft } from "../state/mock-store.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import type { DcwCaller } from "../state/dcw.js";
+import { resolveDraftId } from "../state/draft-id.js";
 import { DirectRtgsWorkflow } from "../workflows/direct-rtgs.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
@@ -75,8 +76,14 @@ export function createDirectRtgsRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/tms/direct-rtgs/payments",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const now = new Date().toISOString();
-      const id = `DRTGS${now.slice(2, 10).replace(/-/g, "")}${String(Math.floor(Math.random() * 999999)).padStart(6, "0")}`;
+      // Honour a client-supplied id (also part of the NRO-signed payload);
+      // mint a daily-sequence id when absent. Duplicate → 409.
+      let id: string;
+      try {
+        id = resolveDraftId(store, "DRTGS", body.id);
+      } catch (e) {
+        return sendRejection(event, e);
+      }
       const draft = workflow.create(buildInit(body, id, (event.context.auth as AuthContext | undefined)?.userUUID));
       setResponseStatus(event, 201);
       return rtgsView(draft, { createdAt: draft.createdAt });
