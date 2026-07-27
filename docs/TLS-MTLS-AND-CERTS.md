@@ -219,4 +219,24 @@ const server = https.createServer({
 | `PONTES_MOCK_LENIENT_PROFILE` | `true` disables strict profile/client_id enforcement |
 | `TRUST_PROXY_CLIENT_CERT` | `true` trusts a client cert forwarded by a reverse proxy via `x-forwarded-client-cert` / `ssl-client-cert` for the NRO signer↔mTLS binding (§5b) |
 | `PONTES_MOCK_LENIENT_MTLS` | `true` skips the NRO signer↔mTLS binding check (dev without mTLS); default is strict/fail-closed |
+| `ADMIN_TOKEN` | When set, gates the admin surface (§9). Unset → admin/enrolment behave as before (open) |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | *(planned)* use an external (LE) server cert/key instead of self-signed |
+
+---
+
+## 9. Admin-token gate (issue #35)
+
+Opt-in protection for the mock's administrative surface, controlled by the
+`ADMIN_TOKEN` environment variable. The token is presented via the
+`X-Admin-Token` header (or `Authorization: Bearer <token>`).
+
+| Endpoint | `ADMIN_TOKEN` unset | `ADMIN_TOKEN` set |
+|---|---|---|
+| `GET /admin/business-window` | open | **open** (unchanged) |
+| `PUT /admin/business-window` | open | **token required** (401 otherwise) |
+| `POST /admin/reset` | open | **token required** (401 otherwise) |
+| `GET /admin/enrolled-users` (+ `/{username}/certificate`) | open | **token required** (401 otherwise) |
+| `POST /iam/realms/{ncb}/protocol/openid-connect/csr` | issues a **24-month** cert | issues a **1-hour** cert (no token needed to enrol) |
+
+Implemented in [`src/auth/admin-token.ts`](../src/auth/admin-token.ts)
+(`enforceAdminToken`) and applied in the admin routers + enrolment routes.
