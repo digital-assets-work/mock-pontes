@@ -61,10 +61,12 @@ if (redisUrl) {
   console.log(`[mock-pontes] Users persistence enabled via Redis (${redisUrl})`);
 }
 
-// List of the API patterns that need NRO signature verification. 
+// List of the API patterns that need NRO signature verification.
+// Anchored to the CREATE endpoints only: the `-drafts/{id}/{status}` approval and
+// cancel PUTs must NOT require an NRO signature (fixed for issue #17).
 const nroRoutePatterns: readonly RegExp[] = [
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/funding-requests/,
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests/,
+  /\/dlt\/[^/]+\/api\/octopus\/tms\/funding-requests(?:$|\?)/,
+  /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests(?:$|\?)/,
 ];
 
 // --- H3 App ---

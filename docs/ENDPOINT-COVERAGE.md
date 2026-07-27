@@ -235,8 +235,9 @@ official funding/defunding/transaction/wallet endpoints instead.
   RVS transactions now serve the **generic `{status}`** transition
   (`approve`/`cancel`, case-insensitive, plus the `APPROVED`/`CANCELED` target
   states) alongside a `GET .../transactions-drafts/{id}` read-by-id. TMS funding
-  keeps `/approve`+`/cancel`; TMS defunding `/approve` (+ `/cancel` added in the
-  defunding issue). Behaviour: `404` if the draft is unknown, `409` if it is not
+  also serves the **generic `{status}`** (approve|cancel) plus a
+  `GET .../tms/funding-defunding-requests(-drafts)/{id}` read; TMS defunding
+  `/approve` (+ `/cancel` added in the defunding issue). Behaviour: `404` if the draft is unknown, `409` if it is not
   in `PENDING_APPROVAL`. Two-step **approval** enforces **four-eyes** (approver
   `≠` initiator → `403`) and, for debiting workflows, checks the source **debit
   right** (`403`) and **available balance** (`422`) *at approval only*.
@@ -295,5 +296,11 @@ official funding/defunding/transaction/wallet endpoints instead.
 
 ### Gaps worth follow-up (not fixed here)
 
-- **No NRO on cancel.** `NRO` is applied to funding/defunding **create** POSTs
-  only; approve/cancel PUTs are not signature-checked.
+- **NRO is create-only (by design).** `NRO` is verified on funding/defunding
+  **create** POSTs only (signature over
+  `techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID`,
+  with `signerPEM` matched to the presented mTLS cert). The `-drafts/{id}/{status}`
+  approve/cancel PUTs are **not** signature-checked — the route patterns are now
+  anchored to the create paths so approval is no longer erroneously rejected for a
+  missing signature (fixed in the funding issue). Four-eyes (approver ≠ initiator)
+  is enforced on funding/defunding approval instead.

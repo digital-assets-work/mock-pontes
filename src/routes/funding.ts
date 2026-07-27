@@ -6,7 +6,9 @@ import {
   setResponseStatus,
   createError,
 } from "h3";
+import type { H3Event } from "h3";
 import type { MockStore } from "../state/mock-store.js";
+import type { AuthContext } from "../auth/jwt-middleware.js";
 import { FundingWorkflow, DefundingWorkflow } from "../workflows/funding.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
@@ -19,6 +21,11 @@ function rejectAsError(e: unknown): never {
     });
   }
   throw e;
+}
+
+/** UUID of the approving user (for the four-eyes check). */
+function approverUUID(event: H3Event): string | undefined {
+  return (event.context.auth as AuthContext | undefined)?.userUUID;
 }
 
 /**
@@ -90,17 +97,31 @@ export function createFundingRouter(store: MockStore) {
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/approve — Approve funding draft
+  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/:status — Transition
+  // funding draft. Generic {status} per the official spec: approve|cancel
+  // (case-insensitive, plus APPROVED/CANCELED). Approval enforces four-eyes and
+  // credits the target from the infinite issuance wallet (no availability check).
   router.put(
-    "/dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/approve",
+    "/dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/:status",
     defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
+      const status = (getRouterParam(event, "status") || "").toLowerCase();
       try {
-        funding.approve(id);
+        if (status === "approve" || status === "approved") {
+          funding.approve(id, { approverUserUUID: approverUUID(event) });
+          return { fundingRequestID: id, status: "SETTLED" };
+        }
+        if (status === "cancel" || status === "canceled" || status === "cancelled") {
+          funding.cancel(id);
+          return { fundingRequestID: id, status: "CANCELED" };
+        }
+        throw createError({
+          statusCode: 400,
+          data: { businessErrors: [{ errorDescription: `Unsupported status transition '${status}'` }] },
+        });
       } catch (e) {
         rejectAsError(e);
       }
-      return { fundingRequestID: id, status: "SETTLED" };
     }),
   );
 
@@ -144,7 +165,7 @@ export function createFundingRouter(store: MockStore) {
     defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
       try {
-        defunding.approve(id);
+        defunding.approve(id, { approverUserUUID: approverUUID(event) });
       } catch (e) {
         rejectAsError(e);
       }
@@ -152,20 +173,36 @@ export function createFundingRouter(store: MockStore) {
     }),
   );
 
-  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/cancel — Cancel funding draft
-  // Initiator-only in the real API; the mock unwinds the draft without settling.
-  router.put(
-    "/dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/cancel",
-    defineEventHandler((event) => {
-      const id = getRouterParam(event, "id")!;
-      try {
-        funding.cancel(id);
-      } catch (e) {
-        rejectAsError(e);
-      }
-      return { fundingRequestID: id, status: "CANCELED" };
-    }),
-  );
+  // GET /dlt/:ncb/api/octopus/tms/funding-defunding-requests-drafts/:id — Read a
+  // funding OR defunding draft by id. Also served without the `-drafts` suffix.
+  const readByIdHandler = defineEventHandler((event: H3Event) => {
+    const id = getRouterParam(event, "id")!;
+    const draft = store.getDraft(id);
+    if (!draft || (draft.type !== "FUNDING" && draft.type !== "DEFUNDING")) {
+      throw createError({
+        statusCode: 404,
+        data: { businessErrors: [{ errorDescription: `Request ${id} not found` }] },
+      });
+    }
+    const isFunding = draft.type === "FUNDING";
+    return {
+      [isFunding ? "fundingRequestID" : "defundingRequestID"]: draft.id,
+      status: draft.status,
+      type: draft.type,
+      amount: draft.amount,
+      currency: draft.currency,
+      creditedCashWalletAlias: draft.creditedWalletAlias,
+      debitedCashWalletAlias: draft.debitedWalletAlias,
+      initiatorUserUUID: draft.initiatorUserUUID,
+      approverUserUUID: draft.approverUserUUID,
+      createdAt: draft.createdAt,
+    };
+  });
+  router.get("/dlt/:ncb/api/octopus/tms/funding-defunding-requests-drafts/:id", readByIdHandler);
+  router.get("/dlt/:ncb/api/octopus/tms/funding-defunding-requests/:id", readByIdHandler);
+
+  // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/cancel — handled by
+  // the generic {status} route above (kept as a comment for endpoint discoverability).
 
   return router;
 }
