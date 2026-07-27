@@ -19,25 +19,28 @@ export interface TestKeyMaterial {
 }
 
 const EC_ALG: EcKeyGenParams = { name: "ECDSA", namedCurve: "P-256" };
+// See runtime-pki.ts: bridge Node's webcrypto key types to the DOM types that
+// @peculiar/x509 expects.
+const subtle = crypto.webcrypto.subtle as unknown as SubtleCrypto;
 const SIGNING_ALG: EcdsaParams = { name: "ECDSA", hash: "SHA-256" };
 
 /**
  * Generate ECDSA P-256 test keypair + self-signed X.509 certificate.
  */
 async function generateTestKeys(): Promise<TestKeyMaterial> {
-  const keys = await crypto.webcrypto.subtle.generateKey(EC_ALG, true, ["sign", "verify"]);
+  const keys = await subtle.generateKey(EC_ALG, true, ["sign", "verify"]);
 
   const cert = await x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: crypto.randomBytes(16).toString("hex"),
-    name: "CN=mock-pontes, O=MockBank, C=LU",
+    name: "CN=mock-pontes, O=MockBank, C=DEV",
     notBefore: new Date(),
     notAfter: new Date(Date.now() + 730 * 24 * 60 * 60 * 1000),
     signingAlgorithm: SIGNING_ALG,
     keys,
   });
 
-  const pkcs8 = await crypto.webcrypto.subtle.exportKey("pkcs8", keys.privateKey);
-  const spki = await crypto.webcrypto.subtle.exportKey("spki", keys.publicKey);
+  const pkcs8 = await subtle.exportKey("pkcs8", keys.privateKey);
+  const spki = await subtle.exportKey("spki", keys.publicKey);
 
   const privateKeyPem = x509.PemConverter.encode(pkcs8, "PRIVATE KEY");
   const publicKeyPem = x509.PemConverter.encode(spki, "PUBLIC KEY");
