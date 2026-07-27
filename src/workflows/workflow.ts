@@ -26,6 +26,7 @@
  */
 
 import type { MockStore, Draft } from "../state/mock-store.js";
+import type { DcwCaller } from "../state/dcw.js";
 
 export type WorkflowType = Draft["type"];
 export type WorkflowState = Draft["status"];
@@ -65,6 +66,14 @@ export interface WorkflowInit {
   supplementaryData?: string;
 }
 
+/** Per-request context threaded through a transition (identity for checks). */
+export interface WorkflowActor {
+  /** DCW debit-rights identity (entity BIC / whitelisted operator). */
+  caller?: DcwCaller;
+  /** UUID of the user performing an approval (four-eyes check). */
+  approverUserUUID?: string;
+}
+
 const VERB: Record<WorkflowPhase, string> = {
   create: "create",
   approve: "approve",
@@ -85,10 +94,10 @@ export abstract class Workflow {
   // --- extension points -----------------------------------------------------
 
   /** Validate/authorise a transition. Override to add checks; throw {@link WorkflowRejection}. */
-  protected conditions(_phase: WorkflowPhase, _record: Draft): void {}
+  protected conditions(_phase: WorkflowPhase, _record: Draft, _caller?: DcwCaller): void {}
 
   /** Apply the DCW effect at settlement (credit/debit the wallets). */
-  protected abstract apply(record: Draft): void;
+  protected abstract apply(record: Draft, caller?: DcwCaller): void;
 
   /** Transaction id recorded on settlement. Override for a custom scheme. */
   protected transactionId(record: Draft): string {
@@ -106,11 +115,22 @@ export abstract class Workflow {
   }
 
   /** `PENDING_APPROVAL` → `SETTLED`: run conditions, apply the effect, record a transaction. */
-  approve(id: string, approverUserUUID?: string): Draft {
+  approve(id: string, actor: WorkflowActor = {}): Draft {
     const record = this.loadPending(id, "approve");
-    this.conditions("approve", record);
-    this.apply(record);
-    this.store.updateDraft(id, { status: "SETTLED", approverUserUUID });
+    if (
+      actor.approverUserUUID &&
+      record.initiatorUserUUID &&
+      actor.approverUserUUID === record.initiatorUserUUID
+    ) {
+      throw new WorkflowRejection(
+        403,
+        "HL-GER-003",
+        "Approver must differ from the initiator (four-eyes control)",
+      );
+    }
+    this.conditions("approve", record, actor.caller);
+    this.apply(record, actor.caller);
+    this.store.updateDraft(id, { status: "SETTLED", approverUserUUID: actor.approverUserUUID });
     this.recordTransaction(record);
     return this.store.getDraft(id)!;
   }
@@ -124,10 +144,10 @@ export abstract class Workflow {
   }
 
   /** One-step settlement: apply the effect and record a transaction, no draft persisted. */
-  execute(init: WorkflowInit): Draft {
+  execute(init: WorkflowInit, actor: WorkflowActor = {}): Draft {
     const record = this.buildRecord(init, "SETTLED");
-    this.conditions("create", record);
-    this.apply(record);
+    this.conditions("create", record, actor.caller);
+    this.apply(record, actor.caller);
     this.recordTransaction(record);
     return record;
   }
@@ -205,5 +225,58 @@ export abstract class Workflow {
       ...w,
       balance: (parseFloat(w.balance) - parseFloat(amount)).toFixed(2),
     });
+  }
+
+  /**
+   * Checked debit via the DCW ops: enforces debit rights (blocked/validity/owner
+   * or PoA/operator) and sufficient available balance. Maps DCW errors to a
+   * {@link WorkflowRejection}.
+   */
+  protected checkedDebit(alias: string, amount: string, caller?: DcwCaller): void {
+    try {
+      this.store.debit(alias, amount, caller);
+    } catch (e) {
+      throw this.mapDcwError(e, alias);
+    }
+  }
+
+  /** Assert the source can be debited now (rights + availability) without mutating. */
+  protected assertCanDebit(alias: string, amount: string, caller?: DcwCaller): void {
+    const permitted = this.store.canDebit(alias, caller);
+    if (!permitted.ok) {
+      throw this.rejectionFor(permitted.reason ?? "NOT_AUTHORISED_TO_DEBIT", alias);
+    }
+    const w = this.store.getWallet(alias)!;
+    if (parseFloat(w.balance) < parseFloat(amount)) {
+      throw new WorkflowRejection(
+        422,
+        "HL-BAL-001",
+        `Insufficient available balance on ${alias}`,
+      );
+    }
+  }
+
+  private mapDcwError(e: unknown, alias: string): WorkflowRejection {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.startsWith("WALLET_NOT_FOUND")) {
+      return new WorkflowRejection(404, "HL-WAL-001", `Wallet ${alias} not found`);
+    }
+    if (msg.startsWith("DCW_DEBIT_DENIED")) {
+      return this.rejectionFor(msg.split(":")[1] || "NOT_AUTHORISED_TO_DEBIT", alias);
+    }
+    if (msg === "DCW_INSUFFICIENT_AVAILABLE") {
+      return new WorkflowRejection(422, "HL-BAL-001", `Insufficient available balance on ${alias}`);
+    }
+    if (msg === "DCW_NEGATIVE_AMOUNT") {
+      return new WorkflowRejection(400, "HL-VAL-002", "Amount must not be negative");
+    }
+    return new WorkflowRejection(422, "HL-GER-000", msg);
+  }
+
+  private rejectionFor(reason: string, alias: string): WorkflowRejection {
+    if (reason === "WALLET_NOT_FOUND") {
+      return new WorkflowRejection(404, "HL-WAL-001", `Wallet ${alias} not found`);
+    }
+    return new WorkflowRejection(403, "HL-AUT-001", `Debit of ${alias} not authorised (${reason})`);
   }
 }

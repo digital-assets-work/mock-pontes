@@ -259,6 +259,14 @@ official funding/defunding/transaction/wallet endpoints instead.
   not reserve funds** — availability is only ever checked at the approval step,
   and only XvP locks funds up-front. Workflow records (drafts) and settled
   transactions **persist to Redis** when `REDIS_URL` is set.
+- **One-step payment enforces funds + rights.** `POST .../bridge/payments`
+  (EXTERNAL_USER) now debits via the checked DCW op: the caller must have a
+  **debit right** on the source (owner / PoA / whitelisted operator, and the
+  wallet not blocked/out-of-validity) and it must hold **sufficient available
+  balance now**. Failures return `403` (rights) or `422` (insufficient balance);
+  missing fields still return `400`; success returns `200` + the confirmation
+  string. The source DCW is auto-created **owned by the caller's entity** so a
+  party paying from its own wallet passes the rights check.
 - **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
   wallet (via the DCW create primitive: zero balances, same-entity debit rights,
   no PoA/whitelist) instead of requiring the official AMS wallet-creation flow.

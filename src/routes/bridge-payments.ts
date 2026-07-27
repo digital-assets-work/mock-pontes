@@ -6,11 +6,14 @@ import {
 } from "h3";
 import { randomUUID } from "node:crypto";
 import type { MockStore } from "../state/mock-store.js";
+import type { AuthContext } from "../auth/jwt-middleware.js";
 import { PaymentWorkflow } from "../workflows/payment.js";
+import { isWorkflowRejection } from "../workflows/workflow.js";
 
-function ensureWallet(store: MockStore, alias: string, managerNCB: string): void {
+/** Auto-create a wallet, owned by `ownerEntityID` when known (for debit rights). */
+function ensureWallet(store: MockStore, alias: string, managerNCB: string, ownerEntityID?: string): void {
   if (!alias || store.getWallet(alias)) return;
-  store.ensureWallet(alias, { managerNCB });
+  store.ensureWallet(alias, { managerNCB, ownerEntityID, ownerBIC: ownerEntityID });
   console.log(`[mock-pontes] Auto-created wallet ${alias}`);
 }
 
@@ -63,18 +66,32 @@ export function createBridgePaymentsRouter(store: MockStore) {
         };
       }
 
-      // Auto-create wallets if needed
-      ensureWallet(store, debitedCashWalletAlias, debitedCashWalletManagerID || "UNKNOWN");
+      // Auto-create wallets if needed. The source is owned by the caller so the
+      // debit-rights check passes for a party paying from its own DCW.
+      const auth = event.context.auth as AuthContext | undefined;
+      const callerEntity = auth?.entityBIC;
+      ensureWallet(store, debitedCashWalletAlias, debitedCashWalletManagerID || "UNKNOWN", callerEntity);
       ensureWallet(store, creditedCashWalletAlias, creditedCashWalletManagerID || "UNKNOWN");
 
-      // Execute the 1-step payment via the shared workflow engine.
-      workflow.execute({
-        id: paymentID || randomUUID(),
-        amount,
-        currency: currency || "EUR",
-        creditedWalletAlias: creditedCashWalletAlias,
-        debitedWalletAlias: debitedCashWalletAlias,
-      });
+      // Execute the 1-step payment via the shared workflow engine (checked debit).
+      try {
+        workflow.execute(
+          {
+            id: paymentID || randomUUID(),
+            amount,
+            currency: currency || "EUR",
+            creditedWalletAlias: creditedCashWalletAlias,
+            debitedWalletAlias: debitedCashWalletAlias,
+          },
+          { caller: callerEntity ? { entityBIC: callerEntity } : undefined },
+        );
+      } catch (e) {
+        if (isWorkflowRejection(e)) {
+          setResponseStatus(event, e.statusCode);
+          return { businessErrors: e.businessErrors };
+        }
+        throw e;
+      }
 
       // The official endpoint returns HTTP 200 with a plain-text confirmation.
       setResponseStatus(event, 200);

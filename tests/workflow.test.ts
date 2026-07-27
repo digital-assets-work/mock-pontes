@@ -140,16 +140,57 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
   });
 });
 
-describe("PaymentWorkflow (one-step)", () => {
+describe("PaymentWorkflow (one-step, checked debit — issue #15)", () => {
+  const CALLER = { entityBIC: "BANKAXXXXXX" };
+
   it("execute settles immediately without persisting a draft", () => {
     const store = seededStore();
     const wf = new PaymentWorkflow(store);
-    wf.execute({ id: "PAY1", amount: "15.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    wf.execute(
+      { id: "PAY1", amount: "15.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" },
+      { caller: CALLER },
+    );
     expect(store.getWallet("SRC")?.balance).toBe("85.00");
     expect(store.getWallet("DST")?.balance).toBe("15.00");
     expect(store.getDrafts()).toHaveLength(0);
     expect(store.getTransactions()).toHaveLength(1);
     expect(store.getTransactions()[0].id).toBe("TX-PAY1");
+  });
+
+  it("rejects with 422 when the source lacks sufficient available balance", () => {
+    const store = seededStore();
+    const wf = new PaymentWorkflow(store);
+    try {
+      wf.execute(
+        { id: "PAY2", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" },
+        { caller: CALLER },
+      );
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(422);
+      expect(r.errorCode).toBe("HL-BAL-001");
+    }
+    // no balances moved
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
+    expect(store.getWallet("DST")?.balance).toBe("0.00");
+  });
+
+  it("rejects with 403 when the caller has no debit right on the source", () => {
+    const store = seededStore();
+    const wf = new PaymentWorkflow(store);
+    try {
+      wf.execute(
+        { id: "PAY3", amount: "10.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" },
+        { caller: { entityBIC: "OTHERBANKXX" } },
+      );
+      throw new Error("expected rejection");
+    } catch (e) {
+      const r = e as WorkflowRejection;
+      expect(r.statusCode).toBe(403);
+      expect(r.errorCode).toBe("HL-AUT-001");
+    }
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
   });
 });
 
