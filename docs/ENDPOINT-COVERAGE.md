@@ -273,6 +273,17 @@ official funding/defunding/transaction/wallet endpoints instead.
   missing fields still return `400`; success returns `200` + the confirmation
   string. The source DCW is auto-created **owned by the caller's entity** so a
   party paying from its own wallet passes the rights check.
+- **Direct RTGS payment (composite).** A direct-RTGS payment is modelled as a
+  **defund(source) + fund(target)** composite workflow — net effect: checked
+  debit of the payer + credit of the receiver. Both a **two-step** variant
+  (`POST/PUT/GET .../octopus/tms/direct-rtgs/payments(-drafts)/{id}/{status}`,
+  PILOT_READ_WRITE) and a **one-step** variant
+  (`POST .../bridge/direct-rtgs/payments`, EXTERNAL_USER, returns `200` + a
+  confirmation string) are served. Both are **NRO-signed on create** (signature
+  over `id + amount + payerBank + receiverBank`, `signerPEM` = presented mTLS
+  cert). Availability + debit rights are checked at approval (two-step) or
+  immediately (one-step). *(Mock-defined paths; distinct from the `/igw/…`
+  direct-RTGS/XvP surface, which is still not implemented.)*
 - **Auto-created wallets.** RVS/TMS/bridge handlers auto-create any referenced
   wallet (via the DCW create primitive: zero balances, same-entity debit rights,
   no PoA/whitelist) instead of requiring the official AMS wallet-creation flow.

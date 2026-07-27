@@ -26,6 +26,7 @@ import { createFundingRouter } from "./routes/funding.js";
 import { createBusinessWindowRouter } from "./routes/business-window.js";
 import { createHealthRouter } from "./routes/health.js";
 import { createBridgePaymentsRouter } from "./routes/bridge-payments.js";
+import { createDirectRtgsRouter } from "./routes/direct-rtgs.js";
 
 // UI (native, no-build) served directly from the backend
 import { createUiRouter } from "./ui/router.js";
@@ -67,6 +68,8 @@ if (redisUrl) {
 const nroRoutePatterns: readonly RegExp[] = [
   /\/dlt\/[^/]+\/api\/octopus\/tms\/funding-requests(?:$|\?)/,
   /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests(?:$|\?)/,
+  /\/dlt\/[^/]+\/api\/octopus\/tms\/direct-rtgs\/payments(?:$|\?)/,
+  /\/dlt\/[^/]+\/api\/bridge\/direct-rtgs\/payments(?:$|\?)/,
 ];
 
 // --- H3 App ---
@@ -124,6 +127,7 @@ app.use(createTransfersRouter(store).handler);
 app.use(createFundingRouter(store).handler);
 app.use(createBusinessWindowRouter(store).handler);
 app.use(createBridgePaymentsRouter(store).handler);
+app.use(createDirectRtgsRouter(store).handler);
 
 // Admin routes (mock-only, no official equivalent)
 app.use(createAdminBusinessWindowRouter(store).handler);

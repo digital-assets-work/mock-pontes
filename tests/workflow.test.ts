@@ -10,6 +10,7 @@ import { CacheMemory } from "../src/cache/in-memory.js";
 import { TransferWorkflow } from "../src/workflows/transfer.js";
 import { FundingWorkflow, DefundingWorkflow } from "../src/workflows/funding.js";
 import { PaymentWorkflow } from "../src/workflows/payment.js";
+import { DirectRtgsWorkflow } from "../src/workflows/direct-rtgs.js";
 import { isWorkflowRejection, WorkflowRejection } from "../src/workflows/workflow.js";
 
 function seededStore(): MemoryStore {
@@ -303,6 +304,48 @@ describe("PaymentWorkflow (one-step, checked debit — issue #15)", () => {
       expect(r.errorCode).toBe("HL-AUT-001");
     }
     expect(store.getWallet("SRC")?.balance).toBe("100.00");
+  });
+});
+
+describe("DirectRtgsWorkflow (composite defund + fund — issue #19)", () => {
+  const CALLER = { entityBIC: "BANKAXXXXXX" };
+
+  it("two-step: create reserves nothing; approve debits payer and credits receiver", () => {
+    const store = seededStore();
+    const wf = new DirectRtgsWorkflow(store);
+    wf.create({ id: "DRTGS1", amount: "40.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    expect(store.getWallet("SRC")?.balance).toBe("100.00"); // nothing reserved at create
+    const settled = wf.approve("DRTGS1", { caller: CALLER });
+    expect(settled.status).toBe("SETTLED");
+    expect(store.getWallet("SRC")?.balance).toBe("60.00");
+    expect(store.getWallet("DST")?.balance).toBe("40.00");
+    expect(store.getTransactions()[0].type).toBe("DIRECT_RTGS");
+  });
+
+  it("two-step: approve rejects with 422 when the payer is short at approval", () => {
+    const store = seededStore();
+    const wf = new DirectRtgsWorkflow(store);
+    wf.create({ id: "DRTGS1", amount: "500.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" });
+    try {
+      wf.approve("DRTGS1", { caller: CALLER });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(422);
+    }
+    expect(store.getWallet("SRC")?.balance).toBe("100.00");
+  });
+
+  it("one-step: execute settles immediately without a draft", () => {
+    const store = seededStore();
+    const wf = new DirectRtgsWorkflow(store);
+    wf.execute(
+      { id: "DRTGS-1S", amount: "25.00", creditedWalletAlias: "DST", debitedWalletAlias: "SRC" },
+      { caller: CALLER },
+    );
+    expect(store.getWallet("SRC")?.balance).toBe("75.00");
+    expect(store.getWallet("DST")?.balance).toBe("25.00");
+    expect(store.getDrafts()).toHaveLength(0);
+    expect(store.getTransactions()).toHaveLength(1);
   });
 });
 
