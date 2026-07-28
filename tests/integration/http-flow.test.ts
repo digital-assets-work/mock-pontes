@@ -341,6 +341,59 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(String(pay.headers["content-type"])).toMatch(/application\/json/);
     expect(pay.json).toBe("Cash Token Payment Settled Succesfully");
   });
+
+  it("creates a wallet for the caller's own entity via POST ams/wallets/one-step (#77)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WNEW-77-01", isMainWallet: false },
+    });
+    expect(res.status).toBe(201);
+    expect(res.json.walletAlias).toBe("WNEW-77-01");
+    expect(res.json.ownerEntityID).toBe("BSUIFRPPXXX");
+    const read = await request(server.port, "GET", `${BASE}/ams/wallets/WNEW-77-01`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(read.status).toBe(200);
+  });
+
+  it("rejects creating a wallet for another entity (#77)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WNEW-77-02", ownerEntityID: "SOMEOTHERBICXXX" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("409s a duplicate wallet creation (#77)", async () => {
+    await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WDUP-77" },
+    });
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WDUP-77" },
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("funding auto-creates the credited wallet owned by the caller's entity, not the body (#77)", async () => {
+    const created = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: {
+        authorization: `Bearer ${u1}`,
+        "x-forwarded-client-cert": encodeURIComponent(nro.certPem),
+      },
+      body: fundingBody({ creditedCashWalletAlias: "WAUTO-77", creditedCashWalletOwnerID: "IGNOREDBICXXX" }),
+    });
+    expect(created.status).toBe(201);
+    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${created.json.id}/approve`, {
+      headers: { authorization: `Bearer ${u2}` },
+    });
+    const w = await request(server.port, "GET", `${BASE}/ams/wallets/WAUTO-77`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(w.status).toBe(200);
+    expect(w.json.ownerEntityID).toBe("BSUIFRPPXXX"); // caller entity, not the body's owner
+  });
 });
 
 describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {
