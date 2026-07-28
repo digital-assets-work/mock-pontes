@@ -226,14 +226,19 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
       let signedCertPem: string;
       try {
         // When the admin gate is enabled, enrolment still works but issues a
-        // short-lived (1 hour) certificate (#35).
+        // short-lived (1 hour) certificate (#35). The enrolment identity is
+        // passed through so the issued cert carries the Fabric attributes
+        // (enrolment id + MSP id + CSR-supplied privilege) like the real CA (#72).
+        const effectiveEntityBIC = entityBIC || existingUser?.entityBIC;
         signedCertPem = await signCsr(
           csr,
           options.runtimePki.clientSigningCaPrivateKeyPem,
           options.runtimePki.clientSigningCaCertificatePem,
-          adminTokenConfigured()
-            ? { validityMinutes: ADMIN_ENROLMENT_CERT_MINUTES }
-            : {},
+          {
+            username,
+            entityBIC: effectiveEntityBIC,
+            ...(adminTokenConfigured() ? { validityMinutes: ADMIN_ENROLMENT_CERT_MINUTES } : {}),
+          },
         );
       } catch (err) {
         setResponseStatus(event, 500);
