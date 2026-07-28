@@ -197,6 +197,43 @@ export const mockExtras = {
         responses: { "200": { description: "Reset done" } },
       },
     },
+    "/dlt/{ncb}/api/octopus/ams/wallets/one-step": {
+      post: {
+        tags: ["Mock · Admin"],
+        summary: "MOCK: one-step Dedicated Cash Wallet creation",
+        description:
+          "Mock-only convenience (issue #77). The official `POST .../ams/wallets` creates a wallet " +
+          "*draft* that a second user must validate (four-eyes); this one-step variant creates the DCW " +
+          "immediately. Authenticated: the wallet is owned by the caller's own entity (from the JWT) — " +
+          "you may only create wallets for your own entity.",
+        parameters: [NCB_PARAM],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["walletAlias"],
+                properties: {
+                  walletAlias: { type: "string", example: "WFREURBSUIFRPPXXX-01" },
+                  currency: { type: "string", example: "EUR" },
+                  managerNCB: { type: "string", example: "BDF" },
+                  isMainWallet: { type: "boolean", example: false },
+                  validFrom: { type: "string", format: "date-time" },
+                  validTo: { type: "string", format: "date-time" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Wallet created (owned by the caller's entity)" },
+          "400": { description: "walletAlias is required" },
+          "403": { description: "No authenticated entity / foreign ownerEntityID" },
+          "409": { description: "Wallet already exists" },
+        },
+      },
+    },
   },
   components: {
     schemas: {

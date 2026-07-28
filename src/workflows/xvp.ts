@@ -156,6 +156,9 @@ export class XvpWorkflow extends Workflow {
     }
     const providedHash = sha256Hex(preimage);
     if (providedHash === rec.executionHash) {
+      // The buyer's wallet must exist before we settle the seller's lock, so we
+      // never burn the locked funds against an unknown credit wallet (issue #77).
+      this.requireCreditWallet(rec.target);
       this.store.settleLocked(rec.source, rec.amount);
       this.rawCredit(rec.target, rec.amount);
       this.store.updateDraft(rec.id, { status: "SETTLED" });
