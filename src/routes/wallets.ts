@@ -64,13 +64,14 @@ export function createWalletsRouter(store: MockStore) {
     }),
   );
 
-  // POST /dlt/:ncb/api/octopus/ams/wallets — Submit a Dedicated Cash Wallet
-  // Creation Request (official op). A caller may create a DCW **only for its own
-  // entity** (issue #77): the owner is taken from the verified JWT, so the
-  // credit side of a settlement has a wallet to land in when it wasn't
-  // auto-created by funding.
+  // POST /dlt/:ncb/api/octopus/ams/wallets/one-step — MOCK-ONLY convenience.
+  // The official `POST .../ams/wallets` creates a wallet *draft* that a second
+  // user must validate (four-eyes); this non-official one-step variant lets an
+  // authenticated user create a DCW immediately **for its own entity** (issue
+  // #77) — the owner is taken from the verified JWT, so the credit side of a
+  // settlement has a wallet to land in when it wasn't auto-created by funding.
   router.post(
-    "/dlt/:ncb/api/octopus/ams/wallets",
+    "/dlt/:ncb/api/octopus/ams/wallets/one-step",
     defineEventHandler(async (event) => {
       const caller = callerOf(event);
       if (!caller.entityBIC) {

@@ -313,8 +313,8 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("creates a wallet for the caller's own entity via POST ams/wallets (#77)", async () => {
-    const res = await request(server.port, "POST", `${BASE}/ams/wallets`, {
+  it("creates a wallet for the caller's own entity via POST ams/wallets/one-step (#77)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
       headers: { authorization: `Bearer ${u1}` },
       body: { walletAlias: "WNEW-77-01", isMainWallet: false },
     });
@@ -328,7 +328,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
   });
 
   it("rejects creating a wallet for another entity (#77)", async () => {
-    const res = await request(server.port, "POST", `${BASE}/ams/wallets`, {
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
       headers: { authorization: `Bearer ${u1}` },
       body: { walletAlias: "WNEW-77-02", ownerEntityID: "SOMEOTHERBICXXX" },
     });
@@ -336,11 +336,11 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
   });
 
   it("409s a duplicate wallet creation (#77)", async () => {
-    await request(server.port, "POST", `${BASE}/ams/wallets`, {
+    await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
       headers: { authorization: `Bearer ${u1}` },
       body: { walletAlias: "WDUP-77" },
     });
-    const res = await request(server.port, "POST", `${BASE}/ams/wallets`, {
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
       headers: { authorization: `Bearer ${u1}` },
       body: { walletAlias: "WDUP-77" },
     });

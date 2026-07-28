@@ -131,9 +131,12 @@ The cash-token account holding a balance.
   per currency; linked to **0..\*** T2 Accounts.
 - Official: create (2-step), list, get, get settled transactions, total-under-mgmt.
 - Mock: **read** (`GET .../ams/wallets`, `.../{walias}`, `.../transactions`) and
-  **create** (`POST .../ams/wallets`) implemented. Wallet creation is scoped to
-  the caller's **own entity** — the owner is taken from the verified JWT, never
-  the request body (issue #77). Auto-creation is now **funding-only**: funding
+  **one-step create** (`POST .../ams/wallets/one-step`, mock-only) implemented.
+  The official `POST .../ams/wallets` creates a wallet *draft* a second user must
+  validate (four-eyes) and is **not implemented** (returns `501`); the one-step
+  variant creates the DCW immediately. Creation is scoped to the caller's **own
+  entity** — the owner is taken from the verified JWT, never the request body
+  (issue #77). Auto-creation is now **funding-only**: funding
   creates the credited wallet for the caller's entity if it doesn't exist (issue
   #23/#77); **every other settlement path rejects an unknown credited wallet**
   with `422 HL-WAL-003` rather than silently discarding the credit (which
