@@ -196,15 +196,19 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     delete process.env.TRUST_PROXY_CLIENT_CERT;
   });
 
-  function fundingBody() {
+  function fundingBody(overrides: Record<string, unknown> = {}) {
     const b = {
+      type: "FUNDING",
       techFundRequestID: "FUND-INT-1",
       amount: "1000.00",
       currency: "EUR",
       creditedCashWalletAlias: "WDEEURTESTAAAA-01",
       creditedCashWalletManagerID: "MARKDEFFXXX",
       creditedCashWalletOwnerID: "BSUIFRPPXXX",
+      debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      debitedCashWalletManagerID: "ECBFDEFFXXX",
       debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      ...overrides,
     };
     const signature = nro.sign(
       b.techFundRequestID + b.amount + b.creditedCashWalletOwnerID + b.debitedCashWalletOwnerID,
@@ -277,6 +281,19 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(wallets.status).toBe(200);
     const aliases = JSON.stringify(wallets.json);
     expect(aliases).toContain("WDEEURTESTAAAA-01");
+  });
+
+  it("rejects a funding create with an invalid amount (400 HL-VAL, #53)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: {
+        authorization: `Bearer ${u1}`,
+        "x-forwarded-client-cert": encodeURIComponent(nro.certPem),
+      },
+      body: fundingBody({ amount: "banana" }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
+    expect(JSON.stringify(res.json)).toMatch(/amount/);
   });
 });
 

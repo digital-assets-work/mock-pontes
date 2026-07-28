@@ -53,6 +53,16 @@ function positiveAmount(amount: string): number {
   return a;
 }
 
+/**
+ * Validate + parse an amount string (issue #54, defence in depth). A non-finite
+ * (`NaN`/`Infinity`) or negative amount throws here — so even if an unvalidated
+ * value slips past the request-body validation (#53) it can never be written
+ * into wallet state as `NaN` and take down the whole AMS surface on later reads.
+ */
+export function parseAmount(amount: string): number {
+  return positiveAmount(amount);
+}
+
 export function availableOf(w: Wallet): number {
   return toNumber(w.balance);
 }

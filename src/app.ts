@@ -40,6 +40,7 @@ import {
   normalizeReturnedErrorBody,
   normalizeThrownError,
 } from "./http/error-response.js";
+import { createRequestValidationMiddleware } from "./http/request-validation.js";
 import { mockVersion } from "./version.js";
 
 /** API patterns that require NRO signature verification (CREATE endpoints only). */
@@ -116,6 +117,10 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   app.use(createProfileAuthorizationMiddleware());
   app.use(createNroCertCheckMiddleware(nroRoutePatterns));
   app.use(createNroMiddleware(nroRoutePatterns));
+
+  // Request-body validation for write endpoints (issue #53) — after auth/NRO,
+  // before the routers, so invalid bodies are rejected with a normalised 400.
+  app.use(createRequestValidationMiddleware());
 
   // Pontes-compatible routes.
   app.use(createWalletsRouter(store).handler);
