@@ -12,7 +12,7 @@ import jwt from "jsonwebtoken";
 import { buildJwks, buildOpenIdConfiguration, SIGNING_KEY_ID } from "./oidc.js";
 import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
-import { validateClientIdForProfile } from "./profile-enforcement.js";
+import { validateClientIdForProfile, isKnownProfile, KNOWN_PROFILES } from "./profile-enforcement.js";
 import { track } from "../http/route-registry.js";
 import {
   adminTokenConfigured,
@@ -304,6 +304,16 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
           error: "invalid_request",
           error_description:
             "profile and entityBIC are required when declaring a new user",
+        };
+      }
+
+      // Reject a typo'd / unknown profile at enrolment (issue #84) so it cannot
+      // silently produce a user that bypasses the Table U client_id binding.
+      if (profile && !isKnownProfile(profile)) {
+        setResponseStatus(event, 400);
+        return {
+          error: "invalid_request",
+          error_description: `Unknown profile '${profile}'. Expected one of: ${[...KNOWN_PROFILES].join(", ")}`,
         };
       }
 

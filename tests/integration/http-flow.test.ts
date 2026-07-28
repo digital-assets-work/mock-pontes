@@ -100,13 +100,13 @@ function request(
 // Test identities & NRO signing
 // ---------------------------------------------------------------------------
 
-async function mintJwt(userUUID: string): Promise<string> {
+async function mintJwt(userUUID: string, profile = "PILOT_READ_WRITE"): Promise<string> {
   // Sign with the persisted, shared JWT key from the runtime PKI bundle (#47) —
   // the same key the app now verifies with.
   const pki = await getRuntimePkiBundle();
   // No preferred_username → the mTLS-consistency middleware is a no-op.
   return jwt.sign(
-    { user_uuid: userUUID, user_profile: "PILOT_READ_WRITE", entity_bic: "BSUIFRPPXXX", realm: "bdf" },
+    { user_uuid: userUUID, user_profile: profile, entity_bic: "BSUIFRPPXXX", realm: "bdf" },
     pki.jwtSigningPrivateKeyPem,
     { algorithm: "ES256", expiresIn: "5m" },
   );
@@ -324,6 +324,103 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(res.status).toBe(400);
     expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
     expect(JSON.stringify(res.json)).toMatch(/Unsupported currency 'USD'/);
+  });
+
+  it("rejects a CSR enrolment with a typo'd/unknown profile (400, #84)", async () => {
+    const res = await request(server.port, "POST", `/iam/realms/${NCB}/protocol/openid-connect/csr`, {
+      body: {
+        username: "PTYPO0001",
+        password: "secret",
+        profile: "PILOT_READWRITE", // typo — missing underscore
+        entityBIC: "BSUIFRPPXXX",
+        csr: "dummy-csr-not-reached",
+      },
+    });
+    expect(res.status).toBe(400);
+    // The CSR error body is normalised (only the token endpoint keeps the OAuth shape).
+    expect(res.text).toMatch(/Unknown profile/);
+  });
+
+  it("returns application/json (a JSON string) for a one-step bridge payment (#82)", async () => {
+    // Fund a source wallet first.
+    const funded = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
+      body: fundingBody({ creditedCashWalletAlias: "WPAY-SRC-82", techFundRequestID: "FUND-82" }),
+    });
+    expect(funded.status).toBe(201);
+    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${funded.json.id}/approve`, {
+      headers: { authorization: `Bearer ${u2}` },
+    });
+    // 1-step bridge payments require the EXTERNAL_USER profile.
+    const ext = await mintJwt("user-ext", "EXTERNAL_USER");
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-82",
+        amount: "10.00",
+        currency: "EUR",
+        creditedCashWalletAlias: "WPAY-DST-82",
+        creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "WPAY-SRC-82",
+        debitedCashWalletManagerID: "ECBFDEFFXXX",
+      },
+    });
+    expect(pay.status).toBe(200);
+    expect(String(pay.headers["content-type"])).toMatch(/application\/json/);
+    expect(pay.json).toBe("Cash Token Payment Settled Succesfully");
+  });
+
+  it("creates a wallet for the caller's own entity via POST ams/wallets/one-step (#77)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WNEW-77-01", isMainWallet: false },
+    });
+    expect(res.status).toBe(201);
+    expect(res.json.walletAlias).toBe("WNEW-77-01");
+    expect(res.json.ownerEntityID).toBe("BSUIFRPPXXX");
+    const read = await request(server.port, "GET", `${BASE}/ams/wallets/WNEW-77-01`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(read.status).toBe(200);
+  });
+
+  it("rejects creating a wallet for another entity (#77)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WNEW-77-02", ownerEntityID: "SOMEOTHERBICXXX" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("409s a duplicate wallet creation (#77)", async () => {
+    await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WDUP-77" },
+    });
+    const res = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WDUP-77" },
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("funding auto-creates the credited wallet owned by the caller's entity, not the body (#77)", async () => {
+    const created = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: {
+        authorization: `Bearer ${u1}`,
+        "x-forwarded-client-cert": encodeURIComponent(nro.certPem),
+      },
+      body: fundingBody({ creditedCashWalletAlias: "WAUTO-77", creditedCashWalletOwnerID: "IGNOREDBICXXX" }),
+    });
+    expect(created.status).toBe(201);
+    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${created.json.id}/approve`, {
+      headers: { authorization: `Bearer ${u2}` },
+    });
+    const w = await request(server.port, "GET", `${BASE}/ams/wallets/WAUTO-77`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(w.status).toBe(200);
+    expect(w.json.ownerEntityID).toBe("BSUIFRPPXXX"); // caller entity, not the body's owner
   });
 });
 

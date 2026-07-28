@@ -37,6 +37,7 @@ import {
 import { buildServedSpec } from "./openapi.js";
 import { inspectPem } from "./inspect.js";
 import { buildP12 } from "./p12.js";
+import { adminTokenConfigured } from "../auth/admin-token.js";
 import { stringify as stringifyYaml } from "yaml";
 // Official ECB Pontes OpenAPI v1.0 (EII API), vendored as JSON.
 // Source: https://www.ecb.europa.eu/paym/target/target-professional-use-documents-links/pontes/shared/pdf/ecb.pontes26_05_15_OpenAPI_Document_v1.0_Pontes_Pilot.en.zip
@@ -158,21 +159,71 @@ function htmlTokens(): Record<string, string> {
   };
 }
 
-function applyTokens(html: string): string {
-  const tokens = htmlTokens();
+function applyTokens(html: string, extra: Record<string, string> = {}): string {
+  const tokens = { ...htmlTokens(), ...extra };
   return html.replace(/\{\{(\w+)\}\}/g, (match, key: string) =>
     Object.prototype.hasOwnProperty.call(tokens, key) ? tokens[key] : match,
   );
+}
+
+/**
+ * Is a host a **public DNS** name (issue #78)? True for a real, dotted, non-IP
+ * hostname (or when a public external URL is configured); false for localhost,
+ * `*.local`, loopback and bare IPs.
+ */
+export function hostIsPublic(hostname: string | undefined, hasPublicExternalUrl: boolean): boolean {
+  if (hasPublicExternalUrl) return true;
+  const host = (hostname || "").toLowerCase();
+  if (!host || host === "localhost" || host.endsWith(".local") || host.endsWith(".localhost")) return false;
+  if (host === "127.0.0.1" || host === "0.0.0.0" || host === "::1") return false;
+  const isIp = /^[0-9.]+$/.test(host) || host.includes(":");
+  if (isIp) return false;
+  return host.includes(".");
+}
+
+/** Control-panel banner wording for the (public-host, admin-token) state (issue #78). */
+export function controlPanelBanner(
+  publicHost: boolean,
+  adminTokenSet: boolean,
+): { MOCK_SCOPE_LABEL: string; ADMIN_AUTH_LABEL: string } {
+  return {
+    MOCK_SCOPE_LABEL: publicHost
+      ? "Shared public mock of the ECB Pontes A2A API."
+      : "Local mock of the ECB Pontes A2A API.",
+    ADMIN_AUTH_LABEL: adminTokenSet
+      ? "Admin endpoint requires the secret ADMIN_TOKEN in authorisation header."
+      : "Admin endpoint requires no authentication (Dev deployment).",
+  };
+}
+
+/**
+ * Is the mock reached over a **public DNS** host (issue #78)? Drives the
+ * control-panel banner wording.
+ */
+function isPublicHost(event: Parameters<typeof getRequestURL>[0]): boolean {
+  let host: string | undefined;
+  try {
+    host = getRequestURL(event).hostname;
+  } catch {
+    host = undefined;
+  }
+  return hostIsPublic(host, Boolean(process.env.PUBLIC_EXTERNAL_URL));
+}
+
+/** Control-panel banner tokens, computed per request (issue #78). */
+function controlPanelTokens(event: Parameters<typeof getRequestURL>[0]): Record<string, string> {
+  return controlPanelBanner(isPublicHost(event), adminTokenConfigured());
 }
 
 /** Read and serve an HTML page from the static dir, applying token substitution. */
 async function renderPage(
   event: Parameters<typeof setResponseHeader>[0],
   file: string,
+  extra: Record<string, string> = {},
 ): Promise<string> {
   const html = await readFile(join(await getStaticDir(), file), "utf8");
   setResponseHeader(event, "content-type", "text/html; charset=utf-8");
-  return applyTokens(html);
+  return applyTokens(html, extra);
 }
 
 export function createUiRouter() {
@@ -190,7 +241,7 @@ export function createUiRouter() {
 
   router.get(
     "/ui/config",
-    defineEventHandler((event) => renderPage(event, "control-panel.html")),
+    defineEventHandler((event) => renderPage(event, "control-panel.html", controlPanelTokens(event))),
   );
 
   router.get(
@@ -275,6 +326,8 @@ export function createUiRouter() {
         runtime: {
           port: Number(process.env.PORT || 3001),
           redis: Boolean(process.env.REDIS_URL),
+          publicHost: isPublicHost(event),
+          adminTokenRequired: adminTokenConfigured(),
         },
       };
     }),
