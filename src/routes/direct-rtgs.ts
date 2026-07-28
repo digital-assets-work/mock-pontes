@@ -130,7 +130,7 @@ export function createDirectRtgsRouter(store: MockStore) {
   // GET /dlt/:ncb/api/octopus/tms/direct-rtgs/payments(-drafts)/:id — Read by id
   const readByIdHandler = defineEventHandler((event: H3Event) => {
     const id = getRouterParam(event, "id")!;
-    const draft = store.getDraft(id);
+    const draft = store.getDraft(id, callerOf(event));
     if (!draft || draft.type !== "DIRECT_RTGS") {
       setResponseStatus(event, 404);
       return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Direct RTGS payment ${id} not found` }] };

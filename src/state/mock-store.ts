@@ -94,8 +94,8 @@ export interface MockStore {
   addTransaction(tx: Transaction): void;
 
   // Drafts
-  getDraft(id: string): Draft | undefined;
-  getDrafts(): Draft[];
+  getDraft(id: string, caller?: DcwCaller): Draft | undefined;
+  getDrafts(caller?: DcwCaller): Draft[];
   addDraft(draft: Draft): void;
   updateDraft(id: string, update: Partial<Draft>): void;
 
