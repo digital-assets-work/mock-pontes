@@ -3,6 +3,7 @@ import {
   defineEventHandler,
   getRouterParam,
   readBody,
+  setResponseHeader,
   setResponseStatus,
 } from "h3";
 import type { H3Event } from "h3";
@@ -155,8 +156,11 @@ export function createDirectRtgsRouter(store: MockStore) {
       } catch (e) {
         return sendRejection(event, e);
       }
+      // JSON string response (issue #82) so `response.json()` works; the ECB
+      // spec's "Succesfully" spelling is intentional — do NOT "correct" it.
       setResponseStatus(event, 200);
-      return "Direct RTGS Payment Settled Succesfully";
+      setResponseHeader(event, "content-type", "application/json");
+      return JSON.stringify("Direct RTGS Payment Settled Succesfully");
     }),
   );
 

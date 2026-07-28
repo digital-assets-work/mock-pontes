@@ -100,13 +100,13 @@ function request(
 // Test identities & NRO signing
 // ---------------------------------------------------------------------------
 
-async function mintJwt(userUUID: string): Promise<string> {
+async function mintJwt(userUUID: string, profile = "PILOT_READ_WRITE"): Promise<string> {
   // Sign with the persisted, shared JWT key from the runtime PKI bundle (#47) —
   // the same key the app now verifies with.
   const pki = await getRuntimePkiBundle();
   // No preferred_username → the mTLS-consistency middleware is a no-op.
   return jwt.sign(
-    { user_uuid: userUUID, user_profile: "PILOT_READ_WRITE", entity_bic: "BSUIFRPPXXX", realm: "bdf" },
+    { user_uuid: userUUID, user_profile: profile, entity_bic: "BSUIFRPPXXX", realm: "bdf" },
     pki.jwtSigningPrivateKeyPem,
     { algorithm: "ES256", expiresIn: "5m" },
   );
@@ -311,6 +311,35 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       headers: { authorization: `Bearer ${u1}` },
     });
     expect(res.status).toBe(404);
+  });
+
+  it("returns application/json (a JSON string) for a one-step bridge payment (#82)", async () => {
+    // Fund a source wallet first.
+    const funded = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
+      body: fundingBody({ creditedCashWalletAlias: "WPAY-SRC-82", techFundRequestID: "FUND-82" }),
+    });
+    expect(funded.status).toBe(201);
+    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${funded.json.id}/approve`, {
+      headers: { authorization: `Bearer ${u2}` },
+    });
+    // 1-step bridge payments require the EXTERNAL_USER profile.
+    const ext = await mintJwt("user-ext", "EXTERNAL_USER");
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-82",
+        amount: "10.00",
+        currency: "EUR",
+        creditedCashWalletAlias: "WPAY-DST-82",
+        creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "WPAY-SRC-82",
+        debitedCashWalletManagerID: "ECBFDEFFXXX",
+      },
+    });
+    expect(pay.status).toBe(200);
+    expect(String(pay.headers["content-type"])).toMatch(/application\/json/);
+    expect(pay.json).toBe("Cash Token Payment Settled Succesfully");
   });
 
   it("creates a wallet for the caller's own entity via POST ams/wallets/one-step (#77)", async () => {

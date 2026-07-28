@@ -2,6 +2,7 @@ import {
   createRouter,
   defineEventHandler,
   readBody,
+  setResponseHeader,
   setResponseStatus,
 } from "h3";
 import { randomUUID } from "node:crypto";
@@ -100,9 +101,13 @@ export function createBridgePaymentsRouter(store: MockStore) {
         throw e;
       }
 
-      // The official endpoint returns HTTP 200 with a plain-text confirmation.
+      // The official 200 response is a JSON string (spec: application/json,
+      // type: string). Emit it as JSON so `response.json()` works (issue #82).
+      // NOTE: the ECB spec's own "Succesfully" spelling is intentional — do NOT
+      // "correct" it (wire compatibility).
       setResponseStatus(event, 200);
-      return "Cash Token Payment Settled Succesfully";
+      setResponseHeader(event, "content-type", "application/json");
+      return JSON.stringify("Cash Token Payment Settled Succesfully");
     }),
   );
 
