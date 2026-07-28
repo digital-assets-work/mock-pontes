@@ -114,6 +114,11 @@ operations. **The only security-adjacent object included here.**
   Users (`initiatorUserUUID` ≠ `approverUserUUID`).
 - Mock: declared + certificate-enrolled via the IAM/Keycloak endpoints
   (`.../openid-connect/token`, `/csr`, `/certs`, `admin/enrolled-users`).
+- Tokens (issue #64): the password grant returns an ES256 `access_token`
+  (`expires_in` 300s) **and** a `refresh_token` (`refresh_expires_in` 864000s =
+  10 days), Keycloak-style. The token endpoint also accepts
+  `grant_type=refresh_token` to mint a fresh pair; a refresh token cannot be used
+  as a bearer access token (`typ: "Refresh"` is rejected by the JWT middleware).
 
 ### 2.4 Dedicated Cash Wallet (DCW) 🟡
 

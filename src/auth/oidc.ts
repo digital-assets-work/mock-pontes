@@ -40,7 +40,7 @@ export function buildOpenIdConfiguration(issuer: string): Record<string, unknown
     issuer: base,
     token_endpoint: `${base}/protocol/openid-connect/token`,
     jwks_uri: `${base}/protocol/openid-connect/certs`,
-    grant_types_supported: ["password"],
+    grant_types_supported: ["password", "refresh_token"],
     response_types_supported: ["token"],
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["ES256"],

@@ -57,6 +57,16 @@ export function createJwtMiddleware(
         algorithms: ["ES256"],
       }) as jwt.JwtPayload;
 
+      // A refresh token (issue #64) must not be accepted as a bearer access
+      // token — it is only valid at the token endpoint's refresh grant.
+      if (decoded.typ === "Refresh") {
+        setResponseStatus(event, 401);
+        return {
+          error: "invalid_token",
+          error_description: "Refresh tokens cannot be used as access tokens",
+        };
+      }
+
       // Attach auth context for downstream handlers
       event.context.auth = {
         userUUID: decoded.user_uuid || decoded.sub,
