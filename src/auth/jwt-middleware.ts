@@ -13,7 +13,6 @@ import {
   type H3Event,
 } from "h3";
 import jwt from "jsonwebtoken";
-import { getTestKeys } from "./test-keys.js";
 
 export interface AuthContext {
   userUUID: string;
@@ -28,7 +27,15 @@ function shouldApplyAuth(path: string, protectedPrefixes: readonly string[]): bo
   return protectedPrefixes.some((prefix) => path.startsWith(prefix));
 }
 
-export function createJwtMiddleware(protectedPrefixes: readonly string[]) {
+/**
+ * JWT verification middleware. `jwtPublicKeyPem` is the persisted, shared JWT
+ * signing public key from the runtime PKI bundle (#47) so tokens verify across
+ * restarts and replicas.
+ */
+export function createJwtMiddleware(
+  protectedPrefixes: readonly string[],
+  jwtPublicKeyPem: string,
+) {
   return defineEventHandler(async (event: H3Event) => {
     const path = event.path || "";
 
@@ -44,10 +51,9 @@ export function createJwtMiddleware(protectedPrefixes: readonly string[]) {
     }
 
     const token = authHeader.slice(7);
-    const keys = await getTestKeys();
 
     try {
-      const decoded = jwt.verify(token, keys.publicKeyPem, {
+      const decoded = jwt.verify(token, jwtPublicKeyPem, {
         algorithms: ["ES256"],
       }) as jwt.JwtPayload;
 
