@@ -41,6 +41,7 @@ import {
   normalizeThrownError,
 } from "./http/error-response.js";
 import { createRequestValidationMiddleware } from "./http/request-validation.js";
+import { createBusinessWindowGuardMiddleware } from "./http/business-window-guard.js";
 import { mockVersion } from "./version.js";
 
 /** API patterns that require NRO signature verification (CREATE endpoints only). */
@@ -122,6 +123,11 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   // Request-body validation for write endpoints (issue #53) — after auth/NRO,
   // before the routers, so invalid bodies are rejected with a normalised 400.
   app.use(createRequestValidationMiddleware());
+
+  // Business-window enforcement (issue #59) — opt-in via
+  // PONTES_MOCK_ENFORCE_BUSINESS_WINDOW; blocks mutating official API calls
+  // outside the (Frankfurt-time) window. Before the routers so no write runs.
+  app.use(createBusinessWindowGuardMiddleware(store));
 
   // Pontes-compatible routes.
   app.use(createWalletsRouter(store).handler);

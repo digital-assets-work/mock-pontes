@@ -266,7 +266,12 @@ The market calendar gating when operations may settle.
 - `BusinessDate`: `businessDate`, `updateBDStatus`
   (`FULL_UPDATE_ALLOWED` / `UPDATE_NOT_ALLOWED` / `CONDITIONAL_UPDATE_ALLOWED`).
 - Mock: `GET .../bridge/current-business-window`, `.../grs/current-business-window`,
-  `.../grs/businessdate` implemented, **but the window is not enforced** on writes.
+  `.../grs/businessdate` implemented. `windowName` is derived from the stored
+  `openTime`/`closeTime` in **Frankfurt** time (`Open for All` inside the window,
+  else `Closed`). Enforcement on writes is **opt-in** via
+  `PONTES_MOCK_ENFORCE_BUSINESS_WINDOW=true` (issue #59): when enabled, mutating
+  official API calls outside the window are rejected with `403 HL-BW-001`. An
+  admin can hard-close the window with `currentWindow: "CLOSED"`.
 
 ---
 
