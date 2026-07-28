@@ -105,6 +105,16 @@ driven through the official Pontes endpoints above — see
 | GET | `/admin/business-window` | Get business window config |
 | PUT | `/admin/business-window` | Update business window config |
 
+> **Security — the admin surface is unauthenticated by default.** `ADMIN_TOKEN`
+> is **not set** by default, and while it is unset the state-changing admin
+> endpoints (`POST /admin/reset`, `PUT /admin/business-window`) and
+> `GET /admin/enrolled-users` are **open** — convenient for local development.
+> **Any published / public instance MUST set `ADMIN_TOKEN`** so those endpoints
+> require it (via the `X-Admin-Token` header, or `Authorization: Bearer <token>`);
+> otherwise any visitor could reset everyone's state. When the token is set, CSR
+> enrolment still works but issues short-lived (1 hour) certificates. See
+> [`docs/TLS-MTLS-AND-CERTS.md`](docs/TLS-MTLS-AND-CERTS.md) §9.
+
 ### Enrollment routes (mock-only)
 
 The mock ships a **local certificate authority** so you can obtain client
@@ -150,6 +160,7 @@ Configuration is via environment variables (see [`.env.example`](.env.example)):
 | `PORT` | `3001` | Listening port |
 | `HOST` | `localhost` (`0.0.0.0` in the Docker image) | Bind address |
 | `REDIS_URL` | — | Optional Redis URL for multi-replica / persistent state |
+| `ADMIN_TOKEN` | — (unset → admin surface open) | Gate the admin surface. **Unset by default; set it on any published/public instance** so `/admin/*` writes and `/admin/enrolled-users` require it (`X-Admin-Token` header or `Authorization: Bearer`). |
 | `TLS_SAN` | `dns:localhost;ip:127.0.0.1` | Subject Alternative Names for the runtime server cert |
 | `TLS_SUBJECT` | `CN=localhost O=MockPontes C=DEV` | Subject for the runtime server cert |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | — | Serve an externally-provided (e.g. Let's Encrypt) server cert instead of the self-signed one |
