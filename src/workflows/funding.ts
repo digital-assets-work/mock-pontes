@@ -1,6 +1,6 @@
 import type { Draft } from "../state/mock-store.js";
 import type { DcwCaller } from "../state/dcw.js";
-import { Workflow } from "./workflow.js";
+import { Workflow, type WorkflowPhase } from "./workflow.js";
 
 /**
  * Two-step funding: credits the target wallet from the (infinite) token-issuance
@@ -10,6 +10,20 @@ import { Workflow } from "./workflow.js";
 export class FundingWorkflow extends Workflow {
   readonly type = "FUNDING" as const;
   protected readonly notFoundLabel = "Funding draft";
+
+  /**
+   * Fund only a wallet you are authorised to act on (issue #56). Funding has no
+   * real debit (the source is the infinite issuance DCA), so as a proxy for the
+   * T2 account's debit rights the *credited* wallet must belong to the caller's
+   * entity (or a PoA / whitelisted operator). Enforced at draft creation.
+   */
+  protected conditions(phase: WorkflowPhase, record: Draft, caller?: DcwCaller): void {
+    if (phase !== "create") return;
+    const permitted = this.store.canDebit(record.creditedWalletAlias, caller);
+    if (!permitted.ok) {
+      throw this.rejectionFor(permitted.reason ?? "NOT_AUTHORISED_TO_DEBIT", record.creditedWalletAlias);
+    }
+  }
 
   protected apply(record: Draft): void {
     this.rawCredit(record.creditedWalletAlias, record.amount);

@@ -180,8 +180,10 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
 
   beforeAll(async () => {
     delete process.env.REDIS_URL;
-    process.env.PONTES_MOCK_LENIENT_PROFILE = "true";
-    process.env.PONTES_MOCK_LENIENT_MTLS = "true"; // skip the signer↔mTLS binding for the happy flow
+    // The signer↔mTLS binding is always enforced; establish the client cert via
+    // the trusted-proxy forwarded-cert path (the mock behind a TLS-terminating
+    // proxy) using the same cert the request is NRO-signed with.
+    process.env.TRUST_PROXY_CLIENT_CERT = "true";
     server = await listen(await buildTestApp());
     u1 = await mintJwt("user-1");
     u2 = await mintJwt("user-2");
@@ -190,8 +192,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
 
   afterAll(async () => {
     await server.close();
-    delete process.env.PONTES_MOCK_LENIENT_PROFILE;
-    delete process.env.PONTES_MOCK_LENIENT_MTLS;
+    delete process.env.TRUST_PROXY_CLIENT_CERT;
   });
 
   function fundingBody() {
@@ -201,7 +202,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       currency: "EUR",
       creditedCashWalletAlias: "WDEEURTESTAAAA-01",
       creditedCashWalletManagerID: "MARKDEFFXXX",
-      creditedCashWalletOwnerID: "TESTAAAA",
+      creditedCashWalletOwnerID: "BSUIFRPPXXX",
       debitedCashWalletOwnerID: "ECBFDEFFXXX",
     };
     const signature = nro.sign(
@@ -241,7 +242,10 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
   it("drives funding create → self-approve 403 → second-user approve 200 (#28)", async () => {
     // create (user-1)
     const created = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
-      headers: { authorization: `Bearer ${u1}` },
+      headers: {
+        authorization: `Bearer ${u1}`,
+        "x-forwarded-client-cert": encodeURIComponent(nro.certPem),
+      },
       body: fundingBody(),
     });
     expect(created.status).toBe(201);
@@ -282,8 +286,6 @@ describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {
 
   beforeAll(async () => {
     delete process.env.REDIS_URL;
-    process.env.PONTES_MOCK_LENIENT_PROFILE = "true";
-    delete process.env.PONTES_MOCK_LENIENT_MTLS; // strict: binding enforced
     delete process.env.TRUST_PROXY_CLIENT_CERT;
     server = await listen(await buildTestApp());
     token = await mintJwt("user-1");
@@ -292,7 +294,6 @@ describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {
 
   afterAll(async () => {
     await server.close();
-    delete process.env.PONTES_MOCK_LENIENT_PROFILE;
   });
 
   it("rejects an NRO create when no client certificate is established (403 HL-NRO-005)", async () => {

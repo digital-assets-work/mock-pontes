@@ -10,6 +10,7 @@ import { fatalPersistError } from "../cache/index.js";
 import {
   createDcw,
   canDebit as canDebitDcw,
+  canRead as canReadDcw,
   withCredit,
   withDebit,
   withLock,
@@ -110,12 +111,18 @@ export class MemoryStore implements MockStore {
 
   // --- Wallets ---
 
-  getWallets(): Wallet[] {
-    return [...this.wallets.values()];
+  getWallets(caller?: DcwCaller): Wallet[] {
+    const all = [...this.wallets.values()];
+    // Unscoped for internal callers (no caller); scoped for API callers.
+    return caller ? all.filter((w) => canReadDcw(w, caller).ok) : all;
   }
 
-  getWallet(alias: string): Wallet | undefined {
-    return this.wallets.get(alias);
+  getWallet(alias: string, caller?: DcwCaller): Wallet | undefined {
+    const wallet = this.wallets.get(alias);
+    if (!wallet) return undefined;
+    // A caller that may not read the wallet sees it as "not found" (mask).
+    if (caller && !canReadDcw(wallet, caller).ok) return undefined;
+    return wallet;
   }
 
   upsertWallet(wallet: Wallet): void {
@@ -184,10 +191,14 @@ export class MemoryStore implements MockStore {
     return [...this.transactions];
   }
 
-  getWalletTransactions(alias: string): Transaction[] {
+  getWalletTransactions(alias: string, caller?: DcwCaller): Transaction[] {
     // Settled transactions only — mirrors the real Pontes
     // `ams/wallets/{walias}/transactions` endpoint (settled list).
     // Pending/in-flight drafts are served separately via `ims/transactions`.
+    // If the caller may not read the wallet, mask as "no such wallet" (empty);
+    // the route returns 404 when the wallet itself is not readable.
+    const wallet = this.wallets.get(alias);
+    if (caller && (!wallet || !canReadDcw(wallet, caller).ok)) return [];
     return this.transactions.filter(
       (tx) =>
         tx.creditedWalletAlias === alias || tx.debitedWalletAlias === alias,

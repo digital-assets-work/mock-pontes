@@ -6,8 +6,6 @@
  * (case-insensitively — lowercase/uppercase/mixed all accepted) and returns a
  * normalised `404` for an unknown NCB, catching a whole class of participant
  * mis-configuration.
- *
- * Disable with `PONTES_MOCK_LENIENT_NCB=true` for local experimentation.
  */
 
 import { defineEventHandler, setResponseStatus, type H3Event } from "h3";
@@ -52,13 +50,8 @@ export function extractNcb(path: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-function isEnforced(): boolean {
-  return process.env.PONTES_MOCK_LENIENT_NCB !== "true";
-}
-
 export function createNcbValidationMiddleware() {
   return defineEventHandler((event: H3Event) => {
-    if (!isEnforced()) return;
     const ncb = extractNcb(event.path || "");
     if (ncb === null || isValidNcb(ncb)) return; // not ncb-scoped, or valid
     setResponseStatus(event, 404);

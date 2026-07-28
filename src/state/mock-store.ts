@@ -74,8 +74,8 @@ export interface BusinessWindow {
 
 export interface MockStore {
   // Wallets
-  getWallets(): Wallet[];
-  getWallet(alias: string): Wallet | undefined;
+  getWallets(caller?: DcwCaller): Wallet[];
+  getWallet(alias: string, caller?: DcwCaller): Wallet | undefined;
   upsertWallet(wallet: Wallet): void;
 
   // DCW lifecycle & operations
@@ -90,7 +90,7 @@ export interface MockStore {
 
   // Transactions
   getTransactions(): Transaction[];
-  getWalletTransactions(alias: string): Transaction[];
+  getWalletTransactions(alias: string, caller?: DcwCaller): Transaction[];
   addTransaction(tx: Transaction): void;
 
   // Drafts

@@ -114,9 +114,9 @@ export abstract class Workflow {
   // --- lifecycle ------------------------------------------------------------
 
   /** Persist a new two-step workflow in `PENDING_APPROVAL`. */
-  create(init: WorkflowInit): Draft {
+  create(init: WorkflowInit, actor: WorkflowActor = {}): Draft {
     const record = this.buildRecord(init, "PENDING_APPROVAL");
-    this.conditions("create", record);
+    this.conditions("create", record, actor.caller);
     this.assertDebitWalletExists(record);
     this.store.addDraft(record);
     return record;
@@ -311,7 +311,7 @@ export abstract class Workflow {
     return new WorkflowRejection(422, "HL-GER-000", msg);
   }
 
-  private rejectionFor(reason: string, alias: string): WorkflowRejection {
+  protected rejectionFor(reason: string, alias: string): WorkflowRejection {
     if (reason === "WALLET_NOT_FOUND") {
       return new WorkflowRejection(404, "HL-WAL-001", `Wallet ${alias} not found`);
     }

@@ -2,7 +2,7 @@
  * NCB path-parameter validation tests (issue #36).
  */
 
-import { describe, it, expect, afterEach } from "@jest/globals";
+import { describe, it, expect } from "@jest/globals";
 import type { H3Event } from "h3";
 import {
   isValidNcb,
@@ -10,12 +10,6 @@ import {
   OFFICIAL_NCBS,
   createNcbValidationMiddleware,
 } from "../src/auth/ncb-middleware.js";
-
-const ORIGINAL = process.env.PONTES_MOCK_LENIENT_NCB;
-afterEach(() => {
-  if (ORIGINAL === undefined) delete process.env.PONTES_MOCK_LENIENT_NCB;
-  else process.env.PONTES_MOCK_LENIENT_NCB = ORIGINAL;
-});
 
 function fakeEvent(path: string): H3Event {
   return {
@@ -72,12 +66,5 @@ describe("createNcbValidationMiddleware (issue #36)", () => {
 
   it("ignores non-ncb-scoped paths", () => {
     expect(mw(fakeEvent("/ui/docs"))).toBeUndefined();
-  });
-
-  it("is bypassed by PONTES_MOCK_LENIENT_NCB=true", () => {
-    process.env.PONTES_MOCK_LENIENT_NCB = "true";
-    const ev = fakeEvent("/dlt/ZZZZ/api/octopus/ams/wallets");
-    expect(mw(ev)).toBeUndefined();
-    expect(ev.node.res.statusCode).toBe(200);
   });
 });

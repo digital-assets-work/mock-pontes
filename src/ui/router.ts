@@ -274,7 +274,6 @@ export function createUiRouter() {
         },
         runtime: {
           port: Number(process.env.PORT || 3001),
-          strictProfile: process.env.PONTES_MOCK_LENIENT_PROFILE !== "true",
           redis: Boolean(process.env.REDIS_URL),
         },
       };

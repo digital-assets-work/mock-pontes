@@ -59,8 +59,14 @@ export function createDirectRtgsRouter(store: MockStore) {
 
   function buildInit(body: any, id: string, initiatorUserUUID?: string) {
     // Auto-create only the CREDIT-side wallet (issue #23); the debit-side payer
-    // must already exist or the workflow raises a condition error.
-    ensureWallet(store, body.creditedCashWalletAlias, body.creditedCashWalletManagerID || "UNKNOWN");
+    // must already exist or the workflow raises a condition error. The wallet is
+    // owned by the entity named in the request (issue #56), never the caller.
+    ensureWallet(
+      store,
+      body.creditedCashWalletAlias,
+      body.creditedCashWalletManagerID || "UNKNOWN",
+      body.creditedCashWalletOwnerID,
+    );
     return {
       id,
       amount: body.amount || "0.00",

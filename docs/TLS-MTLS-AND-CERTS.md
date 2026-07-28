@@ -106,8 +106,11 @@ Recent change (Phase 7) — the mock strictly validates the Pontes profile model
 
 - `validateClientIdForProfile()` rejects mismatched `client_id`/profile pairs.
 - The **profile authorization** middleware maps endpoints → required profile.
-- Opt out for lenient/legacy tests with `PONTES_MOCK_LENIENT_PROFILE=true`
-  (`isStrictMode()`).
+- Enforcement is **always strict** (no opt-out flag).
+- **Entity scoping (issue #56):** wallet reads are filtered by the caller's
+  `entity_bic` (own / PoA / whitelisted operator); a wallet or transaction the
+  caller may not read is masked as `404`. Funding is authorised on the credited
+  wallet at draft creation, and money-out flows enforce debit rights on approval.
 
 ---
 
@@ -167,8 +170,9 @@ set `TRUST_PROXY_CLIENT_CERT=true` and forward the client certificate in the
 `x-forwarded-client-cert` (or `ssl-client-cert`) header. Raw PEM, URL-encoded PEM
 (nginx `$ssl_client_escaped_cert`) and Envoy XFCC `Cert="…"` syntax are accepted.
 
-For local development without mTLS, `PONTES_MOCK_LENIENT_MTLS=true` skips the
-binding check (default is strict/fail-closed).
+The binding is **always enforced** (fail-closed). For local development without
+real mTLS, terminate at a trusted proxy (or emulate one) and forward the client
+certificate via the header above.
 
 ---
 
@@ -216,11 +220,8 @@ const server = https.createServer({
 | `TLS_SUBJECT` | Server cert subject DN |
 | `TLS_SAN` | Server cert SANs (`dns:`/`ip:`, `;`-separated) — composed by the chart |
 | `REDIS_URL` | Persist PKI + enrolled users across restarts/replicas |
-| `PONTES_MOCK_LENIENT_PROFILE` | `true` disables strict profile/client_id enforcement |
 | `TRUST_PROXY_CLIENT_CERT` | `true` trusts a client cert forwarded by a reverse proxy via `x-forwarded-client-cert` / `ssl-client-cert` for the NRO signer↔mTLS binding (§5b) |
-| `PONTES_MOCK_LENIENT_MTLS` | `true` skips the NRO signer↔mTLS binding check (dev without mTLS); default is strict/fail-closed |
 | `ADMIN_TOKEN` | When set, gates the admin surface (§9). Unset → admin/enrolment behave as before (open) |
-| `PONTES_MOCK_LENIENT_NCB` | `true` disables `{ncb}` path-parameter validation (default: strict — unknown NCB → `404`, case-insensitive) |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | *(planned)* use an external (LE) server cert/key instead of self-signed |
 
 ---

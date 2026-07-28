@@ -13,7 +13,7 @@ import { getTestKeys } from "./test-keys.js";
 import { buildJwks, buildOpenIdConfiguration } from "./oidc.js";
 import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
-import { isStrictMode, validateClientIdForProfile } from "./profile-enforcement.js";
+import { validateClientIdForProfile } from "./profile-enforcement.js";
 import { track } from "../http/route-registry.js";
 import {
   adminTokenConfigured,
@@ -94,19 +94,17 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         return { error: "invalid_grant", error_description: "Invalid user credentials" };
       }
 
-      // Strict profile/client_id enforcement (Table U)
-      if (isStrictMode()) {
-        const validation = validateClientIdForProfile(user.profile, clientId, clientSecret);
-        if (!validation.valid) {
-          console.warn(
-            `[mock-pontes] enrollment-token:invalid_client username=${username} profile=${user.profile} client_id=${clientId} reason=${validation.error}`,
-          );
-          setResponseStatus(event, 401);
-          return {
-            error: "invalid_client",
-            error_description: validation.error,
-          };
-        }
+      // Profile/client_id enforcement (Table U) — always strict.
+      const validation = validateClientIdForProfile(user.profile, clientId, clientSecret);
+      if (!validation.valid) {
+        console.warn(
+          `[mock-pontes] enrollment-token:invalid_client username=${username} profile=${user.profile} client_id=${clientId} reason=${validation.error}`,
+        );
+        setResponseStatus(event, 401);
+        return {
+          error: "invalid_client",
+          error_description: validation.error,
+        };
       }
 
       const prevFp = options.authUsersRepository.getFingerprintByUsername(username);

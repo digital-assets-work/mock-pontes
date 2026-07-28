@@ -69,9 +69,16 @@ export function createBridgePaymentsRouter(store: MockStore) {
 
       // Auto-create only the CREDIT-side wallet (issue #23). The debit-side
       // source must already exist; the workflow raises a condition error if not.
+      // The wallet is owned by the entity named in the request (issue #56),
+      // never the caller.
       const auth = event.context.auth as AuthContext | undefined;
       const callerEntity = auth?.entityBIC;
-      ensureWallet(store, creditedCashWalletAlias, creditedCashWalletManagerID || "UNKNOWN");
+      ensureWallet(
+        store,
+        creditedCashWalletAlias,
+        creditedCashWalletManagerID || "UNKNOWN",
+        body.creditedCashWalletOwnerID,
+      );
 
       // Execute the 1-step payment via the shared workflow engine (checked debit).
       try {
