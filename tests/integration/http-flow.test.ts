@@ -312,6 +312,19 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it("rejects a non-EUR currency on funding create (400 HL-VAL-001, #80)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: {
+        authorization: `Bearer ${u1}`,
+        "x-forwarded-client-cert": encodeURIComponent(nro.certPem),
+      },
+      body: fundingBody({ currency: "USD" }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
+    expect(JSON.stringify(res.json)).toMatch(/Unsupported currency 'USD'/);
+  });
 });
 
 describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {

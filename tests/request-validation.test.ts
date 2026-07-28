@@ -6,8 +6,7 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
-import { schemaForRequest, validateRequestBody } from "../src/http/request-validation.js";
-
+import { schemaForRequest, validateRequestBody, currencyError } from "../src/http/request-validation.js";
 function validFunding() {
   return {
     type: "FUNDING",
@@ -27,6 +26,20 @@ function validFunding() {
 
 const FUNDING = "triggermanagement.CreateFundingRequest";
 const codes = (b: unknown) => validateRequestBody(FUNDING, b).map((e) => e.errorDescription);
+
+describe("currencyError (issue #80)", () => {
+  it("rejects a non-EUR currency", () => {
+    expect(currencyError({ currency: "USD" })?.errorCode).toBe("HL-VAL-001");
+    expect(currencyError({ currency: "USD" })?.errorDescription).toMatch(/Unsupported currency 'USD'/);
+    expect(currencyError({ currency: "gbp" })?.errorCode).toBe("HL-VAL-001");
+  });
+  it("accepts EUR or an absent currency", () => {
+    expect(currencyError({ currency: "EUR" })).toBeNull();
+    expect(currencyError({})).toBeNull();
+    expect(currencyError({ amount: "1.00" })).toBeNull();
+    expect(currencyError(undefined)).toBeNull();
+  });
+});
 
 describe("schemaForRequest (issue #53)", () => {
   it("maps the create write endpoints (realm collapsed)", () => {
