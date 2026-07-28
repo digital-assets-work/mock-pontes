@@ -33,4 +33,12 @@ else
   exit 2
 fi
 
+# Copy the static UI assets (HTML/CSS/JS) next to the bundle so the backend can
+# serve them from disk at runtime (resolved relative to dist/index.js).
+if [ -d src/ui/static ]; then
+  rm -rf $dest/static
+  cp -R src/ui/static $dest/static
+  echo "Copied static UI assets to $dest/static"
+fi
+
 # node $entrypoint_js "$@"

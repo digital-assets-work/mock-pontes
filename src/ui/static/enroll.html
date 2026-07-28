@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enroll · Mock Pontes</title>
+  <link rel="stylesheet" href="/ui/static/app.css">
+</head>
+
+<body>
+  <header class="nav">
+    <div class="brand">🅜 Mock Pontes</div>
+    <nav>
+      <a href="/ui">Home</a>
+      <a href="/ui/config">Control panel</a>
+      <a href="/ui/enroll">Enroll (CSR)</a>
+      <a href="/ui/docs">API Docs</a>
+    </nav>
+  </header>
+  <main>
+    <h1>CSR enrollment</h1>
+    <p class="hint">Upload or paste a PKCS#10 CSR, declare the user, and download the signed certificate.
+      Inspect either the CSR or the issued certificate (subject, key, and the Pontes <code>privilege</code>
+      attribute).</p>
+
+    <div class="card">
+      <h2>1 · Certificate Signing Request</h2>
+      <label>Upload a .csr / .pem file</label>
+      <input type="file" id="csrFile" accept=".csr,.pem,.txt">
+      <label>…or paste the CSR (PEM)</label>
+      <textarea id="csr" placeholder="-----BEGIN CERTIFICATE REQUEST-----"></textarea>
+      <button class="secondary" id="btnInspect" type="button">Inspect CSR</button>
+      <div id="csrDetails"></div>
+    </div>
+
+    <div class="card">
+      <h2>2 · User declaration</h2>
+      <div class="row">
+        <div><label>NCB / ORG (realm)</label><input id="ncb" value="bdf"></div>
+        <div><label>Username (= CSR Common Name)</label><input id="username" placeholder="PFRBSUIFRPPXXX0001"></div>
+      </div>
+      <div class="row">
+        <div><label>Password</label><input id="password" value="initiator-secret"></div>
+        <div><label>Entity BIC (MSPID)</label><input id="entityBIC" placeholder="BSUIFRPPXXX"></div>
+        <div><label>Profile</label>
+          <select id="profile">
+            <option>PILOT_READ_WRITE</option>
+            <option>PILOT_READ_ONLY</option>
+            <option>EXTERNAL_USER</option>
+            <option>REFERENTIAL_READ_WRITE</option>
+            <option>REFERENTIAL_READ_ONLY</option>
+          </select>
+        </div>
+      </div>
+      <button id="btnEnroll" type="button">Enroll &amp; issue certificate</button>
+      <span class="hint" id="enrollStatus"></span>
+    </div>
+
+    <div class="card" id="certCard" style="display:none">
+      <h2>3 · Issued certificate</h2>
+      <div id="certDetails"></div>
+      <button id="btnDownload" type="button">⬇ Download certificate (.pem)</button>
+      <label>PEM</label>
+      <pre id="certPem"></pre>
+    </div>
+
+    <div class="card" id="p12Card">
+      <h2>4 · Download as PKCS#12 (.p12)</h2>
+      <p class="hint">Bundle the issued certificate with your private key for import into Keychain / a browser.
+        ⚠️ Your private key is sent to this <b>local</b> mock only to assemble the bundle (never stored). For real
+        keys, prefer the command line below.</p>
+      <label>Private key (PEM) — upload or paste</label>
+      <input type="file" id="p12keyFile" accept=".pem,.key,.txt">
+      <textarea id="p12key" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+      <label>Export password</label>
+      <input id="p12pw" type="password" placeholder="choose a password">
+      <button id="btnP12" type="button">Build &amp; download .p12</button>
+      <span class="hint" id="p12status"></span>
+    </div>
+
+    <div class="card">
+      <h2>5 · Create &amp; install from the command line</h2>
+      <p class="hint">Recommended for real keys — the private key never leaves your machine.</p>
+      <label>Create the .p12 (you'll be prompted for an export password)</label>
+      <pre>openssl pkcs12 -export \
+  -inkey &lt;your_private_key&gt;.pem \
+  -in    &lt;your_cert&gt;.pem \
+  -name  "PFRBSUIFRPPXXX0001" \
+  -out   PFRBSUIFRPPXXX0001.p12</pre>
+      <label>Install — macOS Keychain (Safari / Chrome / Edge)</label>
+      <pre>security import PFRBSUIFRPPXXX0001.p12 -k ~/Library/Keychains/login.keychain-db
+# verify:
+security find-identity -v ~/Library/Keychains/login.keychain-db | grep PFRBSUIFRPPXXX0001</pre>
+      <label>Install — Firefox (separate certificate store)</label>
+      <pre>Settings → Privacy &amp; Security → Certificates → View Certificates
+  → Your Certificates → Import… → select the .p12</pre>
+      <label>Use directly for CLI / app mTLS (no install)</label>
+      <pre>curl --cert &lt;your_cert&gt;.pem --key &lt;your_private_key&gt;.pem \
+     -k https://localhost:3001/check/mtls</pre>
+    </div>
+  </main>
+  <script src="/ui/static/enroll.js"></script>
+</body>
+
+</html>

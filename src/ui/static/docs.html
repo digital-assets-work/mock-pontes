@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Docs · Mock Pontes</title>
+  <link rel="stylesheet" href="/ui/static/app.css">
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+
+<body>
+  <header class="nav">
+    <div class="brand">🅜 Mock Pontes</div>
+    <nav>
+      <a href="/ui">Home</a>
+      <a href="/ui/config">Control panel</a>
+      <a href="/ui/enroll">Enroll (CSR)</a>
+      <a href="/ui/docs">API Docs</a>
+    </nav>
+  </header>
+  <main>
+    <h1>API documentation</h1>
+
+    <div class="tabs">
+      <button id="tab-mock" class="tab active" type="button">Mock endpoints (testable)</button>
+      <button id="tab-official" class="tab" type="button">Official Pontes API v1.0 (reference)</button>
+    </div>
+
+    <div class="card" id="authPanel">
+      <h2>Authentication</h2>
+      <p class="hint">Get a JWT from the mock token endpoint and apply it automatically to the “Try it out” calls
+        below. Requires your client certificate to be installed &amp; selected for this origin (mTLS).</p>
+      <div class="row">
+        <div><label>NCB / ORG</label><input id="a-ncb" value="bdf"></div>
+        <div><label>Username</label><input id="a-user" placeholder="PFRBSUIFRPPXXX0001"></div>
+        <div><label>Password</label><input id="a-pass" type="password"></div>
+        <div><label>Client ID</label>
+          <select id="a-client">
+            <option>esydlt-web-app</option>
+            <option>esydlt-backend-service</option>
+          </select>
+        </div>
+      </div>
+      <button id="a-btn" type="button">Get token &amp; authorize</button>
+      <span class="hint" id="a-status"></span>
+      <div id="a-claims"></div>
+    </div>
+
+    <div class="card" id="official-note" style="display:none">
+      <b>Reference only.</b> The official ECB OpenAPI v1.0 (EII API) — for browsing the real contract.
+      “Try it out” is disabled: the mock implements a subset. Use the <b>Mock endpoints</b> tab to test.
+    </div>
+
+    <div id="swagger-mock" style="background:#fff;border-radius:12px;overflow:hidden"></div>
+    <div id="swagger-official" style="background:#fff;border-radius:12px;overflow:hidden;display:none"></div>
+  </main>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="/ui/static/docs.js"></script>
+</body>
+
+</html>
