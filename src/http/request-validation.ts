@@ -129,6 +129,28 @@ export function schemaForRequest(method: string, path: string): string | undefin
   return ROUTE_SCHEMAS[`${method.toUpperCase()} ${segs.join("/")}`];
 }
 
+/** The only currency Pontes settles in (central-bank digital EUR). */
+export const SUPPORTED_CURRENCY = "EUR";
+
+/**
+ * Reject a non-EUR `currency` (issue #80). Pontes is EUR-only; previously
+ * funding/defunding/transfer **silently coerced** any value to EUR while other
+ * routes honoured it — both hide a client bug. A supplied non-EUR currency is
+ * now a clear 400 rather than a silent rewrite. Returns the error or `null`.
+ */
+export function currencyError(body: unknown): { errorCode: string; errorDescription: string } | null {
+  if (body && typeof body === "object") {
+    const c = (body as Record<string, unknown>).currency;
+    if (typeof c === "string" && c && c !== SUPPORTED_CURRENCY) {
+      return {
+        errorCode: "HL-VAL-001",
+        errorDescription: `Unsupported currency '${c}'. Only ${SUPPORTED_CURRENCY} is supported.`,
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * Middleware that validates create request bodies. Placed after the auth/NRO
  * chain and before the route routers, so authentication and signer binding are
@@ -151,6 +173,9 @@ export function createRequestValidationMiddleware() {
     }
 
     const errors = validateRequestBody(schemaName, body);
+    // Enforce EUR-only settlement (issue #80) — no silent coercion.
+    const currency = currencyError(body);
+    if (currency) errors.push(currency);
     if (errors.length === 0) return;
     setResponseStatus(event, 400);
     return { businessErrors: errors };
