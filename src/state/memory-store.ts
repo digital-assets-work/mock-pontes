@@ -6,6 +6,7 @@ import type {
   BusinessWindow,
 } from "./mock-store.js";
 import type { CacheInterface } from "../cache/index.js";
+import { fatalPersistError } from "../cache/index.js";
 import {
   createDcw,
   canDebit as canDebitDcw,
@@ -44,8 +45,22 @@ export class MemoryStore implements MockStore {
   /**
    * Optional cache for persistence. When provided (Redis when REDIS_URL is set)
    * wallet state is written through on every mutation and reloaded via hydrate().
+   *
+   * `onPersistError` is invoked if a write-through fails after the cache layer's
+   * reconnect-and-retry. It defaults to a fatal handler (stop the process so k8s
+   * relaunches) per issue #46 — a lost write must not be silently ignored.
+   * Tests inject a spy to observe the failure without exiting.
    */
-  constructor(private readonly cache?: CacheInterface) {}
+  constructor(
+    private readonly cache?: CacheInterface,
+    private readonly onPersistError: (err: unknown) => void = fatalPersistError,
+  ) {}
+
+  /** Fire-and-forget write-through; a post-retry failure is treated as fatal. */
+  private persist(run: () => Promise<unknown>): void {
+    if (!this.cache) return;
+    void run().catch((err) => this.onPersistError(err));
+  }
 
   /** Load persisted state (call once at startup). */
   async hydrate(): Promise<void> {
@@ -69,24 +84,28 @@ export class MemoryStore implements MockStore {
   }
 
   private persistWallets(): void {
-    if (!this.cache) return;
-    // Fire-and-forget write-through; the in-memory map is the sync source of truth.
-    void this.cache.put(WALLETS_KEY, [...this.wallets.values()], PERSIST_TTL_SEC);
+    // The in-memory map is the sync source of truth; the cache is written through.
+    this.persist(() =>
+      this.cache!.put(WALLETS_KEY, [...this.wallets.values()], PERSIST_TTL_SEC),
+    );
   }
 
   private persistDrafts(): void {
-    if (!this.cache) return;
-    void this.cache.put(DRAFTS_KEY, [...this.drafts.values()], PERSIST_TTL_SEC);
+    this.persist(() =>
+      this.cache!.put(DRAFTS_KEY, [...this.drafts.values()], PERSIST_TTL_SEC),
+    );
   }
 
   private persistTransactions(): void {
-    if (!this.cache) return;
-    void this.cache.put(TRANSACTIONS_KEY, [...this.transactions], PERSIST_TTL_SEC);
+    this.persist(() =>
+      this.cache!.put(TRANSACTIONS_KEY, [...this.transactions], PERSIST_TTL_SEC),
+    );
   }
 
   private persistSequences(): void {
-    if (!this.cache) return;
-    void this.cache.put(SEQUENCES_KEY, [...this.sequences.entries()], PERSIST_TTL_SEC);
+    this.persist(() =>
+      this.cache!.put(SEQUENCES_KEY, [...this.sequences.entries()], PERSIST_TTL_SEC),
+    );
   }
 
   // --- Wallets ---

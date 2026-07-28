@@ -13,3 +13,19 @@ export interface CacheInterface {
   del(key: string): Promise<boolean>;
   close(): void;
 }
+
+/**
+ * Default handler for a persistence failure that survives the cache layer's
+ * reconnect-and-retry. Per issue #46 a lost write must not be silently ignored:
+ * the mock stops so the orchestrator (k8s) can relaunch it with a fresh
+ * connection, rather than continuing to serve state that was never persisted.
+ * Injected into the store/repositories so tests can substitute a spy.
+ */
+export function fatalPersistError(err: unknown): void {
+  console.error(
+    "[mock-pontes] FATAL: Redis persistence failed after reconnect/retry; stopping so the orchestrator can relaunch.",
+    err,
+  );
+  process.exit(1);
+}
+

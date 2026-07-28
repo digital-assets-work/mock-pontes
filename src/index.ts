@@ -15,18 +15,57 @@ import { getRuntimePkiBundle, closeRuntimePkiPersistence, getTlsCertConfig } fro
 import { createInMemoryAuthUsersRepository, createPersistedAuthUsersRepository } from "./auth/users-repository.js";
 import { RedisCache } from "./cache/index.js";
 
+// --- Fatal-error safety net ---
+// Per issue #46 a lost persistence write (or any stray rejection) must stop the
+// process rather than leave it running in an inconsistent state; k8s relaunches
+// it with a fresh Redis connection.
+process.on("unhandledRejection", (reason) => {
+  console.error("[mock-pontes] FATAL unhandledRejection:", reason);
+  process.exit(1);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[mock-pontes] FATAL uncaughtException:", err);
+  process.exit(1);
+});
+
 // --- State ---
 const redisUrl = process.env.REDIS_URL;
-const store = new MemoryStore(
-  redisUrl ? new RedisCache(redisUrl, "mock-pontes:state") : undefined,
-);
-await store.hydrate();
+
+// When REDIS_URL is set the mock must not start unless it can reach Redis:
+// starting with persistence configured but unavailable would silently drop
+// state and mislead integrators. Connect up front and exit non-zero on failure.
+let stateCache: RedisCache | undefined;
+let usersCache: RedisCache | undefined;
+if (redisUrl) {
+  stateCache = new RedisCache(redisUrl, "mock-pontes:state");
+  usersCache = new RedisCache(redisUrl, "mock-pontes:users");
+  try {
+    await stateCache.connect();
+    await usersCache.connect();
+    console.log(`[mock-pontes] Connected to Redis (${redisUrl})`);
+  } catch (err) {
+    console.error(
+      `[mock-pontes] FATAL: REDIS_URL is set but Redis is unreachable; refusing to start. ${(err as Error).message}`,
+    );
+    process.exit(1);
+  }
+}
+
+const store = new MemoryStore(stateCache);
+try {
+  await store.hydrate();
+} catch (err) {
+  console.error(
+    `[mock-pontes] FATAL: could not load persisted state from Redis; refusing to start. ${(err as Error).message}`,
+  );
+  process.exit(1);
+}
 const runtimePki = await getRuntimePkiBundle();
 
 
 // --- Auth users repository (Redis-backed if available) ---
-const authUsersRepository = redisUrl
-  ? await createPersistedAuthUsersRepository(new RedisCache(redisUrl, "mock-pontes:users"))
+const authUsersRepository = usersCache
+  ? await createPersistedAuthUsersRepository(usersCache)
   : createInMemoryAuthUsersRepository();
 if (redisUrl) {
   console.log(`[mock-pontes] Users persistence enabled via Redis (${redisUrl})`);
