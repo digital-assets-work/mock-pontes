@@ -9,7 +9,6 @@ import {
 } from "h3";
 import { createHash, X509Certificate } from "node:crypto";
 import jwt from "jsonwebtoken";
-import { getTestKeys } from "./test-keys.js";
 import { buildJwks, buildOpenIdConfiguration } from "./oidc.js";
 import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
@@ -26,6 +25,8 @@ interface RuntimePkiMaterial {
   clientSigningCaPrivateKeyPem: string;
   clientSigningCaCertificatePem: string;
   serverCaCertificatePem: string;
+  jwtSigningPrivateKeyPem: string;
+  jwtSigningPublicKeyPem: string;
 }
 
 interface EnrollmentRouterOptions {
@@ -137,7 +138,6 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         );
       }
 
-      const keys = await getTestKeys();
       const now = Math.floor(Date.now() / 1000);
       const expiresIn = 300;
       const payload = {
@@ -154,7 +154,7 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         realm: ncb,
       };
 
-      const accessToken = jwt.sign(payload, keys.privateKeyPem, {
+      const accessToken = jwt.sign(payload, options.runtimePki.jwtSigningPrivateKeyPem, {
         algorithm: "ES256",
         keyid: "mock-pontes-key-1",
       });
@@ -330,9 +330,8 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
   // JWKS: the signing public key so clients can verify issued JWTs by `kid`.
   router.get(
     "/iam/realms/:ncb/protocol/openid-connect/certs",
-    defineEventHandler(async () => {
-      const keys = await getTestKeys();
-      return buildJwks(keys.publicKeyPem);
+    defineEventHandler(() => {
+      return buildJwks(options.runtimePki.jwtSigningPublicKeyPem);
     }),
   );
 

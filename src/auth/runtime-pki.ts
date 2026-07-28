@@ -10,6 +10,15 @@ export interface RuntimePkiBundle {
   serverCertificatePem: string;
   clientSigningCaPrivateKeyPem: string;
   clientSigningCaCertificatePem: string;
+  /**
+   * Dedicated ECDSA P-256 key used to sign/verify the access-token JWTs (#47).
+   * Kept in the persisted bundle so every replica and every restart shares one
+   * key (tokens no longer break on restart / with >1 replica). It is a *separate*
+   * key from the CA issuance key (`clientSigningCa*`) — key separation, so the
+   * mTLS trust anchor is never overloaded for JWT signing.
+   */
+  jwtSigningPrivateKeyPem: string;
+  jwtSigningPublicKeyPem: string;
 }
 
 const PKI_CACHE_PREFIX = "mock-pontes:pki";
@@ -93,6 +102,20 @@ function validateBundle(raw: unknown): RuntimePkiBundle | null {
 async function exportKeyToPem(key: CryptoKey): Promise<string> {
   const pkcs8 = await subtle.exportKey("pkcs8", key);
   return x509.PemConverter.encode(pkcs8, "PRIVATE KEY");
+}
+
+async function exportPublicKeyToPem(key: CryptoKey): Promise<string> {
+  const spki = await subtle.exportKey("spki", key);
+  return x509.PemConverter.encode(spki, "PUBLIC KEY");
+}
+
+/** Generate a standalone ECDSA P-256 keypair (used for JWT signing, #47). */
+async function generateSigningKeyPair(): Promise<{ privateKeyPem: string; publicKeyPem: string }> {
+  const keys = await subtle.generateKey(EC_ALG, true, ["sign", "verify"]);
+  return {
+    privateKeyPem: await exportKeyToPem(keys.privateKey),
+    publicKeyPem: await exportPublicKeyToPem(keys.publicKey),
+  };
 }
 
 async function generateCa(commonName: string, organization: string): Promise<{ keyPem: string; certPem: string }> {
@@ -201,6 +224,7 @@ async function generateRuntimePkiBundle(): Promise<RuntimePkiBundle> {
   const serverCa = await generateCa("MockPontes-ServerCA", "MockPontes");
   const clientCa = await generateCa("MockPontes-ClientCA", "MockPontes");
   const serverLeaf = await generateServerCertificate(serverCa.keyPem, serverCa.certPem);
+  const jwtKeys = await generateSigningKeyPair();
 
   return {
     version: 1,
@@ -210,6 +234,8 @@ async function generateRuntimePkiBundle(): Promise<RuntimePkiBundle> {
     serverCertificatePem: serverLeaf.certPem,
     clientSigningCaPrivateKeyPem: clientCa.keyPem,
     clientSigningCaCertificatePem: clientCa.certPem,
+    jwtSigningPrivateKeyPem: jwtKeys.privateKeyPem,
+    jwtSigningPublicKeyPem: jwtKeys.publicKeyPem,
   };
 }
 
@@ -248,6 +274,25 @@ export async function getRuntimePkiBundle(): Promise<RuntimePkiBundle> {
   }
 
   if (persisted) {
+    // Backward-compatible upgrade: a bundle persisted before #47 has no JWT
+    // signing key. Generate one and merge it in-place (preserving the CAs so
+    // already-enrolled client certificates stay valid), then re-persist.
+    if (!persisted.jwtSigningPrivateKeyPem || !persisted.jwtSigningPublicKeyPem) {
+      const jwtKeys = await generateSigningKeyPair();
+      persisted = {
+        ...persisted,
+        jwtSigningPrivateKeyPem: jwtKeys.privateKeyPem,
+        jwtSigningPublicKeyPem: jwtKeys.publicKeyPem,
+      };
+      try {
+        await withRetries(() => pkiCache.put(PKI_CACHE_KEY, persisted, Number.NaN));
+        console.log("[mock-pontes] Upgraded persisted PKI bundle with a JWT signing key");
+      } catch (err) {
+        if (usingRedis) {
+          throw new Error(`Failed to persist upgraded PKI bundle to Redis: ${String(err)}`);
+        }
+      }
+    }
     cachedBundle = persisted;
     console.log("[mock-pontes] Reusing PKI bundle from persisted cache");
     return cachedBundle;

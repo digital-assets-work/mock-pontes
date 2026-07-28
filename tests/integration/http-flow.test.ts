@@ -32,7 +32,6 @@ import { buildApp } from "../../src/app.js";
 import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
 import { createInMemoryAuthUsersRepository } from "../../src/auth/users-repository.js";
-import { getTestKeys } from "../../src/auth/test-keys.js";
 import officialSpec from "../../src/ui/spec/pontes-official-v1.0.json";
 
 x509.cryptoProvider.set(webcrypto as unknown as Crypto);
@@ -102,11 +101,13 @@ function request(
 // ---------------------------------------------------------------------------
 
 async function mintJwt(userUUID: string): Promise<string> {
-  const keys = await getTestKeys();
+  // Sign with the persisted, shared JWT key from the runtime PKI bundle (#47) —
+  // the same key the app now verifies with.
+  const pki = await getRuntimePkiBundle();
   // No preferred_username → the mTLS-consistency middleware is a no-op.
   return jwt.sign(
     { user_uuid: userUUID, user_profile: "PILOT_READ_WRITE", entity_bic: "BSUIFRPPXXX", realm: "bdf" },
-    keys.privateKeyPem,
+    pki.jwtSigningPrivateKeyPem,
     { algorithm: "ES256", expiresIn: "5m" },
   );
 }

@@ -58,6 +58,8 @@ export interface AppDeps {
     clientSigningCaPrivateKeyPem: string;
     clientSigningCaCertificatePem: string;
     serverCaCertificatePem: string;
+    jwtSigningPrivateKeyPem: string;
+    jwtSigningPublicKeyPem: string;
   };
   authUsersRepository: InMemoryAuthUsersRepository;
 }
@@ -109,7 +111,7 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   app.use(createNcbValidationMiddleware());
 
   // Auth chain.
-  app.use(createJwtMiddleware(["/dlt"]));
+  app.use(createJwtMiddleware(["/dlt"], runtimePki.jwtSigningPublicKeyPem));
   app.use(createMtlsConsistencyMiddleware(authUsersRepository));
   app.use(createProfileAuthorizationMiddleware());
   app.use(createNroCertCheckMiddleware(nroRoutePatterns));
