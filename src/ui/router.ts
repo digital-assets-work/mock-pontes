@@ -73,6 +73,7 @@ const NAV = `
   <div class="brand">🅜 Mock Pontes</div>
   <nav>
     <a href="/ui">Home</a>
+    <a href="/ui/config">Control panel</a>
     <a href="/ui/enroll">Enroll (CSR)</a>
     <a href="/ui/docs">API Docs</a>
   </nav>
@@ -118,6 +119,151 @@ function page(title: string, body: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} · Mock Pontes</title>${STYLE}</head>
 <body>${NAV}<main>${body}</main></body></html>`;
+}
+
+const REPO_URL = "https://github.com/digital-assets-work/mock-pontes";
+const IMAGE = "ghcr.io/digital-assets-work/mock-pontes";
+
+/**
+ * Public marketing landing page (issue #51). Neutral, professional tone, an
+ * ECB-inspired blue/gold palette (no ECB logo, and a clear non-affiliation
+ * notice). The developer control panel lives at /ui/config.
+ */
+function marketingPage(): string {
+  const version = mockVersion();
+  const imageTag = version && /^\d+\.\d+/.test(version)
+    ? `${version.split(".").slice(0, 2).join(".")}` // e.g. 1.2
+    : "1.2";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock Pontes — a self-hostable mock of the ECB Pontes A2A API</title>
+<style>
+  :root {
+    --ecb-blue:#003299; --ecb-blue-2:#0a3d91; --ecb-blue-3:#e8edf7;
+    --gold:#ffcc00; --bg:#f5f7fb; --card:#ffffff; --line:#e2e8f0;
+    --fg:#152a4e; --muted:#5b6b8c;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--fg); line-height:1.55; }
+  a { color:var(--ecb-blue); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  header.top { background:var(--ecb-blue); color:#fff; }
+  header.top .bar { max-width:1040px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; padding:14px 24px; }
+  header.top .brand { font-weight:800; letter-spacing:.2px; font-size:1.05rem; }
+  header.top nav a { color:#dbe4f7; text-decoration:none; margin-left:18px; font-size:.92rem; }
+  header.top nav a:hover { color:#fff; }
+  .hero { background:linear-gradient(180deg, var(--ecb-blue) 0%, var(--ecb-blue-2) 100%); color:#fff; }
+  .hero .inner { max-width:1040px; margin:0 auto; padding:56px 24px 64px; }
+  .hero h1 { font-size:2.3rem; margin:0 0 10px; font-weight:800; }
+  .hero .accent { height:4px; width:72px; background:var(--gold); border-radius:2px; margin:14px 0 20px; }
+  .hero p { font-size:1.12rem; color:#e6ecfa; max-width:720px; margin:0 0 24px; }
+  .cta a { display:inline-block; text-decoration:none; font-weight:600; border-radius:9px; padding:11px 20px; margin:6px 10px 0 0; }
+  .cta a.primary { background:var(--gold); color:#3a2e00; }
+  .cta a.ghost { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35); }
+  .cta a:hover { filter:brightness(1.05); }
+  .badge { display:inline-block; margin-top:22px; background:rgba(255,255,255,.10); border:1px solid rgba(255,204,0,.55); color:#fff; border-radius:8px; padding:9px 14px; font-size:.86rem; }
+  main { max-width:1040px; margin:0 auto; padding:8px 24px 40px; }
+  section { margin:38px 0; }
+  h2 { font-size:1.35rem; color:var(--ecb-blue); margin:0 0 14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; box-shadow:0 1px 2px rgba(16,32,74,.04); }
+  .card h3 { margin:0 0 8px; font-size:1.02rem; color:var(--fg); }
+  .card p { margin:0; color:var(--muted); font-size:.94rem; }
+  pre { background:#0b1b3f; color:#e6ecfa; border-radius:10px; padding:16px 18px; overflow:auto; font-size:.86rem; }
+  pre .c { color:#8aa0c9; }
+  .links { list-style:none; padding:0; margin:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; }
+  .links li { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .links a { text-decoration:none; font-weight:600; }
+  .links span { display:block; color:var(--muted); font-size:.85rem; font-weight:400; }
+  .notice { background:var(--ecb-blue-3); border:1px solid #cdd9f0; border-left:4px solid var(--gold); border-radius:10px; padding:16px 18px; color:#26365c; font-size:.94rem; }
+  footer { border-top:1px solid var(--line); color:var(--muted); font-size:.85rem; }
+  footer .inner { max-width:1040px; margin:0 auto; padding:22px 24px 40px; }
+</style></head>
+<body>
+<header class="top"><div class="bar">
+  <div class="brand">🅜 Mock Pontes</div>
+  <nav>
+    <a href="/ui/config">Control panel</a>
+    <a href="/ui/docs">API docs</a>
+    <a href="/ui/enroll">Enroll</a>
+    <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub ↗</a>
+  </nav>
+</div></header>
+
+<div class="hero"><div class="inner">
+  <h1>Mock Pontes</h1>
+  <div class="accent"></div>
+  <p>A stateful, self-hostable mock of the publicly documented <strong>ECB Pontes (TARGET) Agent-to-Application (A2A) API</strong>. Build and test your Pontes integration locally — no access to the ECB test environment and no waiting for a business window.</p>
+  <div class="cta">
+    <a class="primary" href="/ui/docs">Explore the API ↗</a>
+    <a class="ghost" href="${REPO_URL}" target="_blank" rel="noopener">Source on GitHub</a>
+    <a class="ghost" href="/ui/config">Control panel</a>
+  </div>
+  <div class="badge">⚠ Unofficial community tool — <strong>not affiliated with, endorsed, or supported by the European Central Bank</strong>.</div>
+</div></div>
+
+<main>
+  <section>
+    <h2>What it is</h2>
+    <p>Mock Pontes reproduces the <em>shape</em> of the publicly documented Pontes A2A API — wallets, funding &amp; defunding, transfers, direct-RTGS, PFoD and XvP — together with the full transport and authentication chain: <strong>mTLS</strong>, <strong>OAuth2 JWT</strong>, and <strong>NRO</strong> (Non-Repudiation-of-Origin, ECDSA&nbsp;P-256) request signing. State is kept in a stateful in-memory or Redis-backed ledger you can create, approve and inspect.</p>
+  </section>
+
+  <section>
+    <h2>Use cases</h2>
+    <div class="grid">
+      <div class="card"><h3>Local integration dev</h3><p>Point your Pontes base URL at the mock and iterate on the 2-step draft → approve flows without ECB credentials.</p></div>
+      <div class="card"><h3>Full transport/auth</h3><p>Exercise mTLS, JWT and NRO signing end-to-end, including four-eyes approval and the signer↔certificate binding.</p></div>
+      <div class="card"><h3>CI &amp; conformance</h3><p>A fast, zero-dependency service for automated tests; responses follow the official OpenAPI, with unimplemented operations clearly tagged.</p></div>
+      <div class="card"><h3>Demos &amp; onboarding</h3><p>Stand up a realistic endpoint for demos and to onboard teams before real Pontes access is available.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Get started</h2>
+    <p>Run the published container (the mock serves HTTPS with a self-signed cert, so use <code>-k</code> locally):</p>
+    <pre><span class="c"># run the mock</span>
+docker run --rm -p 3001:3001 ${IMAGE}:${imageTag}
+
+<span class="c"># health check</span>
+curl -sk https://localhost:3001/dlt/bdf/api/octopus/health</pre>
+    <p>Or from source (<a href="${REPO_URL}#quick-start-from-source" target="_blank" rel="noopener">Node.js 24+</a>):</p>
+    <pre>git clone ${REPO_URL}.git
+cd mock-pontes &amp;&amp; npm ci &amp;&amp; npm run dev</pre>
+  </section>
+
+  <section>
+    <h2>Example client apps</h2>
+    <p>Ready-to-run clients that connect over mTLS, acquire a JWT and submit an NRO-signed funding request — in <strong>TypeScript</strong>, <strong>Python</strong> and <strong>Java</strong>:</p>
+    <ul class="links">
+      <li><a href="${REPO_URL}/tree/main/examples/typescript" target="_blank" rel="noopener">TypeScript example ↗</a><span>Node built-ins, PEM cert + key</span></li>
+      <li><a href="${REPO_URL}/tree/main/examples/python" target="_blank" rel="noopener">Python example ↗</a><span>requests + cryptography</span></li>
+      <li><a href="${REPO_URL}/tree/main/examples/java" target="_blank" rel="noopener">Java example ↗</a><span>JDK built-ins, PKCS#12</span></li>
+      <li><a href="${REPO_URL}/tree/main/examples" target="_blank" rel="noopener">All examples ↗</a><span>Shared scenario &amp; prerequisites</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Resources</h2>
+    <ul class="links">
+      <li><a href="${REPO_URL}" target="_blank" rel="noopener">Source code (GitHub) ↗</a><span>${REPO_URL.replace("https://", "")}</span></li>
+      <li><a href="https://github.com/digital-assets-work/mock-pontes/pkgs/container/mock-pontes" target="_blank" rel="noopener">Container image ↗</a><span>${IMAGE}</span></li>
+      <li><a href="/ui/docs">API documentation</a><span>Swagger UI + vendored official spec</span></li>
+      <li><a href="/ui/config">Control panel</a><span>Runtime config &amp; connectivity</span></li>
+      <li><a href="/ui/enroll">CSR enrollment</a><span>Obtain a client certificate</span></li>
+      <li><a href="${REPO_URL}/blob/main/LICENSE" target="_blank" rel="noopener">License — Apache-2.0 ↗</a><span>Open source</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="notice"><strong>Not affiliated with the ECB.</strong> Mock Pontes is an independent, open-source community tool. It is not produced, endorsed, or supported by the European Central Bank and reproduces the shape of the publicly documented Pontes A2A API for development convenience only. Always validate against the official ECB environment and documentation before going live.</div>
+  </section>
+</main>
+
+<footer><div class="inner">
+  Mock Pontes v${version} · Apache-2.0 · Unofficial — not affiliated with the European Central Bank ·
+  <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a>
+</div></footer>
+</body></html>`;
 }
 
 const HOME_BODY = `
@@ -474,7 +620,15 @@ export function createUiRouter() {
     "/ui",
     defineEventHandler((event) => {
       setResponseHeader(event, "content-type", "text/html; charset=utf-8");
-      return page("Home", HOME_BODY);
+      return marketingPage();
+    }),
+  );
+
+  router.get(
+    "/ui/config",
+    defineEventHandler((event) => {
+      setResponseHeader(event, "content-type", "text/html; charset=utf-8");
+      return page("Control panel", HOME_BODY);
     }),
   );
 
