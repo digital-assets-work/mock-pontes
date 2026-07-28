@@ -123,7 +123,9 @@ async function generateCa(commonName: string, organization: string): Promise<{ k
 
   const cert = await x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: crypto.randomBytes(16).toString("hex"),
-    name: `CN=${commonName}, O=${organization}, C=DEV`,
+    // Richer, real-CA-shaped DN (issue #72) — still clearly a mock. Only fresh
+    // PKI picks this up; a persisted bundle keeps its existing issuer DN.
+    name: `CN=${commonName}, OU=${organization} PKI, O=${organization}, L=MockCity, ST=MockState, C=DEV`,
     notBefore: new Date(),
     notAfter: new Date(Date.now() + 10 * 365.25 * 24 * 60 * 60 * 1000),
     signingAlgorithm: SIGNING_ALG,
