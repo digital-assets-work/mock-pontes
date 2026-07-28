@@ -97,6 +97,16 @@ export abstract class Workflow {
    */
   protected readonly debitsSource: boolean = false;
 
+  /**
+   * True when the **credited** wallet must already exist (issue #77). Every
+   * money-movement workflow credits a real DCW that must exist beforehand —
+   * crediting an unknown alias is rejected rather than silently discarded (which
+   * destroyed cash). Two workflows override this to `false`:
+   *   - funding auto-creates the credited wallet for the caller's entity;
+   *   - defunding credits the (virtual) infinite issuance wallet.
+   */
+  protected readonly creditsExistingWallet: boolean = true;
+
   constructor(protected readonly store: MockStore) {}
 
   // --- extension points -----------------------------------------------------
@@ -119,6 +129,7 @@ export abstract class Workflow {
     const record = this.buildRecord(init, "PENDING_APPROVAL");
     this.conditions("create", record, actor.caller);
     this.assertDebitWalletExists(record);
+    this.assertCreditWalletExists(record);
     this.store.addDraft(record);
     return record;
   }
@@ -154,6 +165,7 @@ export abstract class Workflow {
     }
     this.conditions("approve", record, actor.caller);
     this.assertDebitWalletExists(record);
+    this.assertCreditWalletExists(record);
     this.apply(record, actor.caller);
     this.store.updateDraft(id, { status: "SETTLED", approverUserUUID: actor.approverUserUUID });
     this.recordTransaction(record);
@@ -173,6 +185,7 @@ export abstract class Workflow {
     const record = this.buildRecord(init, "SETTLED");
     this.conditions("create", record, actor.caller);
     this.assertDebitWalletExists(record);
+    this.assertCreditWalletExists(record);
     this.apply(record, actor.caller);
     this.recordTransaction(record);
     return record;
@@ -225,6 +238,24 @@ export abstract class Workflow {
     }
   }
 
+  /**
+   * Enforce that the credited wallet exists BEFORE any debit runs (issue #77),
+   * so a settlement can never debit the source and then silently discard the
+   * credit to an unknown wallet (which destroyed cash). Funding/defunding opt
+   * out via {@link creditsExistingWallet}.
+   */
+  protected assertCreditWalletExists(record: Draft): void {
+    if (!this.creditsExistingWallet) return;
+    this.requireCreditWallet(record.creditedWalletAlias);
+  }
+
+  /** Throw unless the credited wallet exists (issue #77). */
+  protected requireCreditWallet(alias: string): void {
+    if (alias && !this.store.getWallet(alias)) {
+      throw new WorkflowRejection(422, "HL-WAL-003", `Credit wallet ${alias} does not exist`);
+    }
+  }
+
   protected recordTransaction(record: Draft): void {
     this.store.addTransaction({
       id: this.transactionId(record),
@@ -241,12 +272,14 @@ export abstract class Workflow {
   }
 
   /**
-   * Unchecked credit that preserves current mock behaviour (no-op if the wallet
-   * is missing). Concrete workflows use this from `apply()`.
+   * Credit the wallet's available balance. The wallet MUST exist — a missing
+   * credited wallet throws (issue #77) rather than silently discarding the
+   * credit (which broke conservation of value). Callers assert existence up
+   * front via {@link assertCreditWalletExists} so this never fires mid-apply.
    */
   protected rawCredit(alias: string, amount: string): void {
     const w = this.store.getWallet(alias);
-    if (!w) return;
+    if (!w) throw new WorkflowRejection(422, "HL-WAL-003", `Credit wallet ${alias} does not exist`);
     let a: number;
     try {
       a = parseAmount(amount);
