@@ -27,6 +27,7 @@
 
 import type { MockStore, Draft } from "../state/mock-store.js";
 import type { DcwCaller } from "../state/dcw.js";
+import { parseAmount } from "../state/dcw.js";
 
 export type WorkflowType = Draft["type"];
 export type WorkflowState = Draft["status"];
@@ -246,9 +247,15 @@ export abstract class Workflow {
   protected rawCredit(alias: string, amount: string): void {
     const w = this.store.getWallet(alias);
     if (!w) return;
+    let a: number;
+    try {
+      a = parseAmount(amount);
+    } catch (e) {
+      throw this.mapDcwError(e, alias);
+    }
     this.store.upsertWallet({
       ...w,
-      balance: (parseFloat(w.balance) + parseFloat(amount)).toFixed(2),
+      balance: (parseFloat(w.balance) + a).toFixed(2),
     });
   }
 
@@ -259,9 +266,15 @@ export abstract class Workflow {
   protected rawDebit(alias: string, amount: string): void {
     const w = this.store.getWallet(alias);
     if (!w) return;
+    let a: number;
+    try {
+      a = parseAmount(amount);
+    } catch (e) {
+      throw this.mapDcwError(e, alias);
+    }
     this.store.upsertWallet({
       ...w,
-      balance: (parseFloat(w.balance) - parseFloat(amount)).toFixed(2),
+      balance: (parseFloat(w.balance) - a).toFixed(2),
     });
   }
 
@@ -307,6 +320,9 @@ export abstract class Workflow {
     }
     if (msg === "DCW_NEGATIVE_AMOUNT") {
       return new WorkflowRejection(400, "HL-VAL-002", "Amount must not be negative");
+    }
+    if (msg.startsWith("DCW_INVALID_AMOUNT")) {
+      return new WorkflowRejection(400, "HL-VAL-003", "Amount is not a valid number");
     }
     return new WorkflowRejection(422, "HL-GER-000", msg);
   }
