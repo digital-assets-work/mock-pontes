@@ -28,9 +28,11 @@ const HTTP_METHODS = ["get", "post", "put", "delete", "patch"];
 const MOCK_INFO_DESCRIPTION =
   "Served by **mock-pontes**. This is the official ECB Pontes Pilot *EII API* " +
   "OpenAPI, dynamically annotated: operations this mock does not implement are " +
-  "tagged `NotImplemented` (`x-mock-implemented: false`). Mock-only helpers " +
-  "(CSR enrolment, connectivity checks, `/admin/**`) are appended under `Mock ·` " +
-  "tags. The pristine official spec is at `/openapi/official.json`.";
+  "tagged `NotImplemented` (`x-mock-implemented: false`) and, when called, return " +
+  "**`501 Not Implemented`** (not a generic `404`) so \"try it out\" is self-" +
+  "explanatory (issue #62). Mock-only helpers (CSR enrolment, connectivity " +
+  "checks, `/admin/**`) are appended under `Mock ·` tags. The pristine official " +
+  "spec is at `/openapi/official.json`.";
 
 const NCB_PARAM = {
   name: "ncb",
