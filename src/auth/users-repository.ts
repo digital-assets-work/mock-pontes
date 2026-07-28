@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CacheInterface } from "../cache/index.js";
+import { fatalPersistError } from "../cache/index.js";
 
 export interface AuthUserRecord {
   username: string;
@@ -203,6 +204,7 @@ interface PersistedUsersData {
  */
 export async function createPersistedAuthUsersRepository(
   cache: CacheInterface,
+  onPersistError: (err: unknown) => void = fatalPersistError,
 ): Promise<InMemoryAuthUsersRepository> {
   const repo = createInMemoryAuthUsersRepository();
 
@@ -238,7 +240,9 @@ export async function createPersistedAuthUsersRepository(
     try {
       await cache.put<PersistedUsersData>(USERS_CACHE_KEY, { users: allUsers }, NaN);
     } catch (err) {
-      console.error("[mock-pontes] Failed to persist users to Redis:", err);
+      // The cache layer already reconnected and retried once; a failure here
+      // means the enrolment was not persisted, so stop (issue #46).
+      onPersistError(err);
     }
   }
 
