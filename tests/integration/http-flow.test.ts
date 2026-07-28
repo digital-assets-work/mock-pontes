@@ -313,6 +313,21 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(res.status).toBe(404);
   });
 
+  it("rejects a CSR enrolment with a typo'd/unknown profile (400, #84)", async () => {
+    const res = await request(server.port, "POST", `/iam/realms/${NCB}/protocol/openid-connect/csr`, {
+      body: {
+        username: "PTYPO0001",
+        password: "secret",
+        profile: "PILOT_READWRITE", // typo — missing underscore
+        entityBIC: "BSUIFRPPXXX",
+        csr: "dummy-csr-not-reached",
+      },
+    });
+    expect(res.status).toBe(400);
+    // The CSR error body is normalised (only the token endpoint keeps the OAuth shape).
+    expect(res.text).toMatch(/Unknown profile/);
+  });
+
   it("returns application/json (a JSON string) for a one-step bridge payment (#82)", async () => {
     // Fund a source wallet first.
     const funded = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
