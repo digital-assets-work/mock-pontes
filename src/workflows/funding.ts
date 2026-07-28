@@ -10,6 +10,9 @@ import { Workflow, type WorkflowPhase } from "./workflow.js";
 export class FundingWorkflow extends Workflow {
   readonly type = "FUNDING" as const;
   protected readonly notFoundLabel = "Funding draft";
+  // Funding auto-creates the credited wallet (for the caller's entity) at the
+  // route, so it does not require a pre-existing credited wallet (issue #77).
+  protected readonly creditsExistingWallet = false;
 
   /**
    * Fund only a wallet you are authorised to act on (issue #56). Funding has no
@@ -39,6 +42,8 @@ export class DefundingWorkflow extends Workflow {
   readonly type = "DEFUNDING" as const;
   protected readonly notFoundLabel = "Defunding draft";
   protected readonly debitsSource = true;
+  // Defunding credits the virtual infinite issuance wallet, not a real DCW.
+  protected readonly creditsExistingWallet = false;
 
   protected apply(record: Draft, caller?: DcwCaller): void {
     this.checkedDebit(record.debitedWalletAlias, record.amount, caller);

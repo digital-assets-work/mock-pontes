@@ -38,18 +38,20 @@ function callerOf(event: H3Event): { entityBIC: string } | undefined {
 }
 
 /**
- * Auto-create a wallet if it doesn't exist (mock-only convenience).
+ * Auto-create the credited wallet if it doesn't exist yet (mock convenience,
+ * issue #23) — owned by the **caller's own entity** (issue #77), taken from the
+ * verified JWT, never from the request body. Other money-movement routes do NOT
+ * auto-create: crediting an unknown wallet is rejected there.
  */
-function ensureWallet(store: MockStore, alias: string, body: any): void {
+function ensureWallet(store: MockStore, alias: string, ownerEntity: string, managerNCB: string, currency: string): void {
   if (!alias || store.getWallet(alias)) return;
-  const owner = body.creditedCashWalletOwnerID || body.debitedCashWalletOwnerID || "UNKNOWN";
   store.ensureWallet(alias, {
-    ownerBIC: owner,
-    ownerEntityID: owner,
-    managerNCB: body.creditedCashWalletManagerID || body.debitedCashWalletManagerID || "UNKNOWN",
-    currency: body.currency || "EUR",
+    ownerBIC: ownerEntity,
+    ownerEntityID: ownerEntity,
+    managerNCB,
+    currency,
   });
-  console.log(`[mock-pontes] Auto-created wallet ${alias}`);
+  console.log(`[mock-pontes] Auto-created wallet ${alias} for entity ${ownerEntity}`);
 }
 
 export function createFundingRouter(store: MockStore) {
@@ -72,9 +74,19 @@ export function createFundingRouter(store: MockStore) {
     defineEventHandler(async (event) => {
       const body = await readBody(event);
       const id = store.nextId("FRQ");
+      const caller = callerOf(event);
 
-      // Auto-create credited wallet if it doesn't exist (mock convenience)
-      ensureWallet(store, body.creditedCashWalletAlias, body);
+      // Auto-create the credited wallet if unknown — owned by the caller's own
+      // entity (issue #77), with the NCB manager from the body or path.
+      if (caller?.entityBIC) {
+        ensureWallet(
+          store,
+          body.creditedCashWalletAlias,
+          caller.entityBIC,
+          body.creditedCashWalletManagerID || "UNKNOWN",
+          body.currency || "EUR",
+        );
+      }
 
       const draft = funding.create(
         {
@@ -86,7 +98,7 @@ export function createFundingRouter(store: MockStore) {
           // Initiator is the authenticated caller (four-eyes), never the body (#28).
           initiatorUserUUID: approverUUID(event),
         },
-        { caller: callerOf(event) },
+        { caller },
       );
 
       setResponseStatus(event, 201);

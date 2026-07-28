@@ -130,11 +130,16 @@ The cash-token account holding a balance.
 - Cardinality: owned by **1** Entity, managed by **1** NCB; holds **1** Holding
   per currency; linked to **0..\*** T2 Accounts.
 - Official: create (2-step), list, get, get settled transactions, total-under-mgmt.
-- Mock: **read** (`GET .../ams/wallets`, `.../{walias}`, `.../transactions`)
-  implemented; wallets are **auto-created on first reference — credit side only**
-  (issue #23): a referenced wallet is created when it is the credit target, but a
-  missing **debit-side** wallet raises a condition error (`422`) rather than being
-  created. As of #13 the DCW is properly modelled: **`availableBalance` +
+- Mock: **read** (`GET .../ams/wallets`, `.../{walias}`, `.../transactions`) and
+  **create** (`POST .../ams/wallets`) implemented. Wallet creation is scoped to
+  the caller's **own entity** — the owner is taken from the verified JWT, never
+  the request body (issue #77). Auto-creation is now **funding-only**: funding
+  creates the credited wallet for the caller's entity if it doesn't exist (issue
+  #23/#77); **every other settlement path rejects an unknown credited wallet**
+  with `422 HL-WAL-003` rather than silently discarding the credit (which
+  destroyed cash — conservation of value, issue #77). A missing **debit-side**
+  wallet still raises `422 HL-WAL-002`. As of #13 the DCW is properly modelled:
+  **`availableBalance` +
   `lockedBalance`** (invariant available + locked = total), per-currency
   holdings, `isBlocked`/validity, and **debit rights** (only a user of the owning
   entity may debit by default; PoA grantees / whitelisted operators too). The

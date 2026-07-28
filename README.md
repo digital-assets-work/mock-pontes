@@ -92,6 +92,13 @@ real Pontes gateway): `GET /check/ip`, `GET /check/mtls`.
 > always succeeds — there is no separate admin "fund" shortcut. Move balances
 > between wallets with the official transfer (`rvs/transactions-requests` +
 > approve) or 1-step bridge payment, and remove cash with **defunding**.
+>
+> **Wallets.** Funding **auto-creates** its credited wallet for **your own
+> entity** if it doesn't exist; you can also pre-create one with
+> `POST .../ams/wallets` (owner taken from your JWT — you may only create wallets
+> for your own entity). Every other settlement path **rejects an unknown credited
+> wallet** with `422 HL-WAL-003` (conservation of value, issue #77) rather than
+> silently discarding the credit.
 
 ### Admin routes
 
