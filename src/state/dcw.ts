@@ -106,6 +106,22 @@ export function canDebit(w: Wallet, caller: DcwCaller = {}, now: Date = new Date
   return { ok: false, reason: "NOT_AUTHORISED_TO_DEBIT" };
 }
 
+/**
+ * Read-rights guard (issue #56). A user may read a DCW only if they belong to
+ * the owning entity, are a PoA grantee, or a whitelisted market DLT operator —
+ * the same allow-set as {@link canDebit}, kept as a separate function so read
+ * rules can evolve independently. Unlike debit, reads ignore blocked/validity
+ * state. Callers mask a denied read as "not found" (404) to hide existence.
+ */
+export function canRead(w: Wallet, caller: DcwCaller = {}): CanDebitResult {
+  const byEntity = !!caller.entityBIC && caller.entityBIC === w.ownerEntityID;
+  const byPoa = !!caller.entityBIC && w.poaGrantees.includes(caller.entityBIC);
+  const byOperator =
+    !!caller.marketDLTOperator && w.whitelistedOperators.includes(caller.marketDLTOperator);
+  if (byEntity || byPoa || byOperator) return { ok: true };
+  return { ok: false, reason: "NOT_AUTHORISED_TO_READ" };
+}
+
 /** Credit the available balance. */
 export function withCredit(w: Wallet, amount: string): Wallet {
   const a = positiveAmount(amount);

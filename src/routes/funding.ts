@@ -31,6 +31,12 @@ function approverUUID(event: H3Event): string | undefined {
   return (event.context.auth as AuthContext | undefined)?.userUUID;
 }
 
+/** Acting entity from the verified JWT, for DCW authorisation (issue #56). */
+function callerOf(event: H3Event): { entityBIC: string } | undefined {
+  const entity = (event.context.auth as AuthContext | undefined)?.entityBIC;
+  return entity ? { entityBIC: entity } : undefined;
+}
+
 /**
  * Auto-create a wallet if it doesn't exist (mock-only convenience).
  */
@@ -70,15 +76,18 @@ export function createFundingRouter(store: MockStore) {
       // Auto-create credited wallet if it doesn't exist (mock convenience)
       ensureWallet(store, body.creditedCashWalletAlias, body);
 
-      const draft = funding.create({
-        id,
-        amount: body.amount || "0.00",
-        currency: "EUR",
-        creditedWalletAlias: body.creditedCashWalletAlias || "",
-        debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-        // Initiator is the authenticated caller (four-eyes), never the body (#28).
-        initiatorUserUUID: approverUUID(event),
-      });
+      const draft = funding.create(
+        {
+          id,
+          amount: body.amount || "0.00",
+          currency: "EUR",
+          creditedWalletAlias: body.creditedCashWalletAlias || "",
+          debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+          // Initiator is the authenticated caller (four-eyes), never the body (#28).
+          initiatorUserUUID: approverUUID(event),
+        },
+        { caller: callerOf(event) },
+      );
 
       setResponseStatus(event, 201);
       return {

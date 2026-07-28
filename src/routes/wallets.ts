@@ -3,10 +3,30 @@ import {
   defineEventHandler,
   getRouterParam,
   setResponseStatus,
+  type H3Event,
 } from "h3";
 import type { MockStore, Wallet } from "../state/mock-store.js";
+import type { DcwCaller } from "../state/dcw.js";
 import { totalOf } from "../state/dcw.js";
+import type { AuthContext } from "../auth/jwt-middleware.js";
 import { track } from "../http/route-registry.js";
+
+/** The acting entity, derived from the verified JWT (issue #56 scoping). */
+function callerOf(event: H3Event): DcwCaller {
+  const entity = (event.context.auth as AuthContext | undefined)?.entityBIC;
+  return entity ? { entityBIC: entity } : {};
+}
+
+function walletNotFound(alias: string) {
+  return {
+    businessErrors: [
+      {
+        errorCode: "HL-GER-001",
+        errorDescription: `Wallet ${alias} not found`,
+      },
+    ],
+  };
+}
 
 function toWalletResponse(wallet: Wallet) {
   return {
@@ -35,10 +55,11 @@ export function createWalletsRouter(store: MockStore) {
 
   // GET /dlt/:ncb/api/octopus/ams/wallets — Retrieve Dedicated Cash Wallet list
   // Official AMS query. Replaces the former mock-only `GET /admin/wallets`.
+  // Scoped to the caller's entity (issue #56): only own/PoA/operated wallets.
   router.get(
     "/dlt/:ncb/api/octopus/ams/wallets",
-    defineEventHandler(() => {
-      return { wallets: store.getWallets().map(toWalletResponse) };
+    defineEventHandler((event) => {
+      return { wallets: store.getWallets(callerOf(event)).map(toWalletResponse) };
     }),
   );
 
@@ -47,17 +68,11 @@ export function createWalletsRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/ams/wallets/:walias",
     defineEventHandler((event) => {
       const walias = getRouterParam(event, "walias")!;
-      const wallet = store.getWallet(walias);
+      // A wallet the caller may not read is masked as "not found" (404).
+      const wallet = store.getWallet(walias, callerOf(event));
       if (!wallet) {
         setResponseStatus(event, 404);
-        return {
-          businessErrors: [
-            {
-              errorCode: "HL-GER-001",
-              errorDescription: `Wallet ${walias} not found`,
-            },
-          ],
-        };
+        return walletNotFound(walias);
       }
       return toWalletResponse(wallet);
     }),
@@ -68,19 +83,13 @@ export function createWalletsRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/ams/wallets/:walias/transactions",
     defineEventHandler((event) => {
       const walias = getRouterParam(event, "walias")!;
-      const wallet = store.getWallet(walias);
+      const caller = callerOf(event);
+      const wallet = store.getWallet(walias, caller);
       if (!wallet) {
         setResponseStatus(event, 404);
-        return {
-          businessErrors: [
-            {
-              errorCode: "HL-GER-001",
-              errorDescription: `Wallet ${walias} not found`,
-            },
-          ],
-        };
+        return walletNotFound(walias);
       }
-      const transactions = store.getWalletTransactions(walias);
+      const transactions = store.getWalletTransactions(walias, caller);
       return { transactions };
     }),
   );

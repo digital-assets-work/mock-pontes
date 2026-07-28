@@ -5,12 +5,11 @@
  * - 1-step bridge endpoints require EXTERNAL_USER profile
  * - 2-step draft/approve and funding/defunding endpoints require PILOT_READ_WRITE profile
  *
- * Skipped when PONTES_MOCK_LENIENT_PROFILE=true.
+ * Always enforced (no lenient toggle).
  */
 
 import { defineEventHandler, setResponseStatus, type H3Event } from "h3";
 import {
-  isStrictMode,
   BRIDGE_1STEP_PROFILES,
   DRAFT_APPROVE_PROFILES,
 } from "./profile-enforcement.js";
@@ -58,8 +57,6 @@ function createAuthorizationError(profile: string, requiredProfiles: Set<string>
  */
 export function createProfileAuthorizationMiddleware() {
   return defineEventHandler((event: H3Event) => {
-    if (!isStrictMode()) return;
-
     const path = event.path || "";
     // Only apply to /dlt/ routes (same scope as JWT middleware)
     if (!path.startsWith("/dlt")) return;

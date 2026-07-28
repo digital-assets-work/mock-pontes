@@ -8,7 +8,7 @@
  *   REFERENTIAL_READ_ONLY  → client_id=esydlt-web-app (no secret)
  *   REFERENTIAL_READ_WRITE → client_id=esydlt-web-app (no secret)
  *
- * Enforcement is strict by default; set PONTES_MOCK_LENIENT_PROFILE=true to disable.
+ * Enforcement is always strict (no lenient toggle).
  */
 
 export const CLIENT_ID_BACKEND_SERVICE = "esydlt-backend-service";
@@ -24,14 +24,6 @@ const WEB_APP_PROFILES = new Set([
   "REFERENTIAL_READ_ONLY",
   "REFERENTIAL_READ_WRITE",
 ]);
-
-/**
- * Returns true when strict profile/client_id enforcement is active (default).
- * Returns false when PONTES_MOCK_LENIENT_PROFILE=true.
- */
-export function isStrictMode(): boolean {
-  return process.env.PONTES_MOCK_LENIENT_PROFILE !== "true";
-}
 
 export interface ClientIdValidationResult {
   valid: boolean;

@@ -143,7 +143,9 @@ export function createPfodRouter(store: MockStore) {
         setResponseStatus(event, 400);
         return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, buyerCashTokenWalletRef" }] };
       }
-      const buyerEntity = body.buyerID || (event.context.auth as AuthContext | undefined)?.entityBIC;
+      // The buyer wallet is owned by the entity named in the request (issue
+      // #56), never the caller.
+      const buyerEntity = body.buyerID;
       ensureWallet(store, buyerCashTokenWalletRef, body.buyerCAMBIC || "UNKNOWN", buyerEntity);
       storeLeg(receiveId(tradeID), tradeID, amount, currency, "", buyerCashTokenWalletRef, (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);

@@ -5,12 +5,10 @@
  * - Token endpoint rejects wrong client_id for profile
  * - EXTERNAL_USER requires client_secret
  * - Route-level authorization rejects wrong profile
- * - PONTES_MOCK_LENIENT_PROFILE=true disables all checks
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import {
-  isStrictMode,
   validateClientIdForProfile,
   CLIENT_ID_BACKEND_SERVICE,
   CLIENT_ID_WEB_APP,
@@ -19,33 +17,6 @@ import {
 } from "../src/auth/profile-enforcement.js";
 
 describe("Profile Enforcement Helper", () => {
-  const originalEnv = process.env.PONTES_MOCK_LENIENT_PROFILE;
-
-  afterEach(() => {
-    if (originalEnv === undefined) {
-      delete process.env.PONTES_MOCK_LENIENT_PROFILE;
-    } else {
-      process.env.PONTES_MOCK_LENIENT_PROFILE = originalEnv;
-    }
-  });
-
-  describe("isStrictMode", () => {
-    it("returns true by default (no env var)", () => {
-      delete process.env.PONTES_MOCK_LENIENT_PROFILE;
-      expect(isStrictMode()).toBe(true);
-    });
-
-    it("returns true when env var is not 'true'", () => {
-      process.env.PONTES_MOCK_LENIENT_PROFILE = "false";
-      expect(isStrictMode()).toBe(true);
-    });
-
-    it("returns false when PONTES_MOCK_LENIENT_PROFILE=true", () => {
-      process.env.PONTES_MOCK_LENIENT_PROFILE = "true";
-      expect(isStrictMode()).toBe(false);
-    });
-  });
-
   describe("validateClientIdForProfile", () => {
     describe("EXTERNAL_USER", () => {
       it("accepts correct client_id and client_secret", () => {

@@ -147,13 +147,16 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
   it("funding approve credits the target only", () => {
     const store = seededStore();
     const wf = new FundingWorkflow(store);
-    wf.create({
-      id: "FRQ1",
-      amount: "25.00",
-      creditedWalletAlias: "DST",
-      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-      initiatorUserUUID: "user-1",
-    });
+    wf.create(
+      {
+        id: "FRQ1",
+        amount: "25.00",
+        creditedWalletAlias: "DST",
+        debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+        initiatorUserUUID: "user-1",
+      },
+      { caller: { entityBIC: "BANKBXXXXXX" } },
+    );
     wf.approve("FRQ1", { approverUserUUID: "user-2" });
     expect(store.getWallet("DST")?.balance).toBe("25.00");
   });
@@ -172,13 +175,16 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
   it("funding approve enforces four-eyes (approver ≠ initiator)", () => {
     const store = seededStore();
     const wf = new FundingWorkflow(store);
-    wf.create({
-      id: "FRQ1",
-      amount: "10.00",
-      creditedWalletAlias: "DST",
-      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-      initiatorUserUUID: "user-1",
-    });
+    wf.create(
+      {
+        id: "FRQ1",
+        amount: "10.00",
+        creditedWalletAlias: "DST",
+        debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+        initiatorUserUUID: "user-1",
+      },
+      { caller: { entityBIC: "BANKBXXXXXX" } },
+    );
     try {
       wf.approve("FRQ1", { approverUserUUID: "user-1" });
       throw new Error("expected rejection");
@@ -247,12 +253,15 @@ describe("FundingWorkflow / DefundingWorkflow", () => {
 
   it("does not confuse a funding draft with a defunding workflow (type guard)", () => {
     const store = seededStore();
-    new FundingWorkflow(store).create({
-      id: "FRQ1",
-      amount: "10.00",
-      creditedWalletAlias: "DST",
-      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-    });
+    new FundingWorkflow(store).create(
+      {
+        id: "FRQ1",
+        amount: "10.00",
+        creditedWalletAlias: "DST",
+        debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      },
+      { caller: { entityBIC: "BANKBXXXXXX" } },
+    );
     const defunding = new DefundingWorkflow(store);
     expect(() => defunding.approve("FRQ1")).toThrow();
   });
@@ -500,13 +509,16 @@ describe("Debit-side wallet must pre-exist (issue #23)", () => {
     const store = new MemoryStore();
     store.ensureWallet("DST", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDFEFR" });
     const wf = new FundingWorkflow(store);
-    wf.create({
-      id: "FRQ1",
-      amount: "25.00",
-      creditedWalletAlias: "DST",
-      debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", // debit side never touched
-      initiatorUserUUID: "user-1",
-    });
+    wf.create(
+      {
+        id: "FRQ1",
+        amount: "25.00",
+        creditedWalletAlias: "DST",
+        debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", // debit side never touched
+        initiatorUserUUID: "user-1",
+      },
+      { caller: { entityBIC: "BANKBXXXXXX" } },
+    );
     wf.approve("FRQ1", { approverUserUUID: "user-2" });
     expect(store.getWallet("DST")?.balance).toBe("25.00");
   });

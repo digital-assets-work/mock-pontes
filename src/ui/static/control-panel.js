@@ -9,9 +9,6 @@
       var version = document.getElementById("version");
       if (version) version.textContent = "v" + c.version;
 
-      var strict = c.runtime.strictProfile
-        ? "<span class=\"pill ok\">STRICT</span>"
-        : "<span class=\"pill warn\">LENIENT</span>";
       var redis = c.runtime.redis
         ? "<span class=\"pill ok\">on</span>"
         : "<span class=\"pill\">off (in-memory)</span>";
@@ -22,7 +19,6 @@
         row("Base URL", "<code>" + c.baseUrl + "</code>") +
         row("Default NCB / ORG", "<code>" + c.ncb + "</code>") +
         row("Port", "<code>" + c.runtime.port + "</code>") +
-        row("Profile enforcement", strict) +
         row("User persistence", redis);
 
       var E = c.endpoints;

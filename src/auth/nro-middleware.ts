@@ -247,10 +247,6 @@ export function createNroCertCheckMiddleware(routePatterns: readonly RegExp[]) {
     // (HL-NRO-001).
     if (!body || !body.signerPEM) return;
 
-    // Dev escape hatch: skip the binding check when explicitly running without
-    // mTLS. Default is strict (fail closed).
-    if (process.env.PONTES_MOCK_LENIENT_MTLS === "true") return;
-
     const clientCert = resolveClientCert(event);
 
     // FAIL CLOSED (issue #30): the request presents an NRO signer certificate
