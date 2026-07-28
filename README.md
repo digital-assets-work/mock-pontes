@@ -101,6 +101,20 @@ real Pontes gateway): `GET /check/ip`, `GET /check/mtls`.
 > path **rejects an unknown credited wallet** with `422 HL-WAL-003` (conservation
 > of value, issue #77) rather than silently discarding the credit.
 
+> **No idempotency / duplicate-id control (matches the spec).** The mock does
+> **not** deduplicate resubmitted requests: posting the same `paymentID` to a
+> one-step bridge payment (or the same `techFundRequestID` to funding) settles
+> **each** call independently. This is deliberate fidelity — the published Pontes
+> specifications (URD, SDD, BDD, Service Description, EII OpenAPI) define **no**
+> idempotency key, `Idempotency-Key` header, or duplicate-detection control on
+> these ids. `paymentID` is documented merely as the *"Unique identifier of the
+> payment"* — a value the **client** is expected to make distinct per payment,
+> not a server-side dedupe key. Retry-and-reconcile safety must therefore be
+> handled **client-side** (as it must be against real Pontes). The one exception
+> is a **mock-only** convenience: the two-step draft flows reject a duplicate
+> client-supplied draft `id` with `409 HL-GER-004` (issue #32) — that is a mock
+> affordance, not a spec-mandated control.
+
 ### Admin routes
 
 Mock-only endpoints with **no official-API equivalent** (everything else is now
