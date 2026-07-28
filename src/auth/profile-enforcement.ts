@@ -25,6 +25,17 @@ const WEB_APP_PROFILES = new Set([
   "REFERENTIAL_READ_WRITE",
 ]);
 
+/** Every profile recognised by Table U — the enrolment allow-list (issue #84). */
+export const KNOWN_PROFILES: ReadonlySet<string> = new Set<string>([
+  ...BACKEND_SERVICE_PROFILES,
+  ...WEB_APP_PROFILES,
+]);
+
+/** Is this a known Table U profile? (Used to reject typo'd profiles at CSR.) */
+export function isKnownProfile(profile: string): boolean {
+  return KNOWN_PROFILES.has(profile);
+}
+
 export interface ClientIdValidationResult {
   valid: boolean;
   error?: string;

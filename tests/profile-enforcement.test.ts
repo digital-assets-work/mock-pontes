@@ -14,7 +14,29 @@ import {
   CLIENT_ID_WEB_APP,
   BRIDGE_1STEP_PROFILES,
   DRAFT_APPROVE_PROFILES,
+  isKnownProfile,
+  KNOWN_PROFILES,
 } from "../src/auth/profile-enforcement.js";
+
+describe("isKnownProfile (issue #84)", () => {
+  it("accepts every Table U profile", () => {
+    for (const p of [
+      "EXTERNAL_USER",
+      "PILOT_READ_WRITE",
+      "PILOT_READ_ONLY",
+      "REFERENTIAL_READ_ONLY",
+      "REFERENTIAL_READ_WRITE",
+    ]) {
+      expect(isKnownProfile(p)).toBe(true);
+      expect(KNOWN_PROFILES.has(p)).toBe(true);
+    }
+  });
+  it("rejects typos and unknown profiles", () => {
+    expect(isKnownProfile("PILOT_READWRITE")).toBe(false); // missing underscore
+    expect(isKnownProfile("ADMIN")).toBe(false);
+    expect(isKnownProfile("")).toBe(false);
+  });
+});
 
 describe("Profile Enforcement Helper", () => {
   describe("validateClientIdForProfile", () => {
