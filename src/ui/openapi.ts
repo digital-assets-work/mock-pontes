@@ -162,10 +162,30 @@ export const mockExtras = {
       put: {
         tags: ["Mock · Admin"],
         summary: "MOCK: set business window",
+        description:
+          "Accepts a sub-list of the GET fields (currentWindow, businessDate, openTime, closeTime); rejects unknown fields and requires closeTime > openTime (issue #59).",
         requestBody: {
-          content: { "application/json": { schema: { type: "object" } } },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  currentWindow: {
+                    type: "string",
+                    enum: ["CLOSED", "START_OF_DAY", "OPEN_FOR_ALL", "END_OF_DAY"],
+                  },
+                  businessDate: { type: "string", example: "2026-06-15" },
+                  openTime: { type: "string", example: "08:00" },
+                  closeTime: { type: "string", example: "18:00" },
+                },
+              },
+            },
+          },
         },
-        responses: { "200": { description: "Updated" } },
+        responses: {
+          "200": { description: "Updated" },
+          "400": { description: "Invalid body (unknown field / bad time / closeTime ≤ openTime)" },
+        },
       },
     },
     "/admin/reset": {

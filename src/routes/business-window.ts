@@ -1,40 +1,24 @@
 import { createRouter, defineEventHandler } from "h3";
 import { track } from "../http/route-registry.js";
-import type { MockStore, BusinessWindow } from "../state/mock-store.js";
-
-/** Map internal window state name to a human-readable window name per Pontes spec */
-function windowName(bw: BusinessWindow): string {
-  switch (bw.currentWindow) {
-    case "OPEN_FOR_ALL": return "Open for All";
-    case "START_OF_DAY": return "Start of Day";
-    case "END_OF_DAY": return "End of Day";
-    case "CLOSED": return "Closed";
-    default: return bw.currentWindow;
-  }
-}
-
-/** Determine the next window name in the cycle */
-function nextWindowName(bw: BusinessWindow): string {
-  switch (bw.currentWindow) {
-    case "CLOSED": return "Start of Day";
-    case "START_OF_DAY": return "Open for All";
-    case "OPEN_FOR_ALL": return "End of Day";
-    case "END_OF_DAY": return "Closed";
-    default: return "Closed";
-  }
-}
+import type { MockStore } from "../state/mock-store.js";
+import {
+  effectiveWindowName,
+  nextEffectiveWindowName,
+} from "../state/business-window.js";
 
 export function createBusinessWindowRouter(store: MockStore) {
   const router = track(createRouter());
 
   // GET /dlt/:ncb/api/bridge/current-business-window
   // Response schema: globalregistry.GetCurrentBusinessWindowBridge { windowName, startTime, endTime }
+  // windowName is derived from the stored open/close times in Frankfurt time
+  // ("Open for All" when inside the window, else "Closed") — issue #59.
   router.get(
     "/dlt/:ncb/api/bridge/current-business-window",
     defineEventHandler(() => {
       const bw = store.getBusinessWindow();
       return {
-        windowName: windowName(bw),
+        windowName: effectiveWindowName(bw),
         startTime: bw.openTime,
         endTime: bw.closeTime,
       };
@@ -48,10 +32,10 @@ export function createBusinessWindowRouter(store: MockStore) {
     defineEventHandler(() => {
       const bw = store.getBusinessWindow();
       return {
-        windowName: windowName(bw),
+        windowName: effectiveWindowName(bw),
         startTime: bw.openTime,
         endTime: bw.closeTime,
-        nextWindowName: nextWindowName(bw),
+        nextWindowName: nextEffectiveWindowName(bw),
       };
     }),
   );
