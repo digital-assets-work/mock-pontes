@@ -215,12 +215,32 @@ export class MemoryStore implements MockStore {
 
   // --- Drafts ---
 
-  getDraft(id: string): Draft | undefined {
-    return this.drafts.get(id);
+  /**
+   * A draft is readable by a caller if they may read (issue #56 `canRead`) at
+   * least one of the DCWs it references (credited or debited). This reuses the
+   * wallet ownership model instead of stamping an owning entity on the draft —
+   * both legs' participants can therefore see a shared in-flight draft.
+   */
+  private canReadDraft(draft: Draft, caller: DcwCaller): boolean {
+    for (const alias of [draft.creditedWalletAlias, draft.debitedWalletAlias]) {
+      const wallet = alias ? this.wallets.get(alias) : undefined;
+      if (wallet && canReadDcw(wallet, caller).ok) return true;
+    }
+    return false;
   }
 
-  getDrafts(): Draft[] {
-    return [...this.drafts.values()];
+  getDraft(id: string, caller?: DcwCaller): Draft | undefined {
+    const draft = this.drafts.get(id);
+    if (!draft) return undefined;
+    // A caller that may not read any referenced wallet sees it as "not found".
+    if (caller && !this.canReadDraft(draft, caller)) return undefined;
+    return draft;
+  }
+
+  getDrafts(caller?: DcwCaller): Draft[] {
+    const all = [...this.drafts.values()];
+    // Unscoped for internal callers (no caller); scoped for API callers.
+    return caller ? all.filter((d) => this.canReadDraft(d, caller)) : all;
   }
 
   addDraft(draft: Draft): void {

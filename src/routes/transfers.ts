@@ -98,8 +98,9 @@ export function createTransfersRouter(store: MockStore) {
   // `ims/transactions` query endpoint used to surface in-flight drafts.
   router.get(
     "/dlt/:ncb/api/octopus/ims/transactions",
-    defineEventHandler(() => {
-      return store.getDrafts().map((d) => ({
+    defineEventHandler((event) => {
+      const { caller } = authCaller(event);
+      return store.getDrafts(caller).map((d) => ({
         id: d.id,
         type: d.type,
         etatsUX: d.status,
@@ -118,7 +119,8 @@ export function createTransfersRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/rvs/transactions-drafts/:id",
     defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
-      const draft = store.getDraft(id);
+      const { caller } = authCaller(event);
+      const draft = store.getDraft(id, caller);
       if (!draft || draft.type !== "TRANSFER") {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Draft ${id} not found` }] };

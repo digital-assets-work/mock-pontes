@@ -109,3 +109,59 @@ describe("Funding authorisation on the credited wallet (issue #56)", () => {
     expect(draft.status).toBe("PENDING_APPROVAL");
   });
 });
+
+describe("Draft read scoping via DCW canRead (issue #73)", () => {
+  function storeWithDrafts(): MemoryStore {
+    const store = storeWithWallets();
+    // A→B transfer draft: readable by BANKA (debited) and BANKB (credited).
+    store.addDraft({
+      id: "TR-AB",
+      type: "TRANSFER",
+      status: "PENDING_APPROVAL",
+      amount: "10.00",
+      currency: "EUR",
+      creditedWalletAlias: "B-DCW1",
+      debitedWalletAlias: "A-DCW1",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    // A-only funding draft: readable by BANKA only.
+    store.addDraft({
+      id: "FRQ-A",
+      type: "FUNDING",
+      status: "PENDING_APPROVAL",
+      amount: "5.00",
+      currency: "EUR",
+      creditedWalletAlias: "A-DCW2",
+      debitedWalletAlias: "ISSUANCE",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    return store;
+  }
+
+  it("lists only drafts the caller can read (either leg)", () => {
+    const store = storeWithDrafts();
+    expect(store.getDrafts(OWNER).map((d) => d.id).sort()).toEqual(["FRQ-A", "TR-AB"]);
+    // BANKB only touches the shared TR-AB (as credited leg).
+    expect(store.getDrafts(OTHER).map((d) => d.id)).toEqual(["TR-AB"]);
+  });
+
+  it("returns all drafts when no caller is supplied (internal use)", () => {
+    expect(storeWithDrafts().getDrafts()).toHaveLength(2);
+  });
+
+  it("lets a participant on either leg read a shared draft", () => {
+    const store = storeWithDrafts();
+    expect(store.getDraft("TR-AB", OWNER)?.id).toBe("TR-AB");
+    expect(store.getDraft("TR-AB", OTHER)?.id).toBe("TR-AB");
+  });
+
+  it("masks another tenant's draft as not found", () => {
+    const store = storeWithDrafts();
+    // BANKB cannot see the A-only funding draft.
+    expect(store.getDraft("FRQ-A", OTHER)).toBeUndefined();
+    // ...but internal (no caller) still resolves it.
+    expect(store.getDraft("FRQ-A")?.id).toBe("FRQ-A");
+  });
+});

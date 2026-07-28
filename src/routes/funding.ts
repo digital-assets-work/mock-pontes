@@ -205,7 +205,7 @@ export function createFundingRouter(store: MockStore) {
   // funding OR defunding draft by id. Also served without the `-drafts` suffix.
   const readByIdHandler = defineEventHandler((event: H3Event) => {
     const id = getRouterParam(event, "id")!;
-    const draft = store.getDraft(id);
+    const draft = store.getDraft(id, callerOf(event));
     if (!draft || (draft.type !== "FUNDING" && draft.type !== "DEFUNDING")) {
       throw createError({
         statusCode: 404,
