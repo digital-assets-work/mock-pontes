@@ -32,6 +32,15 @@ import java.util.regex.Pattern;
  *   3. POST /iam/realms/{ncb}/.../token          - acquire a JWT (mTLS + password)
  *   4. POST /dlt/{ncb}/api/octopus/tms/funding-requests
  *                                                - NRO-signed funding request (2-step)
+ *   5. PUT  /dlt/{ncb}/.../funding-requests-drafts/{id}/approve
+ *                                                - four-eyes approval by a SECOND user
+ *   6. GET  /dlt/{ncb}/api/octopus/ams/wallets/{alias}
+ *                                                - verify the wallet was credited
+ *
+ * Four-eyes control: the request is created by the initiator but must be approved
+ * by a *different* enrolled user (a distinct certificate / user UUID); self-
+ * approval is rejected with 403 HL-GER-003. Steps 5-6 run only when a second
+ * (approver) PKCS#12 is configured via APPROVER_P12.
  *
  * Consumes the mock's PKCS#12 (.p12) export directly for both mTLS and NRO signing.
  */
@@ -54,16 +63,109 @@ public class Main {
         String creditedAlias = env("CREDITED_ALIAS", "WFREURBSUIFRPPXXX-01");
         String entityBic = env("ENTITY_BIC", "BSUIFRPPXXX");
         String managerBic = env("MANAGER_BIC", "BDFEFRPPXXX");
+        // Approver (four-eyes) - a SECOND enrolled user with its own PKCS#12.
+        String approverP12 = env("APPROVER_P12", "approver.p12");
+        String approverP12Pass = env("APPROVER_P12_PASSWORD", p12Pass);
+        String approverUsername = env("APPROVER_USERNAME", "PFRBSUIFRPPXXX0002");
+        String approverPassword = env("APPROVER_PASSWORD", "approver-secret");
 
-        // Load the PKCS#12 keystore (certificate + private key).
-        KeyStore ks = KeyStore.getInstance("PKCS12");
-        try (InputStream in = new FileInputStream(p12Path)) {
-            ks.load(in, p12Pass.toCharArray());
+        // Load the PKCS#12 keystore (certificate + private key) and build the mTLS client.
+        KeyStore ks = loadP12(p12Path, p12Pass);
+        HttpClient http = newHttpClient(ks, p12Pass, caPath);
+
+        // 1. mTLS acceptance
+        HttpResponse<String> mtls = send(http, "GET", baseUrl + "/check/mtls", null, null, null);
+        System.out.println("1) GET /check/mtls        -> " + mtls.statusCode() + " " + mtls.body());
+
+        // 2. Health (unauthenticated)
+        HttpResponse<String> health = send(http, "GET", baseUrl + "/dlt/" + ncb + "/api/octopus/health", null, null, null);
+        System.out.println("2) GET .../octopus/health -> " + health.statusCode() + " " + health.body());
+
+        // 3. Token (mTLS + password grant)
+        String token = getToken(http, baseUrl, ncb, username, password);
+        System.out.println("3) POST .../token         -> " + (token != null ? "(JWT acquired)" : "FAILED"));
+        if (token == null) {
+            throw new RuntimeException("No access_token - check USERNAME/PASSWORD and enrollment");
         }
-        KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        kmf.init(ks, p12Pass.toCharArray());
 
-        // Trust: use CA_CERT when provided, otherwise accept any server (local dev only).
+        // 4. NRO-signed funding request
+        String techId = env("TECH_FUND_REQUEST_ID", "FUND-" + System.currentTimeMillis());
+        String debitedOwner = "ECBFDEFFXXX";
+
+        // NRO canonical signing string (Pontes v1.0):
+        //   techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID
+        String signingData = techId + amount + entityBic + debitedOwner;
+
+        PrivateKey privateKey = firstPrivateKey(ks, p12Pass);
+        X509Certificate cert = firstCertificate(ks);
+        Signature ecdsa = Signature.getInstance("SHA256withECDSA");
+        ecdsa.initSign(privateKey);
+        ecdsa.update(signingData.getBytes(StandardCharsets.UTF_8));
+        String signature = Base64.getEncoder().encodeToString(ecdsa.sign()); // DER ECDSA, base64
+        // signerPEM accepts base64-DER (no PEM headers); the mock wraps it and must
+        // match the presented mTLS certificate byte-for-byte.
+        String signerPem = Base64.getEncoder().encodeToString(cert.getEncoded());
+
+        String body = "{"
+                + "\"techFundRequestID\":\"" + techId + "\","
+                + "\"type\":\"FUNDING\","
+                + "\"amount\":\"" + amount + "\","
+                + "\"currency\":\"EUR\","
+                + "\"creditedCashWalletAlias\":\"" + creditedAlias + "\","
+                + "\"creditedCashWalletManagerID\":\"" + managerBic + "\","
+                + "\"creditedCashWalletOwnerID\":\"" + entityBic + "\","
+                + "\"debitedCashWalletAlias\":\"WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET\","
+                + "\"debitedCashWalletManagerID\":\"" + debitedOwner + "\","
+                + "\"debitedCashWalletOwnerID\":\"" + debitedOwner + "\","
+                + "\"signature\":\"" + signature + "\","
+                + "\"signerPEM\":\"" + signerPem + "\""
+                + "}";
+
+        HttpResponse<String> funding = send(http, "POST",
+                baseUrl + "/dlt/" + ncb + "/api/octopus/tms/funding-requests",
+                body, "application/json", "Bearer " + token);
+        System.out.println("4) POST .../funding-requests -> " + funding.statusCode() + " " + funding.body());
+        String fundingId = extract(funding.body(), "id"); // server-assigned FRQ id
+
+        // 5. Four-eyes approval by a SECOND user (self-approval is rejected 403).
+        if (fundingId == null || !new java.io.File(approverP12).exists()) {
+            System.out.println("5) approval skipped - set APPROVER_P12 (a second enrolled user)"
+                    + " to run the four-eyes approve + balance check.");
+            return;
+        }
+        KeyStore aks = loadP12(approverP12, approverP12Pass);
+        HttpClient approverHttp = newHttpClient(aks, approverP12Pass, caPath);
+        String approverToken = getToken(approverHttp, baseUrl, ncb, approverUsername, approverPassword);
+        if (approverToken == null) {
+            throw new RuntimeException("Approver token failed for " + approverUsername);
+        }
+        HttpResponse<String> approve = send(approverHttp, "PUT",
+                baseUrl + "/dlt/" + ncb + "/api/octopus/tms/funding-requests-drafts/" + fundingId + "/approve",
+                null, null, "Bearer " + approverToken);
+        System.out.println("5) PUT .../{id}/approve   -> " + approve.statusCode() + " " + approve.body());
+
+        // 6. Verify the credited wallet now holds the funded amount.
+        HttpResponse<String> wallet = send(http, "GET",
+                baseUrl + "/dlt/" + ncb + "/api/octopus/ams/wallets/" + creditedAlias,
+                null, null, "Bearer " + token);
+        String balance = extract(wallet.body(), "availableBalance");
+        System.out.println("6) GET .../ams/wallets     -> " + wallet.statusCode()
+                + " " + (balance != null ? "availableBalance=" + balance : wallet.body()));
+    }
+
+    static KeyStore loadP12(String path, String pass) throws Exception {
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        try (InputStream in = new FileInputStream(path)) {
+            ks.load(in, pass.toCharArray());
+        }
+        return ks;
+    }
+
+    /** Build an mTLS HttpClient from a keystore; trusts CA_CERT when set, else any server. */
+    static HttpClient newHttpClient(KeyStore ks, String pass, String caPath) throws Exception {
+        KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(ks, pass.toCharArray());
+
         boolean insecure = (caPath == null || caPath.isEmpty());
         TrustManager[] trustManagers;
         if (insecure) {
@@ -90,67 +192,20 @@ public class Main {
 
         SSLContext ssl = SSLContext.getInstance("TLS");
         ssl.init(kmf.getKeyManagers(), trustManagers, new SecureRandom());
-        HttpClient http = HttpClient.newBuilder().sslContext(ssl).build();
+        return HttpClient.newBuilder().sslContext(ssl).build();
+    }
 
-        // 1. mTLS acceptance
-        HttpResponse<String> mtls = send(http, "GET", baseUrl + "/check/mtls", null, null, null);
-        System.out.println("1) GET /check/mtls        -> " + mtls.statusCode() + " " + mtls.body());
-
-        // 2. Health (unauthenticated)
-        HttpResponse<String> health = send(http, "GET", baseUrl + "/dlt/" + ncb + "/api/octopus/health", null, null, null);
-        System.out.println("2) GET .../octopus/health -> " + health.statusCode() + " " + health.body());
-
-        // 3. Token (mTLS + password grant)
+    /** Acquire a JWT for a user over its own mTLS client; returns null on failure. */
+    static String getToken(HttpClient http, String baseUrl, String ncb, String username, String password) throws Exception {
         String form = "grant_type=password"
                 + "&username=" + enc(username)
                 + "&password=" + enc(password)
                 + "&client_id=esydlt-web-app"
                 + "&scope=openid";
-        HttpResponse<String> tokenRes = send(http, "POST",
+        HttpResponse<String> res = send(http, "POST",
                 baseUrl + "/iam/realms/" + ncb + "/protocol/openid-connect/token",
                 form, "application/x-www-form-urlencoded", null);
-        String token = extract(tokenRes.body(), "access_token");
-        System.out.println("3) POST .../token         -> " + tokenRes.statusCode()
-                + " " + (token != null ? "(JWT acquired)" : tokenRes.body()));
-        if (token == null) {
-            throw new RuntimeException("No access_token - check USERNAME/PASSWORD and enrollment");
-        }
-
-        // 4. NRO-signed funding request
-        String techId = env("TECH_FUND_REQUEST_ID", "FUND-" + System.currentTimeMillis());
-        String debitedOwner = "ECBFDEFFXXX";
-
-        // NRO canonical signing string (Pontes v1.0):
-        //   techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID
-        String signingData = techId + amount + entityBic + debitedOwner;
-
-        PrivateKey privateKey = firstPrivateKey(ks, p12Pass);
-        X509Certificate cert = firstCertificate(ks);
-        Signature ecdsa = Signature.getInstance("SHA256withECDSA");
-        ecdsa.initSign(privateKey);
-        ecdsa.update(signingData.getBytes(StandardCharsets.UTF_8));
-        String signature = Base64.getEncoder().encodeToString(ecdsa.sign()); // DER ECDSA, base64
-        // signerPEM accepts base64-DER (no PEM headers); the mock wraps it and must
-        // match the presented mTLS certificate byte-for-byte.
-        String signerPem = Base64.getEncoder().encodeToString(cert.getEncoded());
-
-        String body = "{"
-                + "\"techFundRequestID\":\"" + techId + "\","
-                + "\"amount\":\"" + amount + "\","
-                + "\"currency\":\"EUR\","
-                + "\"creditedCashWalletAlias\":\"" + creditedAlias + "\","
-                + "\"creditedCashWalletManagerID\":\"" + managerBic + "\","
-                + "\"creditedCashWalletOwnerID\":\"" + entityBic + "\","
-                + "\"debitedCashWalletManagerID\":\"" + debitedOwner + "\","
-                + "\"debitedCashWalletOwnerID\":\"" + debitedOwner + "\","
-                + "\"signature\":\"" + signature + "\","
-                + "\"signerPEM\":\"" + signerPem + "\""
-                + "}";
-
-        HttpResponse<String> funding = send(http, "POST",
-                baseUrl + "/dlt/" + ncb + "/api/octopus/tms/funding-requests",
-                body, "application/json", "Bearer " + token);
-        System.out.println("4) POST .../funding-requests -> " + funding.statusCode() + " " + funding.body());
+        return extract(res.body(), "access_token");
     }
 
     static HttpResponse<String> send(HttpClient http, String method, String url,

@@ -7,6 +7,15 @@ Flow:
   3. POST /iam/realms/{ncb}/.../token          - acquire a JWT (mTLS + password)
   4. POST /dlt/{ncb}/api/octopus/tms/funding-requests
                                                - NRO-signed funding request (2-step)
+  5. PUT  /dlt/{ncb}/.../funding-requests-drafts/{id}/approve
+                                               - four-eyes approval by a SECOND user
+  6. GET  /dlt/{ncb}/api/octopus/ams/wallets/{alias}
+                                               - verify the wallet was credited
+
+Four-eyes control: the funding request is created by the initiator but must be
+approved by a *different* enrolled user (a distinct certificate / user UUID);
+self-approval is rejected with 403 HL-GER-003. Steps 5-6 run only when a second
+(approver) certificate is configured via APPROVER_CERT / APPROVER_KEY.
 """
 
 import base64
@@ -25,21 +34,46 @@ CA_CERT = os.environ.get("CA_CERT")  # optional; when unset the server cert is n
 USERNAME = os.environ.get("PONTES_USERNAME", "PFRBSUIFRPPXXX0001")
 PASSWORD = os.environ.get("PONTES_PASSWORD", "initiator-secret")
 
+# Approver (four-eyes) — a SECOND enrolled user with its own certificate.
+APPROVER_CERT = os.environ.get("APPROVER_CERT", "approver.crt")
+APPROVER_KEY = os.environ.get("APPROVER_KEY", "approver.key")
+APPROVER_USERNAME = os.environ.get("APPROVER_USERNAME", "PFRBSUIFRPPXXX0002")
+APPROVER_PASSWORD = os.environ.get("APPROVER_PASSWORD", "approver-secret")
+
 AMOUNT = os.environ.get("AMOUNT", "1000000.00")
 CREDITED_ALIAS = os.environ.get("CREDITED_ALIAS", "WFREURBSUIFRPPXXX-01")
 ENTITY_BIC = os.environ.get("ENTITY_BIC", "BSUIFRPPXXX")
 MANAGER_BIC = os.environ.get("MANAGER_BIC", "BDFEFRPPXXX")
 
 
-def main() -> None:
+def new_session(cert, key):
     session = requests.Session()
-    session.cert = (CLIENT_CERT, CLIENT_KEY)
-    # Only verify the server certificate when a CA bundle is supplied.
+    session.cert = (cert, key)
     session.verify = CA_CERT if CA_CERT else False
+    return session
+
+
+def get_token(session, username, password):
+    r = session.post(
+        f"{BASE_URL}/iam/realms/{NCB}/protocol/openid-connect/token",
+        data={
+            "grant_type": "password",
+            "username": username,
+            "password": password,
+            "client_id": "esydlt-web-app",  # PILOT_READ_WRITE uses the web-app client
+            "scope": "openid",
+        },
+    )
+    return r, r.json().get("access_token")
+
+
+def main() -> None:
     if not CA_CERT:
         import urllib3
 
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    session = new_session(CLIENT_CERT, CLIENT_KEY)
 
     # 1. mTLS acceptance
     r = session.get(f"{BASE_URL}/check/mtls")
@@ -50,17 +84,7 @@ def main() -> None:
     print("2) GET .../octopus/health ->", r.status_code, r.text)
 
     # 3. Token (mTLS + password grant)
-    r = session.post(
-        f"{BASE_URL}/iam/realms/{NCB}/protocol/openid-connect/token",
-        data={
-            "grant_type": "password",
-            "username": USERNAME,
-            "password": PASSWORD,
-            "client_id": "esydlt-web-app",  # PILOT_READ_WRITE uses the web-app client
-            "scope": "openid",
-        },
-    )
-    token = r.json().get("access_token")
+    r, token = get_token(session, USERNAME, PASSWORD)
     print("3) POST .../token         ->", r.status_code, "(JWT acquired)" if token else r.text)
     if not token:
         raise SystemExit("No access_token - check USERNAME/PASSWORD and that the user is enrolled")
@@ -68,11 +92,13 @@ def main() -> None:
     # 4. NRO-signed funding request
     funding = {
         "techFundRequestID": os.environ.get("TECH_FUND_REQUEST_ID", f"FUND-{int(time.time() * 1000)}"),
+        "type": "FUNDING",
         "amount": AMOUNT,
         "currency": "EUR",
         "creditedCashWalletAlias": CREDITED_ALIAS,
         "creditedCashWalletManagerID": MANAGER_BIC,
         "creditedCashWalletOwnerID": ENTITY_BIC,
+        "debitedCashWalletAlias": "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
         "debitedCashWalletManagerID": "ECBFDEFFXXX",
         "debitedCashWalletOwnerID": "ECBFDEFFXXX",
     }
@@ -100,6 +126,33 @@ def main() -> None:
         headers={"authorization": f"Bearer {token}"},
     )
     print("4) POST .../funding-requests ->", r.status_code, r.text)
+    funding_id = r.json().get("id")  # server-assigned FRQ id — the four-eyes target
+
+    # 5. Four-eyes approval by a SECOND user (self-approval is rejected 403).
+    if not (funding_id and os.path.exists(APPROVER_CERT) and os.path.exists(APPROVER_KEY)):
+        print(
+            "5) approval skipped - set APPROVER_CERT / APPROVER_KEY (a second enrolled"
+            " user) to run the four-eyes approve + balance check."
+        )
+        return
+
+    approver = new_session(APPROVER_CERT, APPROVER_KEY)
+    ar, atoken = get_token(approver, APPROVER_USERNAME, APPROVER_PASSWORD)
+    if not atoken:
+        raise SystemExit(f"Approver token failed: {ar.status_code} {ar.text}")
+    r = approver.put(
+        f"{BASE_URL}/dlt/{NCB}/api/octopus/tms/funding-requests-drafts/{funding_id}/approve",
+        headers={"authorization": f"Bearer {atoken}"},
+    )
+    print("5) PUT .../{id}/approve   ->", r.status_code, r.text)
+
+    # 6. Verify the credited wallet now holds the funded amount.
+    r = session.get(
+        f"{BASE_URL}/dlt/{NCB}/api/octopus/ams/wallets/{CREDITED_ALIAS}",
+        headers={"authorization": f"Bearer {token}"},
+    )
+    balance = r.json().get("availableBalance") if r.ok else None
+    print("6) GET .../ams/wallets     ->", r.status_code, f"availableBalance={balance}" if balance else r.text)
 
 
 if __name__ == "__main__":

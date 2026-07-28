@@ -12,7 +12,7 @@ Minimal, self-contained clients that connect to the mock over **mTLS**, acquire 
 
 ## The shared scenario
 
-Each example performs the same four steps:
+Each example performs the same steps:
 
 1. `GET /check/mtls` — proves the client certificate is accepted (prints the
    fingerprint the server saw).
@@ -26,6 +26,18 @@ Each example performs the same four steps:
    SHA-256** using the client's private key, and sent as `signature` +
    `signerPEM`. The mock verifies the signature **and** that `signerPEM` matches
    the presented mTLS certificate.
+5. `PUT /dlt/{ncb}/api/octopus/tms/funding-requests-drafts/{id}/approve` — the
+   **four-eyes approval**, performed by a **second, different** enrolled user.
+6. `GET /dlt/{ncb}/api/octopus/ams/wallets/{alias}` — confirms the credited
+   wallet now holds the funded amount.
+
+> **Four-eyes control.** A funding request is *created* by the initiator but must
+> be *approved* by a **different** user (a distinct certificate / user UUID).
+> Approving your own request returns `403 HL-GER-003 "Approver must differ from
+> the initiator (four-eyes control)"`. That is why the scenario enrols **two**
+> users. Steps 5–6 run only when a second (approver) certificate is configured
+> (`APPROVER_CERT`/`APPROVER_KEY`, or `APPROVER_P12` for Java); otherwise the
+> example stops after step 4 and prints how to enable them.
 
 ## Prerequisites
 
@@ -50,6 +62,26 @@ Each example performs the same four steps:
 
    # (Java only) bundle into a .p12
    openssl pkcs12 -export -inkey user.key -in user.crt -name PFRBSUIFRPPXXX0001 -out user.p12
+   ```
+
+3. **A second enrolled user (the approver)** — four-eyes approval (steps 5–6)
+   requires a *different* user. Repeat the enroll with a new username/key:
+
+   ```bash
+   # generate the approver's EC P-256 key + CSR
+   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out approver.key
+   printf '[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN=PFRBSUIFRPPXXX0002\n' > approver-csr.cnf
+   openssl req -new -key approver.key -out approver.csr -config approver-csr.cnf
+
+   # enroll the approver (same entityBIC so it can act on the same wallet)
+   jq -n --arg csr "$(cat approver.csr)" \
+     '{username:"PFRBSUIFRPPXXX0002",password:"approver-secret",
+       profile:"PILOT_READ_WRITE",entityBIC:"BSUIFRPPXXX",csr:$csr}' \
+   | curl -sk -X POST https://localhost:3001/iam/realms/bdf/protocol/openid-connect/csr \
+       -H 'content-type: application/json' -d @- | jq -r .certificate > approver.crt
+
+   # (Java only) bundle the approver into a .p12
+   openssl pkcs12 -export -inkey approver.key -in approver.crt -name PFRBSUIFRPPXXX0002 -out approver.p12
    ```
 
 ## Server certificate trust (CA)
