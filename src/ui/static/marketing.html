@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mock Pontes — a self-hostable mock of the ECB Pontes A2A API</title>
+  <link rel="stylesheet" href="/ui/static/marketing.css">
+</head>
+
+<body>
+  <header class="top">
+    <div class="bar">
+      <div class="brand">🅜 Mock Pontes</div>
+      <nav>
+        <a href="/ui/config">Control panel</a>
+        <a href="/ui/docs">API docs</a>
+        <a href="/ui/enroll">Enroll</a>
+        <a href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="inner">
+      <h1>Mock Pontes</h1>
+      <div class="accent"></div>
+      <p>A stateful, self-hostable mock of the publicly documented <strong>ECB Pontes (TARGET)
+          Agent-to-Application (A2A) API</strong>. Build and test your Pontes integration locally — no access to the
+        ECB test environment and no waiting for a business window.</p>
+      <div class="cta">
+        <a class="primary" href="/ui/docs">Explore the API ↗</a>
+        <a class="ghost" href="{{REPO_URL}}" target="_blank" rel="noopener">Source on GitHub</a>
+        <a class="ghost" href="/ui/config">Control panel</a>
+      </div>
+      <div class="badge">⚠ Unofficial community tool — <strong>not affiliated with, endorsed, or supported by the
+          European Central Bank</strong>.</div>
+    </div>
+  </div>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>Mock Pontes reproduces the <em>shape</em> of the publicly documented Pontes A2A API — wallets, funding
+        &amp; defunding, transfers, direct-RTGS, PFoD and XvP — together with the full transport and authentication
+        chain: <strong>mTLS</strong>, <strong>OAuth2 JWT</strong>, and <strong>NRO</strong>
+        (Non-Repudiation-of-Origin, ECDSA&nbsp;P-256) request signing. State is kept in a stateful in-memory or
+        Redis-backed ledger you can create, approve and inspect.</p>
+    </section>
+
+    <section>
+      <h2>Use cases</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Local integration dev</h3>
+          <p>Point your Pontes base URL at the mock and iterate on the 2-step draft → approve flows without ECB
+            credentials.</p>
+        </div>
+        <div class="card">
+          <h3>Full transport/auth</h3>
+          <p>Exercise mTLS, JWT and NRO signing end-to-end, including four-eyes approval and the
+            signer↔certificate binding.</p>
+        </div>
+        <div class="card">
+          <h3>CI &amp; conformance</h3>
+          <p>A fast, zero-dependency service for automated tests; responses follow the official OpenAPI, with
+            unimplemented operations clearly tagged.</p>
+        </div>
+        <div class="card">
+          <h3>Demos &amp; onboarding</h3>
+          <p>Stand up a realistic endpoint for demos and to onboard teams before real Pontes access is available.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Get started</h2>
+      <p>Run the published container (the mock serves HTTPS with a self-signed cert, so use <code>-k</code>
+        locally):</p>
+      <pre><span class="c"># run the mock</span>
+docker run --rm -p 3001:3001 {{IMAGE}}:{{IMAGE_TAG}}
+
+<span class="c"># health check</span>
+curl -sk https://localhost:3001/dlt/bdf/api/octopus/health</pre>
+      <p>Or from source (<a href="{{REPO_URL}}#quick-start-from-source" target="_blank" rel="noopener">Node.js
+          24+</a>):</p>
+      <pre>git clone {{REPO_URL}}.git
+cd mock-pontes &amp;&amp; npm ci &amp;&amp; npm run dev</pre>
+    </section>
+
+    <section>
+      <h2>Example client apps</h2>
+      <p>Ready-to-run clients that connect over mTLS, acquire a JWT and submit an NRO-signed funding request — in
+        <strong>TypeScript</strong>, <strong>Python</strong> and <strong>Java</strong>:</p>
+      <ul class="links">
+        <li><a href="{{REPO_URL}}/tree/main/examples/typescript" target="_blank" rel="noopener">TypeScript example
+            ↗</a><span>Node built-ins, PEM cert + key</span></li>
+        <li><a href="{{REPO_URL}}/tree/main/examples/python" target="_blank" rel="noopener">Python example
+            ↗</a><span>requests + cryptography</span></li>
+        <li><a href="{{REPO_URL}}/tree/main/examples/java" target="_blank" rel="noopener">Java example
+            ↗</a><span>JDK built-ins, PKCS#12</span></li>
+        <li><a href="{{REPO_URL}}/tree/main/examples" target="_blank" rel="noopener">All examples ↗</a><span>Shared
+            scenario &amp; prerequisites</span></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Resources</h2>
+      <ul class="links">
+        <li><a href="{{REPO_URL}}" target="_blank" rel="noopener">Source code (GitHub)
+            ↗</a><span>{{REPO_HOST}}</span></li>
+        <li><a href="https://github.com/digital-assets-work/mock-pontes/pkgs/container/mock-pontes" target="_blank"
+            rel="noopener">Container image ↗</a><span>{{IMAGE}}</span></li>
+        <li><a href="/ui/docs">API documentation</a><span>Swagger UI + vendored official spec</span></li>
+        <li><a href="/ui/config">Control panel</a><span>Runtime config &amp; connectivity</span></li>
+        <li><a href="/ui/enroll">CSR enrollment</a><span>Obtain a client certificate</span></li>
+        <li><a href="{{REPO_URL}}/blob/main/LICENSE" target="_blank" rel="noopener">License — Apache-2.0
+            ↗</a><span>Open source</span></li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="notice"><strong>Not affiliated with the ECB.</strong> Mock Pontes is an independent, open-source
+        community tool. It is not produced, endorsed, or supported by the European Central Bank and reproduces the
+        shape of the publicly documented Pontes A2A API for development convenience only. Always validate against
+        the official ECB environment and documentation before going live.</div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="inner">
+      Mock Pontes v{{VERSION}} · Apache-2.0 · Unofficial — not affiliated with the European Central Bank ·
+      <a href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </footer>
+</body>
+
+</html>

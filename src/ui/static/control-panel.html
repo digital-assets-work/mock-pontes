@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control panel · Mock Pontes</title>
+  <link rel="stylesheet" href="/ui/static/app.css">
+</head>
+
+<body>
+  <header class="nav">
+    <div class="brand">🅜 Mock Pontes</div>
+    <nav>
+      <a href="/ui">Home</a>
+      <a href="/ui/config">Control panel</a>
+      <a href="/ui/enroll">Enroll (CSR)</a>
+      <a href="/ui/docs">API Docs</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Mock Pontes — control panel <span id="version" class="pill ok"
+        style="font-size:13px;vertical-align:middle"></span></h1>
+    <p class="hint">Local mock of the ECB Pontes A2A API. No authentication (dev only).</p>
+
+    <div class="card">
+      <h2>Runtime configuration</h2>
+      <table id="cfg">
+        <tbody>
+          <tr>
+            <td class="hint">loading…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Connectivity endpoints</h2>
+      <table>
+        <tbody>
+          <tr>
+            <td class="k">Health</td>
+            <td><a class="link" id="e-health" target="_blank"></a></td>
+          </tr>
+          <tr>
+            <td class="k">IP check</td>
+            <td><a class="link" id="e-ip" target="_blank">/check/ip</a></td>
+          </tr>
+          <tr>
+            <td class="k">mTLS check</td>
+            <td><a class="link" id="e-mtls" target="_blank">/check/mtls</a> <span class="hint">(requires a client
+                cert)</span></td>
+          </tr>
+          <tr>
+            <td class="k">CSR enrollment</td>
+            <td><code id="e-csr"></code></td>
+          </tr>
+          <tr>
+            <td class="k">Token</td>
+            <td><code id="e-token"></code></td>
+          </tr>
+          <tr>
+            <td class="k">OpenAPI</td>
+            <td><a class="link" id="e-openapi" target="_blank">/openapi.json</a> · <a class="link"
+                href="/openapi.yaml" target="_blank">/openapi.yaml</a></td>
+          </tr>
+          <tr>
+            <td class="k">Official spec</td>
+            <td><a class="link" href="/openapi/official.json" target="_blank">/openapi/official.json</a> · <a
+                class="link" href="/openapi/official.yaml" target="_blank">/openapi/official.yaml</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+  <script src="/ui/static/control-panel.js"></script>
+</body>
+
+</html>
