@@ -10,6 +10,7 @@ import {
   OFFICIAL_NCBS,
   createNcbValidationMiddleware,
 } from "../src/auth/ncb-middleware.js";
+import { MemoryStore } from "../src/state/memory-store.js";
 
 function fakeEvent(path: string): H3Event {
   return {
@@ -47,7 +48,8 @@ describe("extractNcb (issue #36)", () => {
 });
 
 describe("createNcbValidationMiddleware (issue #36)", () => {
-  const mw = createNcbValidationMiddleware() as unknown as (
+  const store = new MemoryStore();
+  const mw = createNcbValidationMiddleware(store) as unknown as (
     e: H3Event,
   ) => unknown;
 
@@ -64,7 +66,19 @@ describe("createNcbValidationMiddleware (issue #36)", () => {
     expect(body.businessErrors[0].errorCode).toBe("HL-GER-001");
   });
 
-  it("ignores non-ncb-scoped paths", () => {
+  it("validates the ncb on the health route too (issue #48)", () => {
+    const ev = fakeEvent("/dlt/ZZZZ/api/octopus/health");
+    const body = mw(ev) as { businessErrors: { errorCode: string }[] };
+    expect(ev.node.res.statusCode).toBe(404);
+    expect(body.businessErrors[0].errorCode).toBe("HL-GER-001");
+  });
+
+  it("ignores non-ncb-scoped paths (incl. /check/* health probes)", () => {
     expect(mw(fakeEvent("/ui/docs"))).toBeUndefined();
+    expect(mw(fakeEvent("/check/ip"))).toBeUndefined();
+  });
+
+  it("sources the accepted list from the store", () => {
+    expect(store.getValidNcbs()).toEqual(expect.arrayContaining(["BDF", "ECB", "BBK"]));
   });
 });

@@ -37,7 +37,7 @@ Then call a public endpoint (the mock uses a self-signed certificate, so pass
 `-k`/`--insecure` for local testing):
 
 ```bash
-curl -sk https://localhost:3001/dlt/de/api/octopus/health
+curl -sk https://localhost:3001/dlt/bdf/api/octopus/health
 # {"octopus":"UP","server":"UP","mock":true}
 
 curl -sk https://localhost:3001/check/ip

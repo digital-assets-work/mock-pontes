@@ -7,6 +7,7 @@ import type {
 } from "./mock-store.js";
 import type { CacheInterface } from "../cache/index.js";
 import { fatalPersistError } from "../cache/index.js";
+import { OFFICIAL_NCBS } from "../auth/ncb-middleware.js";
 import {
   createDcw,
   canDebit as canDebitDcw,
@@ -42,6 +43,8 @@ export class MemoryStore implements MockStore {
   /** Per-(prefix, yyMMdd) monotonic counter backing nextId(). */
   private sequences: Map<string, number> = new Map();
   private businessWindow: BusinessWindow = { ...DEFAULT_BUSINESS_WINDOW };
+  /** Accepted NCB short names (seeded from the official enum; updatable later). */
+  private validNcbs: string[] = [...OFFICIAL_NCBS];
 
   /**
    * Optional cache for persistence. When provided (Redis when REDIS_URL is set)
@@ -250,6 +253,12 @@ export class MemoryStore implements MockStore {
 
   setBusinessWindow(bw: Partial<BusinessWindow>): void {
     this.businessWindow = { ...this.businessWindow, ...bw };
+  }
+
+  // --- Reference data ---
+
+  getValidNcbs(): string[] {
+    return [...this.validNcbs];
   }
 
   // --- Reset ---
