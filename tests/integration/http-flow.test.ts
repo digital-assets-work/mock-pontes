@@ -295,6 +295,23 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
     expect(JSON.stringify(res.json)).toMatch(/amount/);
   });
+
+  it("returns 501 for a declared-but-unimplemented official operation (#62)", async () => {
+    const res = await request(server.port, "POST", `${BASE}/tms/funding-defunding-requests/extract`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: {},
+    });
+    expect(res.status).toBe(501);
+    expect(res.json).toMatchObject({ status: 501, title: "Not Implemented" });
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-NIMP-001");
+  });
+
+  it("still 404s a truly unknown official-looking path (#62)", async () => {
+    const res = await request(server.port, "GET", `${BASE}/tms/definitely-not-a-real-endpoint`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {

@@ -42,6 +42,7 @@ import {
 } from "./http/error-response.js";
 import { createRequestValidationMiddleware } from "./http/request-validation.js";
 import { createBusinessWindowGuardMiddleware } from "./http/business-window-guard.js";
+import { createNotImplementedMiddleware } from "./http/not-implemented.js";
 import { mockVersion } from "./version.js";
 
 /** API patterns that require NRO signature verification (CREATE endpoints only). */
@@ -142,6 +143,10 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   // Admin routes (mock-only).
   app.use(createAdminBusinessWindowRouter(store).handler);
   app.use(createAdminResetRouter(store).handler);
+
+  // Final fallback (issue #62): a declared-but-unimplemented official operation
+  // returns 501 (not a generic 404) so "try it out" is self-explanatory.
+  app.use(createNotImplementedMiddleware());
 
   return app;
 }
