@@ -9,7 +9,7 @@ import {
 } from "h3";
 import { createHash, X509Certificate } from "node:crypto";
 import jwt from "jsonwebtoken";
-import { buildJwks, buildOpenIdConfiguration } from "./oidc.js";
+import { buildJwks, buildOpenIdConfiguration, SIGNING_KEY_ID } from "./oidc.js";
 import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
 import { validateClientIdForProfile } from "./profile-enforcement.js";
@@ -20,6 +20,70 @@ import {
   adminUnauthorizedBody,
   ADMIN_ENROLMENT_CERT_MINUTES,
 } from "./admin-token.js";
+
+/** Access token lifetime (Keycloak default parity). */
+const ACCESS_TOKEN_TTL_SEC = 300;
+/** Refresh token lifetime — 10 days (issue #64). */
+const REFRESH_TOKEN_TTL_SEC = 10 * 24 * 60 * 60;
+
+interface TokenSubject {
+  uuid: string;
+  username: string;
+  profile: string;
+  entityBIC?: string;
+  ncb: string;
+  clientId: string;
+  scope: string;
+}
+
+/**
+ * Mint the access + refresh token pair for a subject (issue #64). Both are
+ * ES256 JWTs signed with the runtime PKI JWT key; the refresh token carries
+ * `typ: "Refresh"` and a 10-day expiry and is only accepted at the token
+ * endpoint's refresh grant (the JWT middleware rejects it as a bearer token).
+ */
+function signTokens(subject: TokenSubject, privateKeyPem: string): {
+  accessToken: string;
+  refreshToken: string;
+} {
+  const now = Math.floor(Date.now() / 1000);
+  const common = {
+    sub: subject.uuid,
+    iss: `mock-pontes/iam/realms/${subject.ncb}`,
+    aud: subject.clientId,
+    scope: subject.scope,
+    preferred_username: subject.username,
+    user_uuid: subject.uuid,
+    user_profile: subject.profile,
+    entity_bic: subject.entityBIC,
+    realm: subject.ncb,
+  };
+  const accessToken = jwt.sign(
+    { ...common, iat: now, exp: now + ACCESS_TOKEN_TTL_SEC, typ: "Bearer" },
+    privateKeyPem,
+    { algorithm: "ES256", keyid: SIGNING_KEY_ID },
+  );
+  const refreshToken = jwt.sign(
+    { ...common, iat: now, exp: now + REFRESH_TOKEN_TTL_SEC, typ: "Refresh" },
+    privateKeyPem,
+    { algorithm: "ES256", keyid: SIGNING_KEY_ID },
+  );
+  return { accessToken, refreshToken };
+}
+
+/** Shape the Keycloak-compatible token response (issue #64 adds refresh_token). */
+function tokenResponse(accessToken: string, refreshToken: string, scope: string, uuid: string) {
+  return {
+    access_token: accessToken,
+    expires_in: ACCESS_TOKEN_TTL_SEC,
+    refresh_token: refreshToken,
+    refresh_expires_in: REFRESH_TOKEN_TTL_SEC,
+    token_type: "Bearer",
+    not_before_policy: 0,
+    session_state: `mock-session-${uuid}`,
+    scope,
+  };
+}
 
 interface RuntimePkiMaterial {
   clientSigningCaPrivateKeyPem: string;
@@ -72,6 +136,8 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
       let clientId: string;
       let clientSecret: string | null;
       let scope: string;
+      let grantType: string;
+      let refreshToken: string | null;
       let body: any = null;
 
       if (params) {
@@ -80,6 +146,8 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         clientId = params.get("client_id") || "esydlt-web-app";
         clientSecret = params.get("client_secret") || null;
         scope = params.get("scope") || "openid";
+        grantType = params.get("grant_type") || "password";
+        refreshToken = params.get("refresh_token");
       } else {
         body = await readBody(event);
         username = body.username || "";
@@ -87,6 +155,60 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         clientId = body.client_id || "esydlt-web-app";
         clientSecret = body.client_secret || null;
         scope = body.scope || "openid";
+        grantType = body.grant_type || "password";
+        refreshToken = body.refresh_token || null;
+      }
+
+      // Refresh grant (issue #64): exchange a valid refresh token for a fresh
+      // token pair without re-supplying the password. The presented client cert
+      // must still be the one bound to the user (same mTLS invariant).
+      if (grantType === "refresh_token") {
+        if (!refreshToken) {
+          setResponseStatus(event, 400);
+          return { error: "invalid_request", error_description: "refresh_token is required" };
+        }
+        let claims: jwt.JwtPayload;
+        try {
+          claims = jwt.verify(refreshToken, options.runtimePki.jwtSigningPublicKeyPem, {
+            algorithms: ["ES256"],
+          }) as jwt.JwtPayload;
+        } catch (err: any) {
+          setResponseStatus(event, 401);
+          return {
+            error: "invalid_grant",
+            error_description:
+              err?.name === "TokenExpiredError"
+                ? "Refresh token has expired"
+                : "Invalid refresh token",
+          };
+        }
+        if (claims.typ !== "Refresh") {
+          setResponseStatus(event, 401);
+          return { error: "invalid_grant", error_description: "Not a refresh token" };
+        }
+        const refreshUsername = String(claims.preferred_username || "");
+        const boundFp = options.authUsersRepository.getFingerprintByUsername(refreshUsername);
+        if (boundFp && boundFp !== fingerprint) {
+          setResponseStatus(event, 401);
+          return {
+            error: "invalid_client",
+            error_description: "User must always use the same certificate",
+          };
+        }
+        const refreshScope = String(claims.scope || scope);
+        const { accessToken, refreshToken: newRefresh } = signTokens(
+          {
+            uuid: String(claims.user_uuid || claims.sub || ""),
+            username: refreshUsername,
+            profile: String(claims.user_profile || ""),
+            entityBIC: claims.entity_bic ? String(claims.entity_bic) : undefined,
+            ncb,
+            clientId: String(claims.aud || clientId),
+            scope: refreshScope,
+          },
+          options.runtimePki.jwtSigningPrivateKeyPem,
+        );
+        return tokenResponse(accessToken, newRefresh, refreshScope, String(claims.user_uuid || claims.sub || ""));
       }
 
       const user = options.authUsersRepository.validateCredentials(username, password);
@@ -136,35 +258,20 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         );
       }
 
-      const now = Math.floor(Date.now() / 1000);
-      const expiresIn = 300;
-      const payload = {
-        sub: user.uuid,
-        iss: `mock-pontes/iam/realms/${ncb}`,
-        aud: clientId,
-        iat: now,
-        exp: now + expiresIn,
-        scope,
-        preferred_username: username,
-        user_uuid: user.uuid,
-        user_profile: user.profile,
-        entity_bic: user.entityBIC,
-        realm: ncb,
-      };
+      const { accessToken, refreshToken: issuedRefresh } = signTokens(
+        {
+          uuid: user.uuid,
+          username,
+          profile: user.profile,
+          entityBIC: user.entityBIC,
+          ncb,
+          clientId,
+          scope,
+        },
+        options.runtimePki.jwtSigningPrivateKeyPem,
+      );
 
-      const accessToken = jwt.sign(payload, options.runtimePki.jwtSigningPrivateKeyPem, {
-        algorithm: "ES256",
-        keyid: "mock-pontes-key-1",
-      });
-
-      return {
-        access_token: accessToken,
-        token_type: "Bearer",
-        expires_in: expiresIn,
-        scope,
-        not_before_policy: 0,
-        session_state: `mock-session-${user.uuid}`,
-      };
+      return tokenResponse(accessToken, issuedRefresh, scope, user.uuid);
     }),
   );
 
