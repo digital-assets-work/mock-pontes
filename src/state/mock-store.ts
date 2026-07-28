@@ -110,6 +110,11 @@ export interface MockStore {
   getBusinessWindow(): BusinessWindow;
   setBusinessWindow(bw: Partial<BusinessWindow>): void;
 
+  // Reference data
+  /** The NCB short names accepted on `/dlt/{ncb}` and `/igw/{ncb}` paths.
+   *  Sourced from the store so it can later become an updatable concept. */
+  getValidNcbs(): string[];
+
   // Reset
   reset(): void;
 }

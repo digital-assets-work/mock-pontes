@@ -98,6 +98,10 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   // Logging + mTLS context enrichment.
   app.use(createLoggingMiddleware());
 
+  // NCB validation first, so it also covers the health route (issue #48) and
+  // uses the store-sourced NCB list (issue #57). Non-NCB paths pass through.
+  app.use(createNcbValidationMiddleware(store));
+
   // Health + native UI (unauthenticated), before the auth middlewares.
   app.use(createHealthRouter().handler);
   app.use(createUiRouter().handler);
@@ -106,9 +110,6 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   app.use(
     createEnrollmentAuthRouter({ runtimePki, authUsersRepository }).handler,
   );
-
-  // NCB validation (before JWT so a bad NCB is rejected regardless of auth).
-  app.use(createNcbValidationMiddleware());
 
   // Auth chain.
   app.use(createJwtMiddleware(["/dlt"], runtimePki.jwtSigningPublicKeyPem));
