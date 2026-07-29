@@ -72,14 +72,17 @@ function signTokens(subject: TokenSubject, privateKeyPem: string): {
 }
 
 /** Shape the Keycloak-compatible token response (issue #64 adds refresh_token). */
-function tokenResponse(accessToken: string, refreshToken: string, scope: string, uuid: string) {
+/** Build the OAuth2/Keycloak-shaped token endpoint response body. */
+export function tokenResponse(accessToken: string, refreshToken: string, scope: string, uuid: string) {
   return {
     access_token: accessToken,
     expires_in: ACCESS_TOKEN_TTL_SEC,
     refresh_token: refreshToken,
     refresh_expires_in: REFRESH_TOKEN_TTL_SEC,
     token_type: "Bearer",
-    not_before_policy: 0,
+    // Keycloak wire fidelity (#87): the key is hyphenated `not-before-policy`,
+    // not `not_before_policy` — match the real token endpoint exactly.
+    "not-before-policy": 0,
     session_state: `mock-session-${uuid}`,
     scope,
   };
