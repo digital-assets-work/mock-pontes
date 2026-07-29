@@ -43,7 +43,8 @@ docker run --rm -v "$PWD":/app -v /path/to/user.p12:/certs/user.p12 -w /app \
 | `NCB` | `bdf` | NCB / realm |
 | `CLIENT_P12` | `user.p12` | PKCS#12 with cert + key |
 | `P12_PASSWORD` | `changeit` | PKCS#12 export password |
-| `CA_CERT` | *(unset)* | Server CA (PEM). When unset, server verification is disabled (local dev). |
+| `CA_CERT` | *(unset)* | Server CA (PEM). Unset ⇒ verify against the JDK trust store (works against the hosted mock). For a local self-signed mock, fetch it: `curl -sk $BASE_URL/ca.pem -o mock-ca.pem` then set `CA_CERT=mock-ca.pem`. |
+| `INSECURE_SKIP_VERIFY` | *(unset)* | Set to `true` to skip TLS server verification (dev only — explicit opt-out). |
 | `PONTES_USERNAME` / `PONTES_PASSWORD` | `PFRBSUIFRPPXXX0001` / `initiator-secret` | Credentials from enrollment |
 | `APPROVER_P12` / `APPROVER_P12_PASSWORD` | `approver.p12` / *(= `P12_PASSWORD`)* | Second (approver) user's PKCS#12 for four-eyes approval (steps 5–6). When absent, the example stops after step 4. |
 | `APPROVER_USERNAME` / `APPROVER_PASSWORD` | `PFRBSUIFRPPXXX0002` / `approver-secret` | Approver credentials from the second enrollment |
@@ -51,5 +52,6 @@ docker run --rm -v "$PWD":/app -v /path/to/user.p12:/certs/user.p12 -w /app \
 
 ## Against real Pontes
 
-Set `BASE_URL` to the Pontes EII gateway, `CA_CERT` to the ECB CA bundle, and use
-a `.p12` built from your Service-Desk-issued certificate/key.
+Set `BASE_URL` to the Pontes EII gateway and use a `.p12` built from your
+Service-Desk-issued certificate/key. Verification is on by default; set `CA_CERT`
+to the ECB CA bundle only if the gateway cert is not publicly trusted.

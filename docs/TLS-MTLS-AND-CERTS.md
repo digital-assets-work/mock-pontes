@@ -32,7 +32,13 @@ touching mTLS (§6).
 
 `rejectUnauthorized: false` allows connections *without* a client cert (e.g. the
 CSR/enrollment endpoint and the UI). Certificate validation is enforced per-route
-by middleware, not at the TLS layer.
+by middleware, not at the TLS layer. **This is a server-side setting about
+accepting client-cert-less connections — it is *not* the client disabling server
+verification.** Clients should verify the mock's server certificate: fetch the
+runtime server CA from the unauthenticated **`GET /ca.pem`** endpoint (issue #89)
+and trust it, e.g. `curl -sk https://localhost:3001/ca.pem -o mock-ca.pem` then
+`curl --cacert mock-ca.pem …`. Against a mock fronted by a publicly-trusted cert
+(§6/§7), clients verify normally with the system trust store and need no CA file.
 
 ---
 

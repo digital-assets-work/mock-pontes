@@ -86,10 +86,24 @@ Each example performs the same steps:
 
 ## Server certificate trust (CA)
 
-The mock serves a **self-signed** server certificate. There is currently no
-endpoint to download its server CA, so the examples **skip server verification by
-default** (fine for local dev). To enable verification, export the mock's server
-CA to a PEM file and point `CA_CERT` at it.
+The examples **verify the server certificate by default** — do the right thing
+out of the box:
+
+- **Against the hosted mock** (`https://mock.integration.pontes.ca-dag.work`):
+  its certificate is publicly trusted (Let's Encrypt), so verification works with
+  **no configuration** — no `CA_CERT`, no `-k`.
+- **Against a local mock** (self-signed cert): fetch the mock's server CA once and
+  point `CA_CERT` at it:
+
+  ```bash
+  # one-time -k just to fetch the CA (the file itself is public material)
+  curl -sk https://localhost:3001/ca.pem -o mock-ca.pem
+  export CA_CERT=mock-ca.pem
+  # thereafter: curl --cacert mock-ca.pem https://localhost:3001/check/mtls
+  ```
+
+If you must skip verification (dev only), set `INSECURE_SKIP_VERIFY=true` — an
+explicit, loud opt-out. The examples never disable verification silently.
 
 ## Run
 

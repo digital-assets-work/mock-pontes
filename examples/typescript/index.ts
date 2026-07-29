@@ -29,7 +29,11 @@ const cfg = {
   ncb: process.env.NCB ?? "bdf",
   certPath: process.env.CLIENT_CERT ?? "user.crt",
   keyPath: process.env.CLIENT_KEY ?? "user.key",
-  caPath: process.env.CA_CERT, // optional; when unset the server cert is NOT verified (local dev)
+  // TLS server verification (issue #89): CA_CERT set -> verify against it (local self-signed:
+  // fetch from GET /ca.pem); unset -> verify against the system trust store (hosted LE cert).
+  caPath: process.env.CA_CERT,
+  // Explicit, loud opt-out (dev only) — never skip verification silently.
+  insecure: /^(1|true|yes)$/i.test(process.env.INSECURE_SKIP_VERIFY ?? ""),
   username: process.env.PONTES_USERNAME ?? "PFRBSUIFRPPXXX0001",
   password: process.env.PONTES_PASSWORD ?? "initiator-secret",
   // Approver (four-eyes) — a SECOND enrolled user with its own certificate.
@@ -48,14 +52,19 @@ const cert = readFileSync(cfg.certPath);
 const key = readFileSync(cfg.keyPath);
 const ca = cfg.caPath ? readFileSync(cfg.caPath) : undefined;
 
+if (cfg.insecure && !ca) {
+  console.warn("WARNING: TLS server verification is DISABLED (INSECURE_SKIP_VERIFY). Dev use only.");
+}
+
 /** Build an mTLS agent for a given certificate + key pair. */
 function makeAgent(clientCert: Buffer, clientKey: Buffer): https.Agent {
   return new https.Agent({
     cert: clientCert,
     key: clientKey,
     ca,
-    // Only verify the server certificate when a CA bundle is supplied.
-    rejectUnauthorized: Boolean(ca),
+    // Verify by default (system trust store or the supplied CA); skip only on
+    // an explicit INSECURE_SKIP_VERIFY opt-in.
+    rejectUnauthorized: ca ? true : !cfg.insecure,
   });
 }
 

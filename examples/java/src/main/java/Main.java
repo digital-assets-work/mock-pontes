@@ -56,7 +56,11 @@ public class Main {
         String ncb = env("NCB", "bdf");
         String p12Path = env("CLIENT_P12", "user.p12");
         String p12Pass = env("P12_PASSWORD", "changeit");
-        String caPath = System.getenv("CA_CERT"); // optional
+        // TLS server verification (issue #89): CA_CERT set -> trust that CA (local self-signed:
+        // fetch from GET /ca.pem); unset -> use the JDK default trust store (hosted LE cert).
+        String caPath = System.getenv("CA_CERT");
+        // Explicit, loud opt-out (dev only) - never skip verification silently.
+        boolean insecure = env("INSECURE_SKIP_VERIFY", "").matches("(?i)1|true|yes");
         String username = env("PONTES_USERNAME", "PFRBSUIFRPPXXX0001");
         String password = env("PONTES_PASSWORD", "initiator-secret");
         String amount = env("AMOUNT", "1000000.00");
@@ -71,7 +75,7 @@ public class Main {
 
         // Load the PKCS#12 keystore (certificate + private key) and build the mTLS client.
         KeyStore ks = loadP12(p12Path, p12Pass);
-        HttpClient http = newHttpClient(ks, p12Pass, caPath);
+        HttpClient http = newHttpClient(ks, p12Pass, caPath, insecure);
 
         // 1. mTLS acceptance
         HttpResponse<String> mtls = send(http, "GET", baseUrl + "/check/mtls", null, null, null);
@@ -161,21 +165,27 @@ public class Main {
         return ks;
     }
 
-    /** Build an mTLS HttpClient from a keystore; trusts CA_CERT when set, else any server. */
-    static HttpClient newHttpClient(KeyStore ks, String pass, String caPath) throws Exception {
+    /**
+     * Build an mTLS HttpClient from a keystore. Server verification (issue #89):
+     *   caPath set   -> trust that CA (local self-signed cert fetched from /ca.pem)
+     *   caPath unset -> JDK default trust store (verifies the hosted Let's Encrypt cert)
+     *   insecure     -> explicit opt-out: trust any server cert + skip hostname check (dev only)
+     */
+    static HttpClient newHttpClient(KeyStore ks, String pass, String caPath, boolean insecure) throws Exception {
         KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         kmf.init(ks, pass.toCharArray());
 
-        boolean insecure = (caPath == null || caPath.isEmpty());
+        boolean hasCa = caPath != null && !caPath.isEmpty();
         TrustManager[] trustManagers;
-        if (insecure) {
+        if (!hasCa && insecure) {
+            System.out.println("WARNING: TLS server verification is DISABLED (INSECURE_SKIP_VERIFY). Dev use only.");
             System.setProperty("jdk.internal.httpclient.disableHostnameVerification", "true");
             trustManagers = new TrustManager[]{ new X509TrustManager() {
                 public void checkClientTrusted(X509Certificate[] chain, String authType) { }
                 public void checkServerTrusted(X509Certificate[] chain, String authType) { }
                 public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
             }};
-        } else {
+        } else if (hasCa) {
             KeyStore trust = KeyStore.getInstance(KeyStore.getDefaultType());
             trust.load(null, null);
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
@@ -187,6 +197,11 @@ public class Main {
             }
             TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
             tmf.init(trust);
+            trustManagers = tmf.getTrustManagers();
+        } else {
+            // Default: verify against the JDK trust store (publicly-trusted server certs).
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init((KeyStore) null);
             trustManagers = tmf.getTrustManagers();
         }
 
