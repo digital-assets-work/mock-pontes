@@ -114,22 +114,33 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
     createEnrollmentAuthRouter({ runtimePki, authUsersRepository }).handler,
   );
 
-  // Auth chain.
+  // Auth chain. The control sequence follows the maintainer's guidance
+  // (#90/#94): mTLS + JWT (authentication) → required fields & formatting → NRO
+  // → business window → the rest (wallet/profile access rights). JWT is applied
+  // before the mTLS-consistency check because that check cross-references the
+  // JWT-authenticated username against the presented client certificate.
   app.use(createJwtMiddleware(["/dlt"], runtimePki.jwtSigningPublicKeyPem));
   app.use(createMtlsConsistencyMiddleware(authUsersRepository));
-  app.use(createProfileAuthorizationMiddleware());
+
+  // Required fields & formatting (issue #53) — before NRO and the window guard
+  // so a malformed body is reported up front and its payload errors are not
+  // masked by a later signature or window rejection.
+  app.use(createRequestValidationMiddleware());
+
+  // Non-repudiation of origin: certificate presence then signature verification
+  // (CREATE endpoints only).
   app.use(createNroCertCheckMiddleware(nroRoutePatterns));
   app.use(createNroMiddleware(nroRoutePatterns));
-
-  // Request-body validation for write endpoints (issue #53) — after auth/NRO,
-  // before the routers, so invalid bodies are rejected with a normalised 400.
-  app.use(createRequestValidationMiddleware());
 
   // Business-window enforcement (issues #59, #81) — spec-driven and always on;
   // rejects official API calls not accessible in the current (Frankfurt-time)
   // window. Disabled by PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN. Before the
   // routers so no operation runs outside its window.
   app.use(createBusinessWindowGuardMiddleware(store));
+
+  // The rest — profile/wallet access rights (#90): enforced after the window
+  // guard, as the last gate before routing.
+  app.use(createProfileAuthorizationMiddleware());
 
   // Pontes-compatible routes.
   app.use(createWalletsRouter(store).handler);

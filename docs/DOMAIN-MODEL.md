@@ -289,12 +289,16 @@ The market calendar gating when operations may run.
   `GET /admin/business-window` shows the day fields **plus** the live window +
   `isOpen`; `POST` (or `PUT`) `/admin/business-window` sets any sub-list of day
   fields (times must stay in increasing order).
-- Enforcement (issues #59, #81) is **always on** and **spec-driven**: each
+- Enforcement (issues #59, #81, #94) is **always on** and **spec-driven**: each
   official operation is accessible only in the windows its spec description
-  lists (e.g. transfer creation = Start of Day only; bridge/XvP payments =
-  Open for All only; most reads = Start of Day / Open for All / End of Day).
+  lists (e.g. bridge/XvP payments = Open for All only; transfer creation = Open
+  for All only; most reads = Start of Day / Open for All / End of Day). A window
+  entry qualified `(only for ISSUANCE)` / `(only for REDEMPTION)` is open only
+  when the request is that specific central-bank operation; the mock does not
+  model those request types, so such qualified windows are excluded — leaving an
+  ordinary transfer accessible only in the unqualified **Open for all** window.
   Requests outside the allowed windows are rejected with `403 HL-BW-001`.
-  `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN=true` disables enforcement (CI).
+  `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN=true` disables enforcement (CI/demos).
 
 ---
 
