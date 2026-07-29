@@ -71,17 +71,52 @@ helm install my-pontes ./charts/mock-pontes \
   --set config.extraTlsSan="dns:mock.example.com"
 ```
 
-### Expose via Ingress
+### Expose via Ingress (and keep mTLS working)
 
-The app is an **HTTPS backend**, so tell your controller to speak HTTPS upstream.
-For ingress-nginx:
+> **The mock terminates TLS _and client-certificate (mTLS)_ at the pod.** A
+> normal Ingress terminates TLS at the controller and **drops the client
+> certificate**, so authenticated `/dlt` and NRO-signed calls would fail. Choose
+> one of the two patterns below to preserve mTLS. (`backend-protocol: HTTPS`
+> alone only re-encrypts the controller→pod hop — it does **not** carry the
+> client cert.)
+
+**Recipe A — TLS passthrough (recommended).** The controller routes by SNI and
+never decrypts, so mTLS is terminated end-to-end at the pod. No app config
+change. For ingress-nginx (the controller must run with
+`--enable-ssl-passthrough`):
 
 ```yaml
 ingress:
   enabled: true
   className: nginx
   annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+  hosts:
+    - host: mock.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+```
+
+With passthrough, routing is by host/SNI only — path rules and `backend-protocol`
+don't apply, and the mock serves (and validates) the certificate itself.
+
+**Recipe B — terminate at the ingress + forward the client cert (XFCC).** The
+controller does the mTLS verification and forwards the certificate to the pod;
+tell the mock to trust it:
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # ingress-nginx: require + forward the client cert (Envoy-based controllers
+    # such as Istio/Contour/Emissary emit XFCC natively instead).
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-secret: "my-ns/client-ca"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header ssl-client-cert $ssl_client_escaped_cert;
   hosts:
     - host: mock.example.com
       paths:
@@ -91,6 +126,11 @@ ingress:
     - secretName: mock-example-tls
       hosts:
         - mock.example.com
+# Tell the mock to trust the forwarded client cert (reads
+# x-forwarded-client-cert / ssl-client-cert):
+extraEnv:
+  - name: TRUST_PROXY_CLIENT_CERT
+    value: "true"
 ```
 
 ### Let evaluators test any time (disable the business window)

@@ -71,10 +71,26 @@ service:
 ingress:
   enabled: false
   className: ""
-  # NOTE: the app terminates TLS itself (HTTPS backend). If your controller
-  # talks to the backend, set its "backend protocol = HTTPS" annotation, e.g.
-  # for ingress-nginx: nginx.ingress.kubernetes.io/backend-protocol: "HTTPS".
+  # IMPORTANT — mTLS: the app terminates TLS *and client-certificate (mTLS)* at
+  # the pod. A normal Ingress terminates TLS at the controller, which DROPS the
+  # client certificate — so `/dlt` and NRO-signed calls would fail. To preserve
+  # mTLS pick one:
+  #   1) TLS passthrough (recommended) — the controller routes by SNI and never
+  #      decrypts, so mTLS is terminated end-to-end at the pod. For ingress-nginx:
+  #        nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+  #      (the controller must run with --enable-ssl-passthrough). With passthrough
+  #      routing is by host/SNI only — path rules and backend-protocol don't apply.
+  #   2) Terminate at the ingress + forward the client cert (XFCC): verify mTLS at
+  #      the controller, forward the cert header, and set the pod env
+  #        TRUST_PROXY_CLIENT_CERT=true   (via extraEnv)
+  #      The mock reads x-forwarded-client-cert / ssl-client-cert. Envoy-based
+  #      controllers (Istio/Contour/Emissary) emit XFCC natively; ingress-nginx
+  #      needs auth-tls-* annotations + a header carrying $ssl_client_escaped_cert.
+  # If you DON'T need client-cert auth end-to-end, a plain terminating ingress
+  # with `nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"` re-encrypts the
+  # controller→pod hop but does NOT carry the client certificate.
   annotations: {}
+  #  nginx.ingress.kubernetes.io/ssl-passthrough: "true"
   hosts:
     - host: mock-pontes.local
       paths:

@@ -84,10 +84,13 @@ npm run build && npm run run   # production build + run
 > copy-pasteable `curl` block for every flow (funding, defunding, transfer,
 > 1-step bridge payment) plus the profile/client-id table and signing gotchas.
 
-## Quick start (Kubernetes / Helm)
+## Deploy on Kubernetes (Helm)
 
-A standard Helm chart is included at [`charts/mock-pontes`](charts/mock-pontes).
-A default install needs no external services (self-signed HTTPS, in-memory state):
+A clean, standard **Helm chart lives in this repo at
+[`charts/mock-pontes`](charts/mock-pontes)** — see its
+[chart README](charts/mock-pontes/README.md) for the full values reference and
+recipes. A default install needs no external services (self-signed HTTPS,
+in-memory state, single replica):
 
 ```bash
 helm install my-pontes ./charts/mock-pontes -n pontes --create-namespace
@@ -95,9 +98,16 @@ kubectl -n pontes port-forward svc/my-pontes-mock-pontes 8443:443
 curl -sk https://localhost:8443/dlt/bdf/api/octopus/health
 ```
 
-See the [chart README](charts/mock-pontes/README.md) for pinning a version,
-gating the admin surface, running multiple replicas with Redis, serving a real
-TLS certificate, and Ingress.
+The chart covers version pinning, admin-surface gating (`ADMIN_TOKEN`), multiple
+replicas with an external Redis (shared/persistent runtime PKI), serving a real
+(e.g. cert-manager) TLS certificate, Ingress, autoscaling, and a hardened
+security context.
+
+> **mTLS + Ingress.** The mock terminates TLS **and client-cert (mTLS)** at the
+> pod, so a normal terminating Ingress drops the client certificate. Use **TLS
+> passthrough** (recommended) or terminate-and-forward the cert (XFCC) with
+> `TRUST_PROXY_CLIENT_CERT=true` — both are documented in the
+> [chart README](charts/mock-pontes/README.md#expose-via-ingress-and-keep-mtls-working).
 
 ## API surface
 
