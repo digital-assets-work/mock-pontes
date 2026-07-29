@@ -4,3 +4,6 @@ dist/
 .env
 .DS_Store
 coverage/
+
+# Generated README render (published as a release asset / GitHub Pages, not committed)
+README.html
