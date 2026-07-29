@@ -14,13 +14,12 @@
  *   - Open for all
  *   - End of day (only for REDEMPTION)
  *
- * Those parentheticals mean the *central-bank* issuance/redemption of cash
- * tokens is confined to Start/End of day; an ordinary transfer's real open
- * period is **Open for all** (issue #94). The mock does not special-case the
- * CB-only issuance/redemption ops, so we treat the endpoint as accessible in
- * every listed window — the qualifier is parsed as an annotation, not a
- * narrowing. (Previously the parenthetical truncated the list to just the first
- * window, wrongly making transfer creation Start-of-Day-only.)
+ * A `(only for ISSUANCE/REDEMPTION)` window is open **only when the request is
+ * that specific central-bank operation**. The mock does not distinguish those
+ * CB request types, so such a qualified window is **not** part of the general
+ * accessible set — an ordinary transfer is therefore accessible only in the
+ * unqualified window(s), i.e. **Open for all** (issue #94). We drop any window
+ * carrying an `(only for …)` qualifier when building the rule.
  */
 
 import officialSpec from "../ui/spec/pontes-official-v1.0.json";
@@ -51,7 +50,12 @@ export function parseWindowList(description: string): Set<BusinessWindowName> | 
   );
   if (!m) return undefined;
   const set = new Set<BusinessWindowName>();
-  for (const w of m[1].matchAll(/(Start of day|Open for all|End of day|Closed)/gi)) {
+  // Each entry is a window name optionally followed by an `(only for …)`
+  // qualifier. A qualified window is reachable only for that specific CB request
+  // type, which the mock does not model, so it is excluded from the general
+  // accessible set (issue #94).
+  for (const w of m[1].matchAll(/(Start of day|Open for all|End of day|Closed)\s*(\([^)]*\))?/gi)) {
+    if (w[2]) continue; // has an `(only for …)` qualifier → not generally accessible
     set.add(TEXT_TO_CODE[w[1].toLowerCase()]);
   }
   return set.size ? set : undefined;
