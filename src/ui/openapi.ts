@@ -110,6 +110,40 @@ export const mockExtras = {
         },
       },
     },
+    "/iam/realms/{ncb}/protocol/openid-connect/token": {
+      post: {
+        tags: ["Mock · Enrollment"],
+        summary: "MOCK: OAuth2 token endpoint (password + refresh_token grants)",
+        description:
+          "Keycloak-shaped token endpoint every client must call. Requires mTLS (the client " +
+          "certificate bound to the user). The `password` grant exchanges username/password " +
+          "(+ `client_id`, and `client_secret` for `EXTERNAL_USER`) for an access token and a " +
+          "refresh token; the `refresh_token` grant (issue #64) exchanges a valid refresh token " +
+          "for a fresh pair. On real Pontes this is served by the ESY DLT IAM (Keycloak); the mock " +
+          "reproduces its request/response shape.",
+        parameters: [NCB_PARAM],
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: { $ref: "#/components/schemas/TokenRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Token pair",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/TokenResponse" },
+              },
+            },
+          },
+          "400": { description: "invalid_request (e.g. missing refresh_token)" },
+          "401": { description: "invalid_grant / invalid_client (bad credentials, cert, or client_id/secret)" },
+        },
+      },
+    },
     "/admin/enrolled-users": {
       get: {
         tags: ["Mock · Enrollment"],
@@ -265,6 +299,46 @@ export const mockExtras = {
           createdAt: { type: "string", format: "date-time" },
           certificateFingerprint: { type: "string" },
           hasCertificate: { type: "boolean" },
+        },
+      },
+      TokenRequest: {
+        type: "object",
+        required: ["grant_type"],
+        properties: {
+          grant_type: {
+            type: "string",
+            enum: ["password", "refresh_token"],
+            example: "password",
+          },
+          username: { type: "string", example: "PFRBSUIFRPPXXX0001", description: "password grant" },
+          password: { type: "string", example: "initiator-secret", description: "password grant" },
+          client_id: {
+            type: "string",
+            enum: ["esydlt-web-app", "esydlt-backend-service"],
+            example: "esydlt-web-app",
+            description: "esydlt-web-app for PILOT_*/REFERENTIAL_*; esydlt-backend-service for EXTERNAL_USER",
+          },
+          client_secret: {
+            type: "string",
+            example: "esydlt-backend-service",
+            description: "Required for EXTERNAL_USER (equals the client_id)",
+          },
+          scope: { type: "string", example: "openid" },
+          refresh_token: { type: "string", description: "refresh_token grant only" },
+        },
+      },
+      TokenResponse: {
+        type: "object",
+        properties: {
+          access_token: { type: "string" },
+          expires_in: { type: "integer", example: 300 },
+          refresh_token: { type: "string" },
+          refresh_expires_in: { type: "integer", example: 864000 },
+          token_type: { type: "string", example: "Bearer" },
+          // Keycloak wire fidelity (issue #87): hyphenated key.
+          "not-before-policy": { type: "integer", example: 0 },
+          session_state: { type: "string", example: "mock-session-<uuid>" },
+          scope: { type: "string", example: "openid" },
         },
       },
     },

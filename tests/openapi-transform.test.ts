@@ -110,6 +110,19 @@ describe("annotateSpec (issue #34)", () => {
     const spec = annotateSpec(fakeOfficial(), new Set(), "9.9.9");
     expect(spec.paths["/admin/reset"]).toBeDefined();
     expect(spec.paths["/iam/realms/{ncb}/protocol/openid-connect/csr"]).toBeDefined();
+    // The token endpoint every client must call is documented (issue #88).
+    const token = spec.paths["/iam/realms/{ncb}/protocol/openid-connect/token"];
+    expect(token?.post).toBeDefined();
+    expect(token.post.requestBody.content["application/x-www-form-urlencoded"].schema.$ref).toBe(
+      "#/components/schemas/TokenRequest",
+    );
+    expect(token.post.responses["200"].content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/TokenResponse",
+    );
+    expect(spec.components.schemas.TokenRequest).toBeDefined();
+    expect(spec.components.schemas.TokenResponse).toBeDefined();
+    // Wire fidelity carried into the doc (issue #87).
+    expect(spec.components.schemas.TokenResponse.properties).toHaveProperty("not-before-policy");
     expect(spec.components.schemas.CsrRequest).toBeDefined();
     expect(spec.components.schemas.EnrolledUser).toBeDefined();
     expect(spec.tags.some((t: any) => t.name === "NotImplemented")).toBe(true);
