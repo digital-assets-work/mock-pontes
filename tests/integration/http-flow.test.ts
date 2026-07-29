@@ -240,13 +240,35 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(res.json.businessErrors[0].errorCode).toBeDefined();
   });
 
-  it("400s a funding create with no NRO signature (#29/#30)", async () => {
+  it("400s a funding create with no NRO signature (#29/#30, #94)", async () => {
+    // `signature`/`signerPEM` are required by the funding schema, so with
+    // validation now ahead of NRO (#90/#94) a missing signature is reported as a
+    // required-field validation error rather than reaching the NRO check.
+    const { signature, signerPEM, ...body } = fundingBody();
+    void signature;
+    void signerPEM;
     const res = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
       headers: { authorization: `Bearer ${u1}` },
-      body: { techFundRequestID: "X", amount: "1.00" },
+      body,
     });
     expect(res.status).toBe(400);
-    expect(res.json.businessErrors[0].errorCode).toBe("HL-NRO-001");
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
+    expect(res.json.businessErrors[0].errorDescription).toMatch(/signature/i);
+  });
+
+  it("400s a funding create whose NRO signature does not verify (HL-NRO-003)", async () => {
+    // A well-formed body that clears validation but carries a tampered signature
+    // must still be rejected by the NRO verification step that follows.
+    const body = { ...fundingBody(), signature: Buffer.from("not-a-real-signature").toString("base64") };
+    const res = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: {
+        authorization: `Bearer ${u1}`,
+        "x-forwarded-client-cert": encodeURIComponent(nro.certPem),
+      },
+      body,
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-NRO-003");
   });
 
   it("drives funding create → self-approve 403 → second-user approve 200 (#28)", async () => {
@@ -486,11 +508,18 @@ describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {
   });
 
   it("rejects an NRO create when no client certificate is established (403 HL-NRO-005)", async () => {
+    // Schema-complete body so request validation (which precedes NRO, #90/#94)
+    // passes; the absent client certificate is what the NRO cert-check rejects.
     const b = {
+      type: "FUNDING",
       techFundRequestID: "FUND-BIND-1",
       amount: "5.00",
+      currency: "EUR",
       creditedCashWalletAlias: "WDEEURTESTAAAA-02",
+      creditedCashWalletManagerID: "MARKDEFFXXX",
       creditedCashWalletOwnerID: "TESTAAAA",
+      debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+      debitedCashWalletManagerID: "ECBFDEFFXXX",
       debitedCashWalletOwnerID: "ECBFDEFFXXX",
     };
     const signature = nro.sign(

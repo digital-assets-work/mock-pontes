@@ -62,6 +62,11 @@ npm run dev      # hot-reload dev server
 npm run build && npm run run   # production build + run
 ```
 
+> **Tip — business window.** Enforcement is always on and spec-driven, so a few
+> operations are time-restricted (Frankfurt time) and can return `403 HL-BW-001`
+> outside their window. For unrestricted local testing set
+> `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN=true` (the "just let me test" switch).
+
 ## API surface
 
 The mock's OpenAPI description is served in **both JSON and YAML**, and the
@@ -128,11 +133,11 @@ driven through the official Pontes endpoints above — see
 |--------|------|-------------|
 | POST | `/admin/reset` | Reset mock state |
 | GET | `/admin/business-window` | Get business window config |
-| PUT | `/admin/business-window` | Update business window config |
+| POST | `/admin/business-window` | Update business window config (`PUT` is accepted as an alias) |
 
 > **Security — the admin surface is unauthenticated by default.** `ADMIN_TOKEN`
 > is **not set** by default, and while it is unset the state-changing admin
-> endpoints (`POST /admin/reset`, `PUT /admin/business-window`) and
+> endpoints (`POST /admin/reset`, `POST /admin/business-window`) and
 > `GET /admin/enrolled-users` are **open** — convenient for local development.
 > **Any published / public instance MUST set `ADMIN_TOKEN`** so those endpoints
 > require it (via the `X-Admin-Token` header, or `Authorization: Bearer <token>`);
@@ -189,7 +194,7 @@ Configuration is via environment variables (see [`.env.example`](.env.example)):
 | `TLS_SAN` | `dns:localhost;ip:127.0.0.1` | Subject Alternative Names for the runtime server cert |
 | `TLS_SUBJECT` | `CN=localhost O=MockPontes C=DEV` | Subject for the runtime server cert |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | — | Serve an externally-provided (e.g. Let's Encrypt) server cert instead of the self-signed one |
-| `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN` | `false` | Business-window enforcement is **always on** and spec-driven: each official operation is accessible only in the windows its spec lists (e.g. transfer creation = *Start of Day* only; bridge payments = *Open for All* only), derived from the stored business day in **Frankfurt** (`Europe/Berlin`) time and returning `403 HL-BW-001` otherwise. The default day is Open-for-All almost all day, so nothing is blocked out of the box. Set this to `true` to disable enforcement entirely (e.g. CI at odd hours). |
+| `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN` | `false` | Business-window enforcement is **always on** and spec-driven: each official operation is accessible only in the windows its spec lists (e.g. bridge payments = *Open for All* only; transfer creation = *Start of Day* / *Open for All* / *End of Day*), derived from the stored business day in **Frankfurt** (`Europe/Berlin`) time and returning `403 HL-BW-001` otherwise. The default day is Open-for-All for most of the day, so the common flows work at typical hours — but some operations remain time-restricted, so a call can still hit `403 HL-BW-001` (notably outside the open window). Set this to `true` to disable enforcement entirely — the single most useful switch for a first-time user or CI at odd hours. |
 
 > The `TLS_SUBJECT` default above is for **local** use (`C=DEV`). A **deployed**
 > instance sets `TLS_SUBJECT` to the real identity, e.g.

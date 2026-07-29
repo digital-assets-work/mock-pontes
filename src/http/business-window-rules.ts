@@ -3,10 +3,24 @@
  *
  * Every official operation documents, in its description's **"Business Window:"**
  * section, the windows during which it is accessible (e.g. bridge payments are
- * "Open for all" only; transfer creation is "Start of day" only; most reads are
- * "Start of day / Open for all / End of day"). We parse those lists straight
- * from the vendored official spec so enforcement stays faithful to the spec
- * without a hand-maintained table.
+ * "Open for all" only; most reads are "Start of day / Open for all / End of
+ * day"). We parse those lists straight from the vendored official spec so
+ * enforcement stays faithful to the spec without a hand-maintained table.
+ *
+ * Some entries carry a per-operation-type qualifier, e.g. transfer creation
+ * (`rvs/transactions-requests`) lists:
+ *
+ *   - Start of day (only for ISSUANCE)
+ *   - Open for all
+ *   - End of day (only for REDEMPTION)
+ *
+ * Those parentheticals mean the *central-bank* issuance/redemption of cash
+ * tokens is confined to Start/End of day; an ordinary transfer's real open
+ * period is **Open for all** (issue #94). The mock does not special-case the
+ * CB-only issuance/redemption ops, so we treat the endpoint as accessible in
+ * every listed window — the qualifier is parsed as an annotation, not a
+ * narrowing. (Previously the parenthetical truncated the list to just the first
+ * window, wrongly making transfer creation Start-of-Day-only.)
  */
 
 import officialSpec from "../ui/spec/pontes-official-v1.0.json";
@@ -33,7 +47,7 @@ interface WindowRule {
 /** Parse the "Business Window:" list out of an operation description. */
 export function parseWindowList(description: string): Set<BusinessWindowName> | undefined {
   const m = description.match(
-    /Business Window:?\s*((?:\s*[-*]?\s*(?:Start of day|Open for all|End of day|Closed)\s*)+)/i,
+    /Business Window:?\s*((?:\s*[-*]?\s*(?:Start of day|Open for all|End of day|Closed)\s*(?:\([^)]*\))?\s*)+)/i,
   );
   if (!m) return undefined;
   const set = new Set<BusinessWindowName>();

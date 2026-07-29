@@ -7,8 +7,10 @@
  * - admin updates accept a sub-list of day fields and must keep the times in
  *   increasing order;
  * - enforcement is spec-driven: each official operation is accessible only in
- *   the windows its spec description lists (e.g. transfer create = Start of Day
- *   only; bridge payments = Open for All only).
+ *   the windows its spec description lists (e.g. bridge payments = Open for All
+ *   only; transfer create = Start of Day / Open for All / End of Day, since its
+ *   "(only for ISSUANCE/REDEMPTION)" qualifiers do not narrow an ordinary
+ *   transfer — issue #94).
  */
 
 import { describe, it, expect } from "@jest/globals";
@@ -148,9 +150,14 @@ describe("validateBusinessDayUpdate (issue #81)", () => {
 
 describe("allowedWindowsForRequest — spec-driven (issue #81)", () => {
   it("reads the per-operation window lists from the official spec", () => {
-    expect([...(allowedWindowsForRequest("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests") ?? [])]).toEqual([
-      "START_OF_DAY",
-    ]);
+    // Transfer creation lists "Start of day (only for ISSUANCE) / Open for all /
+    // End of day (only for REDEMPTION)"; the qualifiers do not narrow an ordinary
+    // transfer, so all three windows are accessible (#94).
+    const transfer = allowedWindowsForRequest("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests");
+    expect(transfer?.has("START_OF_DAY")).toBe(true);
+    expect(transfer?.has("OPEN_FOR_ALL")).toBe(true);
+    expect(transfer?.has("END_OF_DAY")).toBe(true);
+    expect(transfer?.has("CLOSED")).toBe(false);
     expect([...(allowedWindowsForRequest("POST", "/dlt/bdf/api/bridge/payments") ?? [])]).toEqual(["OPEN_FOR_ALL"]);
     const reads = allowedWindowsForRequest("GET", "/dlt/bdf/api/octopus/ams/wallets");
     expect(reads?.has("START_OF_DAY")).toBe(true);
@@ -169,22 +176,33 @@ describe("parseWindowList", () => {
     const set = parseWindowList("## Business Rules\nBusiness Window:\n  - Start of day\n  - Open for all\n");
     expect([...(set ?? [])].sort()).toEqual(["OPEN_FOR_ALL", "START_OF_DAY"]);
   });
+  it("keeps every window when entries carry a (only for …) qualifier (#94)", () => {
+    const set = parseWindowList(
+      "Business Window:\n  - Start of day (only for ISSUANCE)\n  - Open for all\n  - End of day (only for REDEMPTION)\nWorkflow:",
+    );
+    expect([...(set ?? [])].sort()).toEqual(["END_OF_DAY", "OPEN_FOR_ALL", "START_OF_DAY"]);
+  });
   it("returns undefined when absent", () => {
     expect(parseWindowList("no window section here")).toBeUndefined();
   });
 });
 
 describe("businessWindowDecision (issue #81)", () => {
-  it("blocks transfer creation outside Start of Day", () => {
-    const d = businessWindowDecision("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests", day(), AT_OFA);
-    expect(d.blocked).toBe(true);
-    expect(d.windowName).toBe("Open for All");
-    expect(d.allowed).toEqual(["Start of Day"]);
-  });
-  it("allows transfer creation during Start of Day", () => {
+  it("allows transfer creation through the whole trading day (#94)", () => {
+    // The "(only for ISSUANCE/REDEMPTION)" qualifiers don't narrow an ordinary
+    // transfer, so it is accessible in Start of Day, Open for All and End of Day.
     expect(businessWindowDecision("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests", day(), AT_SOD).blocked).toBe(
       false,
     );
+    expect(businessWindowDecision("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests", day(), AT_OFA).blocked).toBe(
+      false,
+    );
+  });
+  it("blocks transfer creation only when Closed", () => {
+    const d = businessWindowDecision("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests", day(), CLOSED_AM);
+    expect(d.blocked).toBe(true);
+    expect(d.windowName).toBe("Closed");
+    expect(d.allowed).toEqual(["Start of Day", "Open for All", "End of Day"]);
   });
   it("blocks bridge payments outside Open for All", () => {
     expect(businessWindowDecision("POST", "/dlt/bdf/api/bridge/payments", day(), AT_SOD).blocked).toBe(true);
