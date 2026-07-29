@@ -33,6 +33,19 @@ The ECB publishes the Pontes specifications and API documentation here:
 docker run --rm -p 3001:3001 ghcr.io/digital-assets-work/mock-pontes:latest
 ```
 
+> **⚠ Enrolled certs don't survive a restart without Redis.** With no
+> `REDIS_URL`, the mock keeps its runtime CA **in memory** and regenerates it on
+> every start — so after a restart (and `docker run --rm` is one-shot) all
+> previously issued client certificates / `.p12` bundles fail with
+> `403 HL-ATH-002 "Client certificate is not trusted"` and you must re-enroll.
+> To keep the runtime PKI (and enrolled users) stable across restarts, point the
+> mock at Redis:
+>
+> ```bash
+> docker run --rm -p 3001:3001 -e REDIS_URL=redis://host.docker.internal:6379 \
+>   ghcr.io/digital-assets-work/mock-pontes:latest
+> ```
+
 Then call a public endpoint. The mock uses a self-signed certificate locally, so
 first fetch its CA and verify against it (or, against the hosted instance, `curl`
 verifies normally with no flags):
