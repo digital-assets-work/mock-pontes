@@ -14,12 +14,6 @@ import { track } from "../http/route-registry.js";
 import { TransferWorkflow } from "../workflows/transfer.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
-function ensureWallet(store: MockStore, alias: string, ownerBIC: string, managerNCB: string): void {
-  if (!alias || store.getWallet(alias)) return;
-  store.ensureWallet(alias, { ownerBIC, ownerEntityID: ownerBIC, managerNCB });
-  console.log(`[mock-pontes] Auto-created wallet ${alias}`);
-}
-
 /** Build the DCW debit-rights caller from the authenticated request. */
 function authCaller(event: H3Event): { caller?: DcwCaller; approverUserUUID?: string } {
   const auth = event.context.auth as AuthContext | undefined;
@@ -70,10 +64,9 @@ export function createTransfersRouter(store: MockStore) {
         return sendRejection(event, e);
       }
 
-      // Auto-create only the CREDIT-side wallet (issue #23). The debit-side
-      // wallet must already exist; the workflow raises a condition error if not.
-      ensureWallet(store, body.creditedCashWalletAlias, body.creditedCashWalletOwnerID || "UNKNOWN", body.creditedCashWalletManagerID || "UNKNOWN");
-
+      // Both wallets must already exist (issue #93): the workflow rejects an
+      // unknown credit/debit wallet (422 HL-WAL-002/003) rather than
+      // auto-creating it — the error points at POST .../ams/wallets/one-step.
       const draft = workflow.create({
         id,
         amount: body.amountTransferred || "0.00",

@@ -443,7 +443,7 @@ stateDiagram-v2
 | PFoD (matched) | 🟢 | bridge/initpfoddeli + initpfodrece (matched on tradeID) |
 | XvP (hash-lock) | 🟢 | `/igw/{ncb}/v1/xvps(+payment)` — the only fund-locking flow |
 | Settlement query | 🟢 | ims/transactions (drafts) |
-| Dedicated Cash Wallet | 🟡 | read + **credit-side** auto-create; available/locked, debit rights, Redis |
+| Dedicated Cash Wallet | 🟡 | read + **funding-only** credit auto-create (else 422 → one-step endpoint); available/locked, debit rights, Redis |
 | Holding / balance | 🟡 | available + locked balance per wallet |
 | Business Window / Date | � | derived from stored day (Frankfurt time); spec-driven per-endpoint enforcement |
 | Market Participant Entity | ⚪ | — |

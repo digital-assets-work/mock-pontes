@@ -16,13 +16,6 @@ import { DirectRtgsWorkflow } from "../workflows/direct-rtgs.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 import { track } from "../http/route-registry.js";
 
-/** Auto-create a wallet, owned by `ownerEntityID` when known (for debit rights). */
-function ensureWallet(store: MockStore, alias: string, managerNCB: string, ownerEntityID?: string): void {
-  if (!alias || store.getWallet(alias)) return;
-  store.ensureWallet(alias, { managerNCB, ownerEntityID, ownerBIC: ownerEntityID });
-  console.log(`[mock-pontes] Auto-created wallet ${alias}`);
-}
-
 function sendRejection(event: H3Event, e: unknown): { businessErrors: unknown } {
   if (isWorkflowRejection(e)) {
     setResponseStatus(event, e.statusCode);
@@ -59,15 +52,9 @@ export function createDirectRtgsRouter(store: MockStore) {
   const workflow = new DirectRtgsWorkflow(store);
 
   function buildInit(body: any, id: string, initiatorUserUUID?: string) {
-    // Auto-create only the CREDIT-side wallet (issue #23); the debit-side payer
-    // must already exist or the workflow raises a condition error. The wallet is
-    // owned by the entity named in the request (issue #56), never the caller.
-    ensureWallet(
-      store,
-      body.creditedCashWalletAlias,
-      body.creditedCashWalletManagerID || "UNKNOWN",
-      body.creditedCashWalletOwnerID,
-    );
+    // Both wallets must already exist (issue #93): the workflow rejects an
+    // unknown credit/debit wallet (422 HL-WAL-002/003) rather than auto-creating
+    // it — the error points at POST .../ams/wallets/one-step.
     return {
       id,
       amount: body.amount || "0.00",
