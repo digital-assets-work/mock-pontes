@@ -35,6 +35,8 @@
       </div>
       <div class="badge">⚠ Unofficial community tool — <strong>not affiliated with, endorsed, or supported by the
           European Central Bank</strong>.</div>
+      <div class="badge">🔓 <strong>Shared instance — state is global.</strong> On a public host, everyone sees the
+        same wallets and can reset each other. <strong>Run locally for isolated testing.</strong></div>
     </div>
   </div>
 
@@ -84,7 +86,7 @@ docker run --rm -p 3001:3001 {{IMAGE}}:{{IMAGE_TAG}}
 <span class="c"># health check</span>
 curl -sk https://localhost:3001/dlt/bdf/api/octopus/health</pre>
       <p>Or from source (<a href="{{REPO_URL}}#quick-start-from-source" target="_blank" rel="noopener">Node.js
-          24+</a>):</p>
+          22+</a>):</p>
       <pre>git clone {{REPO_URL}}.git
 cd mock-pontes &amp;&amp; npm ci &amp;&amp; npm run dev</pre>
     </section>

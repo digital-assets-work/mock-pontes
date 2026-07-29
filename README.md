@@ -49,7 +49,7 @@ curl -s --cacert mock-ca.pem https://localhost:3001/check/ip
 
 ## Quick start (from source)
 
-Requires Node.js 24+.
+Requires Node.js 22+.
 
 ```bash
 git clone https://github.com/digital-assets-work/mock-pontes.git
@@ -66,6 +66,10 @@ npm run build && npm run run   # production build + run
 > operations are time-restricted (Frankfurt time) and can return `403 HL-BW-001`
 > outside their window. For unrestricted local testing set
 > `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN=true` (the "just let me test" switch).
+
+> **Next step — the recipes.** [`docs/RECIPES.md`](docs/RECIPES.md) has a
+> copy-pasteable `curl` block for every flow (funding, defunding, transfer,
+> 1-step bridge payment) plus the profile/client-id table and signing gotchas.
 
 ## API surface
 
@@ -205,6 +209,9 @@ enrolled users across restarts and to run multiple replicas.
 
 ## Documentation
 
+- [`docs/RECIPES.md`](docs/RECIPES.md) — copy-pasteable `curl` recipes for every
+  flow (funding, defunding, transfer, 1-step bridge payment), the
+  profile→client_id table, and the field-name / NRO-signing gotchas.
 - [`examples/`](examples/) — runnable **mTLS + NRO** client examples in
   TypeScript, Python, and Java (check-mtls → health → token → NRO-signed funding).
 - [`docs/DOMAIN-MODEL.md`](docs/DOMAIN-MODEL.md) — the Pontes functional object

@@ -240,6 +240,17 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(res.json.businessErrors[0].errorCode).toBeDefined();
   });
 
+  it("403s a token used against a different NCB than its realm (#97)", async () => {
+    // u1 is a bdf-realm token; using it on /dlt/bbk/... must be rejected so the
+    // mock's single global ledger doesn't mask real Pontes' per-NCB isolation.
+    const res = await request(server.port, "GET", `/dlt/bbk/api/octopus/ams/wallets`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(res.status).toBe(403);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-ATH-003");
+    expect(res.json.businessErrors[0].errorDescription).toMatch(/realm 'bdf'.*NCB 'bbk'/);
+  });
+
   it("400s a funding create with no NRO signature (#29/#30, #94)", async () => {
     // `signature`/`signerPEM` are required by the funding schema, so with
     // validation now ahead of NRO (#90/#94) a missing signature is reported as a

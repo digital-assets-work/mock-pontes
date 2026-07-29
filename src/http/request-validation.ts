@@ -133,6 +133,65 @@ export function schemaForRequest(method: string, path: string): string | undefin
 export const SUPPORTED_CURRENCY = "EUR";
 
 /**
+ * Canonical 2-decimal money pattern — the same one the official spec applies to
+ * the funding/defunding/bridge/direct-rtgs `amount` field.
+ */
+export const MONEY_PATTERN = /^\d{1,15}(\.\d{0,2})?$/;
+
+/** Body fields that carry a settlement amount. */
+const MONEY_FIELD_NAMES = ["amount", "amountTransferred", "maximumAmount"] as const;
+
+const schemasNode =
+  (officialSpec as { components?: { schemas?: Record<string, { properties?: Record<string, { pattern?: string }> }> } })
+    .components?.schemas ?? {};
+
+/**
+ * The money fields a validated schema leaves **without** a numeric pattern. The
+ * official spec patterns `amount` everywhere but leaves the transfer
+ * `amountTransferred` unconstrained, so the mock used to accept over-precise
+ * amounts (e.g. `"10.123"`) that real Pontes rejects — a realism gap (issue
+ * #97). We enforce {@link MONEY_PATTERN} on exactly these fields so enforcement
+ * is uniform without producing duplicate errors for already-patterned fields.
+ */
+function unpatternedMoneyFields(schemaName: string): string[] {
+  const props = schemasNode[schemaName]?.properties ?? {};
+  return MONEY_FIELD_NAMES.filter((f) => props[f] && !props[f].pattern);
+}
+
+const moneyFieldCache = new Map<string, string[]>();
+function moneyFieldsFor(schemaName: string): string[] {
+  let fields = moneyFieldCache.get(schemaName);
+  if (!fields) {
+    fields = unpatternedMoneyFields(schemaName);
+    moneyFieldCache.set(schemaName, fields);
+  }
+  return fields;
+}
+
+/**
+ * Enforce {@link MONEY_PATTERN} on the money fields the schema leaves
+ * unpatterned (issue #97). Returns the business-error list (empty when valid).
+ */
+export function moneyPrecisionErrors(
+  schemaName: string,
+  body: unknown,
+): Array<{ errorCode: string; errorDescription: string }> {
+  const errors: Array<{ errorCode: string; errorDescription: string }> = [];
+  if (!body || typeof body !== "object") return errors;
+  const b = body as Record<string, unknown>;
+  for (const f of moneyFieldsFor(schemaName)) {
+    const v = b[f];
+    if (typeof v === "string" && v.length > 0 && !MONEY_PATTERN.test(v)) {
+      errors.push({
+        errorCode: "HL-VAL-001",
+        errorDescription: `Field '${f}' must be a EUR amount with at most 2 decimals (pattern ${MONEY_PATTERN.source}).`,
+      });
+    }
+  }
+  return errors;
+}
+
+/**
  * Reject a non-EUR `currency` (issue #80). Pontes is EUR-only; previously
  * funding/defunding/transfer **silently coerced** any value to EUR while other
  * routes honoured it — both hide a client bug. A supplied non-EUR currency is
@@ -173,6 +232,9 @@ export function createRequestValidationMiddleware() {
     }
 
     const errors = validateRequestBody(schemaName, body);
+    // Enforce 2-decimal money precision on fields the spec leaves unpatterned
+    // (issue #97) — e.g. transfer `amountTransferred`.
+    errors.push(...moneyPrecisionErrors(schemaName, body));
     // Enforce EUR-only settlement (issue #80) — no silent coercion.
     const currency = currencyError(body);
     if (currency) errors.push(currency);

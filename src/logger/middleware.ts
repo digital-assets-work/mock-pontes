@@ -31,12 +31,18 @@ export const createLoggingMiddleware = () => {
       const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
       const status = event.node.res.statusCode;
       const user = event.context?.auth?.username || "<unauth>";
-      const fp = event.context.mtlsCertFingerprint || "<none>";
-      const valid = event.context.mtlsCertValid
-        ? "valid"
-        : `INVALID (${event.context.mtlsCertError || "unknown"})`;
+      // Only emit a cert verdict when a client certificate was actually
+      // presented. Normal unauthenticated traffic presents none and none is
+      // required, so log `cert=<none>` rather than a misleading
+      // `certValid=INVALID (UNABLE_TO_GET_ISSUER_CERT)` (issue #98).
+      const fingerprint = event.context.mtlsCertFingerprint;
+      const certInfo = fingerprint
+        ? `cert=${fingerprint} certValid=${
+            event.context.mtlsCertValid ? "valid" : `INVALID (${event.context.mtlsCertError || "unknown"})`
+          }`
+        : "cert=<none>";
       console.log(
-        `[mock-pontes] ${method} ${url} status=${status} durationMs=${durationMs.toFixed(1)} user=${user} cert=${fp} certValid=${valid}`,
+        `[mock-pontes] ${method} ${url} status=${status} durationMs=${durationMs.toFixed(1)} user=${user} ${certInfo}`,
       );
     });
   });
