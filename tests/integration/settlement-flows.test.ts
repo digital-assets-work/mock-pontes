@@ -15,6 +15,12 @@ import http from "node:http";
 import jwt from "jsonwebtoken";
 import { toNodeListener, type App } from "h3";
 
+// Exercise the settlement routes irrespective of the wall-clock: transfer
+// creation is Start-of-Day-only under the spec-driven business window (issue
+// #81), so disable window enforcement here (the window itself is tested in
+// tests/business-window.test.ts).
+process.env.PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN = "true";
+
 import { buildApp } from "../../src/app.js";
 import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";

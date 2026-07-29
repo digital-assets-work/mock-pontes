@@ -158,35 +158,35 @@ export const mockExtras = {
     "/admin/business-window": {
       get: {
         tags: ["Mock · Admin"],
-        summary: "MOCK: get business window",
-        responses: { "200": { description: "Business window" } },
-      },
-      put: {
-        tags: ["Mock · Admin"],
-        summary: "MOCK: set business window",
+        summary: "MOCK: get business day + current window",
         description:
-          "Accepts a sub-list of the GET fields (currentWindow, businessDate, openTime, closeTime); rejects unknown fields and requires closeTime > openTime (issue #59).",
+          "Returns the stored business day (businessDate, sodStart, ofaStart, ofaEnd, eodEnd) plus the live window derived from Frankfurt time (currentWindow, windowName, windowStartTime, windowEndTime, nextWindowName, isOpen) — issue #81.",
+        responses: { "200": { description: "Business day + current window" } },
+      },
+      post: {
+        tags: ["Mock · Admin"],
+        summary: "MOCK: set business day",
+        description:
+          "Accepts a sub-list of the day fields (businessDate, sodStart, ofaStart, ofaEnd, eodEnd); rejects unknown fields and requires the times to stay in increasing order (sodStart ≤ ofaStart ≤ ofaEnd ≤ eodEnd). PUT is also accepted (issue #81).",
         requestBody: {
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  currentWindow: {
-                    type: "string",
-                    enum: ["CLOSED", "START_OF_DAY", "OPEN_FOR_ALL", "END_OF_DAY"],
-                  },
                   businessDate: { type: "string", example: "2026-06-15" },
-                  openTime: { type: "string", example: "08:00" },
-                  closeTime: { type: "string", example: "18:00" },
+                  sodStart: { type: "string", example: "07:00" },
+                  ofaStart: { type: "string", example: "09:00" },
+                  ofaEnd: { type: "string", example: "17:00" },
+                  eodEnd: { type: "string", example: "18:00" },
                 },
               },
             },
           },
         },
         responses: {
-          "200": { description: "Updated" },
-          "400": { description: "Invalid body (unknown field / bad time / closeTime ≤ openTime)" },
+          "200": { description: "Updated business day + current window" },
+          "400": { description: "Invalid body (unknown field / bad time / times not increasing)" },
         },
       },
     },

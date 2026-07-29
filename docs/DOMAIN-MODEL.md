@@ -270,21 +270,31 @@ An operation an operator/authorised party instructs for another entity.
 - States: `PENDING_APPROVAL` → `ACTIVE` / `CANCELED`.
 - Official: `tms/instruct-on-behalf-drafts`, `ams/...`. **Not implemented.**
 
-### 2.15 Business Window & Business Date 🟡
+### 2.15 Business Window & Business Date �
 
-The market calendar gating when operations may settle.
+The market calendar gating when operations may run.
 
-- `BusinessWindow`: `windowName` (Start of Day / Open for All / End of Day /
-  Closed), `startTime`, `endTime`, `nextWindowName`.
+- `BusinessDay` (mock store): `businessDate` + the four boundary times
+  `sodStart` / `ofaStart` / `ofaEnd` / `eodEnd` that partition the Frankfurt day.
+  The current window is **derived** from the Frankfurt-local time (never stored):
+  `[sodStart, ofaStart)` → Start of Day, `[ofaStart, ofaEnd)` → Open for All,
+  `[ofaEnd, eodEnd)` → End of Day, otherwise → Closed. Defaults keep the day
+  Open-for-All almost all day (`00:00 / 00:01 / 23:58 / 23:59`).
+- `BusinessWindow` (official read): `windowName` (Start of Day / Open for All /
+  End of Day / Closed), `startTime`, `endTime`, `nextWindowName`.
 - `BusinessDate`: `businessDate`, `updateBDStatus`
   (`FULL_UPDATE_ALLOWED` / `UPDATE_NOT_ALLOWED` / `CONDITIONAL_UPDATE_ALLOWED`).
 - Mock: `GET .../bridge/current-business-window`, `.../grs/current-business-window`,
-  `.../grs/businessdate` implemented. `windowName` is derived from the stored
-  `openTime`/`closeTime` in **Frankfurt** time (`Open for All` inside the window,
-  else `Closed`). Enforcement on writes is **opt-in** via
-  `PONTES_MOCK_ENFORCE_BUSINESS_WINDOW=true` (issue #59): when enabled, mutating
-  official API calls outside the window are rejected with `403 HL-BW-001`. An
-  admin can hard-close the window with `currentWindow: "CLOSED"`.
+  `.../grs/businessdate` compute the window from the stored day.
+  `GET /admin/business-window` shows the day fields **plus** the live window +
+  `isOpen`; `POST` (or `PUT`) `/admin/business-window` sets any sub-list of day
+  fields (times must stay in increasing order).
+- Enforcement (issues #59, #81) is **always on** and **spec-driven**: each
+  official operation is accessible only in the windows its spec description
+  lists (e.g. transfer creation = Start of Day only; bridge/XvP payments =
+  Open for All only; most reads = Start of Day / Open for All / End of Day).
+  Requests outside the allowed windows are rejected with `403 HL-BW-001`.
+  `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN=true` disables enforcement (CI).
 
 ---
 
@@ -435,7 +445,7 @@ stateDiagram-v2
 | Settlement query | 🟢 | ims/transactions (drafts) |
 | Dedicated Cash Wallet | 🟡 | read + **credit-side** auto-create; available/locked, debit rights, Redis |
 | Holding / balance | 🟡 | available + locked balance per wallet |
-| Business Window / Date | 🟡 | read only, not enforced |
+| Business Window / Date | � | derived from stored day (Frankfurt time); spec-driven per-endpoint enforcement |
 | Market Participant Entity | ⚪ | — |
 | NCB registry | ⚪ | — |
 | T2 Account | ⚪ | — |

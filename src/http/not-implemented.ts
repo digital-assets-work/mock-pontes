@@ -50,7 +50,7 @@ function buildOfficialOps(): OfficialOp[] {
 
 const OFFICIAL_OPS = buildOfficialOps();
 
-function segmentsMatch(reqSegs: string[], tmplSegs: string[]): boolean {
+export function segmentsMatch(reqSegs: string[], tmplSegs: string[]): boolean {
   if (reqSegs.length !== tmplSegs.length) return false;
   for (let i = 0; i < tmplSegs.length; i++) {
     const t = tmplSegs[i];

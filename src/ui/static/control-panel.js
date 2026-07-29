@@ -32,4 +32,42 @@
     .catch(function (e) {
       document.getElementById("cfg").innerHTML = "<tr><td class=\"hint\">config error: " + e + "</td></tr>";
     });
+
+  // Business window (issue #81): show the stored day + the live current window,
+  // and how to change it via POST /admin/business-window.
+  function esc(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;";
+    });
+  }
+  fetch("/admin/business-window")
+    .then(function (r) { return r.json(); })
+    .then(function (b) {
+      var state = document.getElementById("bw-state");
+      if (state) {
+        state.textContent = b.isOpen ? "open" : "closed";
+        state.className = "pill " + (b.isOpen ? "ok" : "");
+      }
+      document.getElementById("bw").innerHTML =
+        row("Current window", "<code>" + esc(b.windowName) + "</code> <span class=\"hint\">(" + esc(b.windowStartTime) + "–" + esc(b.windowEndTime) + " Europe/Berlin)</span>") +
+        row("Next window", "<code>" + esc(b.nextWindowName) + "</code>") +
+        row("Business date", "<code>" + esc(b.businessDate) + "</code>") +
+        row("Start of Day starts", "<code>" + esc(b.sodStart) + "</code>") +
+        row("Open for All starts", "<code>" + esc(b.ofaStart) + "</code>") +
+        row("Open for All ends", "<code>" + esc(b.ofaEnd) + "</code>") +
+        row("End of Day ends", "<code>" + esc(b.eodEnd) + "</code>");
+      var help = document.getElementById("bw-help");
+      if (help) {
+        help.innerHTML =
+          "The current window is derived from the Frankfurt-local time. " +
+          "Change one or more day fields (times must stay in increasing order) with, e.g.:<br>" +
+          "<code>curl -X POST " + location.origin + "/admin/business-window " +
+          "-H 'content-type: application/json' " +
+          "-d '{\"sodStart\":\"07:00\",\"ofaStart\":\"09:00\",\"ofaEnd\":\"17:00\",\"eodEnd\":\"18:00\"}'</code> " +
+          "(add <code>-H 'authorization: Bearer &lt;ADMIN_TOKEN&gt;'</code> when the admin token is set).";
+      }
+    })
+    .catch(function (e) {
+      document.getElementById("bw").innerHTML = "<tr><td class=\"hint\">business-window error: " + e + "</td></tr>";
+    });
 })();

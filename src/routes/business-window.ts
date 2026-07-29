@@ -1,26 +1,23 @@
 import { createRouter, defineEventHandler } from "h3";
 import { track } from "../http/route-registry.js";
 import type { MockStore } from "../state/mock-store.js";
-import {
-  effectiveWindowName,
-  nextEffectiveWindowName,
-} from "../state/business-window.js";
+import { currentWindow, windowDisplayName } from "../state/business-window.js";
 
 export function createBusinessWindowRouter(store: MockStore) {
   const router = track(createRouter());
 
   // GET /dlt/:ncb/api/bridge/current-business-window
   // Response schema: globalregistry.GetCurrentBusinessWindowBridge { windowName, startTime, endTime }
-  // windowName is derived from the stored open/close times in Frankfurt time
-  // ("Open for All" when inside the window, else "Closed") — issue #59.
+  // windowName + bounds are derived from the stored business day in Frankfurt
+  // time (issues #59, #81).
   router.get(
     "/dlt/:ncb/api/bridge/current-business-window",
     defineEventHandler(() => {
-      const bw = store.getBusinessWindow();
+      const cw = currentWindow(store.getBusinessDay());
       return {
-        windowName: effectiveWindowName(bw),
-        startTime: bw.openTime,
-        endTime: bw.closeTime,
+        windowName: cw.displayName,
+        startTime: cw.startTime,
+        endTime: cw.endTime,
       };
     }),
   );
@@ -30,12 +27,12 @@ export function createBusinessWindowRouter(store: MockStore) {
   router.get(
     "/dlt/:ncb/api/octopus/grs/current-business-window",
     defineEventHandler(() => {
-      const bw = store.getBusinessWindow();
+      const cw = currentWindow(store.getBusinessDay());
       return {
-        windowName: effectiveWindowName(bw),
-        startTime: bw.openTime,
-        endTime: bw.closeTime,
-        nextWindowName: nextEffectiveWindowName(bw),
+        windowName: cw.displayName,
+        startTime: cw.startTime,
+        endTime: cw.endTime,
+        nextWindowName: windowDisplayName(cw.nextName),
       };
     }),
   );
@@ -45,9 +42,8 @@ export function createBusinessWindowRouter(store: MockStore) {
   router.get(
     "/dlt/:ncb/api/octopus/grs/businessdate",
     defineEventHandler(() => {
-      const bw = store.getBusinessWindow();
       return {
-        businessDate: bw.businessDate,
+        businessDate: store.getBusinessDay().businessDate,
         updateBDStatus: "UPDATE_NOT_ALLOWED",
       };
     }),

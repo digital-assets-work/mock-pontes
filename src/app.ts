@@ -125,9 +125,10 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   // before the routers, so invalid bodies are rejected with a normalised 400.
   app.use(createRequestValidationMiddleware());
 
-  // Business-window enforcement (issue #59) — opt-in via
-  // PONTES_MOCK_ENFORCE_BUSINESS_WINDOW; blocks mutating official API calls
-  // outside the (Frankfurt-time) window. Before the routers so no write runs.
+  // Business-window enforcement (issues #59, #81) — spec-driven and always on;
+  // rejects official API calls not accessible in the current (Frankfurt-time)
+  // window. Disabled by PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN. Before the
+  // routers so no operation runs outside its window.
   app.use(createBusinessWindowGuardMiddleware(store));
 
   // Pontes-compatible routes.
