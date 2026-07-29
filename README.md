@@ -49,7 +49,7 @@ curl -s --cacert mock-ca.pem https://localhost:3001/check/ip
 
 ## Quick start (from source)
 
-Requires Node.js 24+.
+Requires Node.js 22+.
 
 ```bash
 git clone https://github.com/digital-assets-work/mock-pontes.git
