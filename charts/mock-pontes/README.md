@@ -109,8 +109,9 @@ ingress:
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `imagePullSecrets` | `[]` | Pull secrets for private registries. |
 | `nameOverride` / `fullnameOverride` | `""` | Override generated names. |
-| `serviceAccount.create` | `true` | Create a ServiceAccount. |
+| `serviceAccount.create` | `false` | Create a dedicated ServiceAccount. |
 | `serviceAccount.annotations` | `{}` | ServiceAccount annotations. |
+| `automountServiceAccountToken` | `false` | Mount the SA token into the pod. The mock never calls the K8s API, so it's off by default. |
 | `podSecurityContext` | nonroot 65532, RuntimeDefault | Pod security context. |
 | `securityContext` | no-priv-esc, RO rootfs, drop ALL | Container security context. |
 | `service.type` | `ClusterIP` | Service type. |

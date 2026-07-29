@@ -23,12 +23,17 @@ nameOverride: ""
 fullnameOverride: ""
 
 serviceAccount:
-  # Create a dedicated ServiceAccount.
-  create: true
+  # Create a dedicated ServiceAccount. No RBAC is required for the mock, so you can disable this and use a shared SA if you prefer.
+  create: false
   # Annotations to add to the ServiceAccount (e.g. cloud IAM role bindings).
   annotations: {}
   # Name to use; generated from the fullname template when empty.
   name: ""
+
+# The mock never calls the Kubernetes API, so its ServiceAccount token is not
+# mounted into the pod by default — removing a credential the app never uses.
+# Set to true only if you add a sidecar / tooling that needs API access.
+automountServiceAccountToken: false
 
 # Extra annotations/labels for the pods.
 podAnnotations: {}
