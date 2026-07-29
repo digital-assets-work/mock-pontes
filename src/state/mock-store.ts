@@ -65,11 +65,29 @@ export interface Draft {
   supplementaryData?: string;
 }
 
-export interface BusinessWindow {
-  currentWindow: "CLOSED" | "START_OF_DAY" | "OPEN_FOR_ALL" | "END_OF_DAY";
-  businessDate: string; // YYYY-MM-DD
-  openTime: string; // HH:mm
-  closeTime: string; // HH:mm
+/** Official Pontes business-window names, in daily sequence order. */
+export type BusinessWindowName = "START_OF_DAY" | "OPEN_FOR_ALL" | "END_OF_DAY" | "CLOSED";
+
+/**
+ * The structure of a business day (issue #81). Instead of a single open/close
+ * pair, the mock records the four boundary times that partition the Frankfurt
+ * day into the official windows:
+ *
+ *   [sodStart, ofaStart) → Start of Day
+ *   [ofaStart, ofaEnd)   → Open for All
+ *   [ofaEnd,  eodEnd)    → End of Day
+ *   outside the above     → Closed
+ *
+ * The current window is derived from the Frankfurt-local wall-clock time; there
+ * is no stored "current window". Times must be non-decreasing
+ * (`sodStart ≤ ofaStart ≤ ofaEnd ≤ eodEnd`).
+ */
+export interface BusinessDay {
+  businessDate: string; // YYYY-MM-DD (balance value date)
+  sodStart: string; // HH:mm — "Start of Day" begins
+  ofaStart: string; // HH:mm — "Open for All" begins
+  ofaEnd: string; // HH:mm — "Open for All" ends
+  eodEnd: string; // HH:mm — "End of Day" ends
 }
 
 export interface MockStore {
@@ -107,8 +125,8 @@ export interface MockStore {
   nextId(prefix: string): string;
 
   // Business Window
-  getBusinessWindow(): BusinessWindow;
-  setBusinessWindow(bw: Partial<BusinessWindow>): void;
+  getBusinessDay(): BusinessDay;
+  setBusinessDay(day: Partial<BusinessDay>): void;
 
   // Reference data
   /** The NCB short names accepted on `/dlt/{ncb}` and `/igw/{ncb}` paths.

@@ -1,127 +1,212 @@
 /**
- * Business-window enforcement (issue #59):
- * - openTime/closeTime interpreted in Frankfurt (Europe/Berlin) time;
- * - the window is open only inside [openTime, closeTime) and never when the
- *   admin has hard-closed it (currentWindow: "CLOSED");
- * - mutating official API calls are blocked when the window is closed;
- * - PUT /admin/business-window accepts a sub-list of fields and requires
- *   closeTime > openTime.
+ * Business-day / business-window model (issues #59, #81).
+ *
+ * - The day is partitioned into Start of Day / Open for All / End of Day /
+ *   Closed by the four boundary times, interpreted in Frankfurt (Europe/Berlin);
+ * - the current window is derived from the wall-clock — never stored;
+ * - admin updates accept a sub-list of day fields and must keep the times in
+ *   increasing order;
+ * - enforcement is spec-driven: each official operation is accessible only in
+ *   the windows its spec description lists (e.g. transfer create = Start of Day
+ *   only; bridge payments = Open for All only).
  */
 
 import { describe, it, expect } from "@jest/globals";
-import type { BusinessWindow } from "../src/state/mock-store.js";
+import type { BusinessDay } from "../src/state/mock-store.js";
 import {
   frankfurtTimeHHmm,
-  isBusinessWindowOpen,
-  effectiveWindowName,
-  nextEffectiveWindowName,
-  validateBusinessWindowUpdate,
+  currentWindow,
+  nextWindowName,
+  windowDisplayName,
+  isBusinessOpen,
+  validateBusinessDayUpdate,
 } from "../src/state/business-window.js";
-import { businessWindowBlocks, isOfficialApiPath } from "../src/http/business-window-guard.js";
+import {
+  businessWindowDecision,
+  isOfficialApiPath,
+} from "../src/http/business-window-guard.js";
+import { allowedWindowsForRequest, parseWindowList } from "../src/http/business-window-rules.js";
 
-// 2026-06-15 is DST (CEST, UTC+2) → 10:00Z is 12:00 Frankfurt.
-const SUMMER_NOON = new Date("2026-06-15T10:00:00Z");
-// 2026-01-15 is standard time (CET, UTC+1) → 10:00Z is 11:00 Frankfurt.
-const WINTER_1100 = new Date("2026-01-15T10:00:00Z");
-
-function bw(overrides: Partial<BusinessWindow> = {}): BusinessWindow {
+// A summer (CEST, UTC+2) business day. FFT = UTC + 2.
+function day(overrides: Partial<BusinessDay> = {}): BusinessDay {
   return {
-    currentWindow: "OPEN_FOR_ALL",
     businessDate: "2026-06-15",
-    openTime: "08:00",
-    closeTime: "18:00",
+    sodStart: "07:00",
+    ofaStart: "09:00",
+    ofaEnd: "17:00",
+    eodEnd: "18:00",
     ...overrides,
   };
 }
+const AT_SOD = new Date("2026-06-15T06:30:00Z"); // 08:30 FFT
+const AT_OFA = new Date("2026-06-15T10:00:00Z"); // 12:00 FFT
+const AT_EOD = new Date("2026-06-15T15:30:00Z"); // 17:30 FFT
+const CLOSED_AM = new Date("2026-06-15T04:00:00Z"); // 06:00 FFT
+const CLOSED_PM = new Date("2026-06-15T16:30:00Z"); // 18:30 FFT
 
-describe("frankfurtTimeHHmm (issue #59)", () => {
+describe("frankfurtTimeHHmm", () => {
   it("renders the instant in Europe/Berlin, honouring DST", () => {
-    expect(frankfurtTimeHHmm(SUMMER_NOON)).toBe("12:00");
-    expect(frankfurtTimeHHmm(WINTER_1100)).toBe("11:00");
+    expect(frankfurtTimeHHmm(AT_OFA)).toBe("12:00");
+    expect(frankfurtTimeHHmm(new Date("2026-01-15T10:00:00Z"))).toBe("11:00"); // CET
   });
 });
 
-describe("isBusinessWindowOpen (issue #59)", () => {
-  it("is open when the Frankfurt time is inside [open, close)", () => {
-    expect(isBusinessWindowOpen(bw({ openTime: "08:00", closeTime: "18:00" }), SUMMER_NOON)).toBe(true);
+describe("currentWindow (issue #81)", () => {
+  it("maps Frankfurt time onto the four windows with their bounds", () => {
+    expect(currentWindow(day(), AT_SOD)).toMatchObject({
+      name: "START_OF_DAY",
+      displayName: "Start of Day",
+      startTime: "07:00",
+      endTime: "09:00",
+      nextName: "OPEN_FOR_ALL",
+    });
+    expect(currentWindow(day(), AT_OFA)).toMatchObject({
+      name: "OPEN_FOR_ALL",
+      startTime: "09:00",
+      endTime: "17:00",
+      nextName: "END_OF_DAY",
+    });
+    expect(currentWindow(day(), AT_EOD)).toMatchObject({
+      name: "END_OF_DAY",
+      startTime: "17:00",
+      endTime: "18:00",
+      nextName: "CLOSED",
+    });
   });
-  it("is closed before open and after close", () => {
-    expect(isBusinessWindowOpen(bw({ openTime: "13:00", closeTime: "18:00" }), SUMMER_NOON)).toBe(false);
-    expect(isBusinessWindowOpen(bw({ openTime: "06:00", closeTime: "11:00" }), SUMMER_NOON)).toBe(false);
+  it("is Closed before Start of Day and after End of Day (bounds wrap)", () => {
+    expect(currentWindow(day(), CLOSED_AM)).toMatchObject({
+      name: "CLOSED",
+      startTime: "18:00",
+      endTime: "07:00",
+      nextName: "START_OF_DAY",
+    });
+    expect(currentWindow(day(), CLOSED_PM)).toMatchObject({ name: "CLOSED" });
   });
-  it("is closed at the exact close boundary (half-open interval)", () => {
-    expect(isBusinessWindowOpen(bw({ openTime: "08:00", closeTime: "12:00" }), SUMMER_NOON)).toBe(false);
-  });
-  it("honours a hard admin close regardless of time", () => {
-    expect(isBusinessWindowOpen(bw({ currentWindow: "CLOSED" }), SUMMER_NOON)).toBe(false);
-  });
-  it("treats a non-positive range as closed", () => {
-    expect(isBusinessWindowOpen(bw({ openTime: "18:00", closeTime: "08:00" }), SUMMER_NOON)).toBe(false);
+  it("treats window boundaries as half-open [start, end)", () => {
+    // exactly 09:00 FFT → Open for All (not Start of Day)
+    expect(currentWindow(day(), new Date("2026-06-15T07:00:00Z")).name).toBe("OPEN_FOR_ALL");
+    // exactly 17:00 FFT → End of Day (not Open for All)
+    expect(currentWindow(day(), new Date("2026-06-15T15:00:00Z")).name).toBe("END_OF_DAY");
   });
 });
 
-describe("windowName derivation (issue #59)", () => {
-  it("reports Open for All only when inside the window", () => {
-    expect(effectiveWindowName(bw(), SUMMER_NOON)).toBe("Open for All");
-    expect(nextEffectiveWindowName(bw(), SUMMER_NOON)).toBe("Closed");
-    expect(effectiveWindowName(bw({ openTime: "13:00", closeTime: "18:00" }), SUMMER_NOON)).toBe("Closed");
-    expect(nextEffectiveWindowName(bw({ openTime: "13:00", closeTime: "18:00" }), SUMMER_NOON)).toBe("Open for All");
+describe("nextWindowName / windowDisplayName", () => {
+  it("follows the daily sequence and wraps Closed → Start of Day", () => {
+    expect(nextWindowName("START_OF_DAY")).toBe("OPEN_FOR_ALL");
+    expect(nextWindowName("OPEN_FOR_ALL")).toBe("END_OF_DAY");
+    expect(nextWindowName("END_OF_DAY")).toBe("CLOSED");
+    expect(nextWindowName("CLOSED")).toBe("START_OF_DAY");
+  });
+  it("renders display names", () => {
+    expect(windowDisplayName("OPEN_FOR_ALL")).toBe("Open for All");
+    expect(windowDisplayName("END_OF_DAY")).toBe("End of Day");
   });
 });
 
-describe("businessWindowBlocks (issue #59)", () => {
-  const closed = bw({ currentWindow: "CLOSED" });
-  it("blocks a mutating official API call when closed", () => {
-    expect(businessWindowBlocks("POST", "/dlt/bdf/api/octopus/tms/funding-requests", closed, SUMMER_NOON)).toBe(true);
-    expect(businessWindowBlocks("PUT", "/igw/bdf/v1/xvps/x1", closed, SUMMER_NOON)).toBe(true);
+describe("isBusinessOpen", () => {
+  it("is open in any window other than Closed", () => {
+    expect(isBusinessOpen(day(), AT_OFA)).toBe(true);
+    expect(isBusinessOpen(day(), AT_SOD)).toBe(true);
+    expect(isBusinessOpen(day(), CLOSED_AM)).toBe(false);
   });
-  it("never blocks reads", () => {
-    expect(businessWindowBlocks("GET", "/dlt/bdf/api/bridge/current-business-window", closed, SUMMER_NOON)).toBe(false);
+  it("the sane defaults keep the day open essentially all day", () => {
+    const wide = day({ sodStart: "00:00", ofaStart: "00:01", ofaEnd: "23:58", eodEnd: "23:59" });
+    expect(isBusinessOpen(wide, AT_OFA)).toBe(true);
+    expect(currentWindow(wide, AT_OFA).name).toBe("OPEN_FOR_ALL");
   });
-  it("never blocks non-official paths (admin/health/ui)", () => {
-    expect(businessWindowBlocks("PUT", "/admin/business-window", closed, SUMMER_NOON)).toBe(false);
-    expect(businessWindowBlocks("POST", "/admin/reset", closed, SUMMER_NOON)).toBe(false);
+});
+
+describe("validateBusinessDayUpdate (issue #81)", () => {
+  const current = day();
+  it("accepts a sub-list of day fields", () => {
+    expect(validateBusinessDayUpdate({ ofaStart: "10:00" }, current).update).toEqual({ ofaStart: "10:00" });
+    expect(validateBusinessDayUpdate({ businessDate: "2026-07-01" }, current).update).toEqual({
+      businessDate: "2026-07-01",
+    });
   });
-  it("does not block when the window is open", () => {
-    expect(businessWindowBlocks("POST", "/dlt/bdf/api/octopus/tms/funding-requests", bw(), SUMMER_NOON)).toBe(false);
+  it("rejects unknown fields (e.g. the old openTime/currentWindow)", () => {
+    expect(validateBusinessDayUpdate({ openTime: "08:00" }, current).error).toMatch(/Unknown field/);
+    expect(validateBusinessDayUpdate({ currentWindow: "CLOSED" }, current).error).toMatch(/Unknown field/);
+  });
+  it("rejects an empty body", () => {
+    expect(validateBusinessDayUpdate({}, current).error).toMatch(/at least one/);
+  });
+  it("rejects a bad time / date format", () => {
+    expect(validateBusinessDayUpdate({ sodStart: "7am" }, current).error).toMatch(/HH:mm/);
+    expect(validateBusinessDayUpdate({ eodEnd: "25:00" }, current).error).toMatch(/HH:mm/);
+    expect(validateBusinessDayUpdate({ businessDate: "15-06-2026" }, current).error).toMatch(/YYYY-MM-DD/);
+  });
+  it("requires the merged times to be in increasing order", () => {
+    // ofaStart before sodStart
+    expect(validateBusinessDayUpdate({ ofaStart: "06:00" }, current).error).toMatch(/increasing order/);
+    // eodEnd before ofaEnd
+    expect(validateBusinessDayUpdate({ eodEnd: "16:00" }, current).error).toMatch(/increasing order/);
+    // equal adjacent times are allowed (a zero-length window)
+    expect(validateBusinessDayUpdate({ ofaStart: "07:00" }, current).update).toEqual({ ofaStart: "07:00" });
+  });
+});
+
+describe("allowedWindowsForRequest — spec-driven (issue #81)", () => {
+  it("reads the per-operation window lists from the official spec", () => {
+    expect([...(allowedWindowsForRequest("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests") ?? [])]).toEqual([
+      "START_OF_DAY",
+    ]);
+    expect([...(allowedWindowsForRequest("POST", "/dlt/bdf/api/bridge/payments") ?? [])]).toEqual(["OPEN_FOR_ALL"]);
+    const reads = allowedWindowsForRequest("GET", "/dlt/bdf/api/octopus/ams/wallets");
+    expect(reads?.has("START_OF_DAY")).toBe(true);
+    expect(reads?.has("OPEN_FOR_ALL")).toBe(true);
+    expect(reads?.has("END_OF_DAY")).toBe(true);
+    expect(reads?.has("CLOSED")).toBe(false);
+  });
+  it("returns undefined for operations without a window rule", () => {
+    expect(allowedWindowsForRequest("GET", "/dlt/bdf/api/octopus/health")).toBeUndefined();
+    expect(allowedWindowsForRequest("GET", "/dlt/bdf/api/nonsense")).toBeUndefined();
+  });
+});
+
+describe("parseWindowList", () => {
+  it("parses a Business Window bullet list", () => {
+    const set = parseWindowList("## Business Rules\nBusiness Window:\n  - Start of day\n  - Open for all\n");
+    expect([...(set ?? [])].sort()).toEqual(["OPEN_FOR_ALL", "START_OF_DAY"]);
+  });
+  it("returns undefined when absent", () => {
+    expect(parseWindowList("no window section here")).toBeUndefined();
+  });
+});
+
+describe("businessWindowDecision (issue #81)", () => {
+  it("blocks transfer creation outside Start of Day", () => {
+    const d = businessWindowDecision("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests", day(), AT_OFA);
+    expect(d.blocked).toBe(true);
+    expect(d.windowName).toBe("Open for All");
+    expect(d.allowed).toEqual(["Start of Day"]);
+  });
+  it("allows transfer creation during Start of Day", () => {
+    expect(businessWindowDecision("POST", "/dlt/bdf/api/octopus/rvs/transactions-requests", day(), AT_SOD).blocked).toBe(
+      false,
+    );
+  });
+  it("blocks bridge payments outside Open for All", () => {
+    expect(businessWindowDecision("POST", "/dlt/bdf/api/bridge/payments", day(), AT_SOD).blocked).toBe(true);
+    expect(businessWindowDecision("POST", "/dlt/bdf/api/bridge/payments", day(), AT_OFA).blocked).toBe(false);
+  });
+  it("blocks reads only when Closed", () => {
+    expect(businessWindowDecision("GET", "/dlt/bdf/api/octopus/ams/wallets", day(), AT_OFA).blocked).toBe(false);
+    expect(businessWindowDecision("GET", "/dlt/bdf/api/octopus/ams/wallets", day(), CLOSED_AM).blocked).toBe(true);
+  });
+  it("never blocks the bridge current-business-window read (accessible incl. Closed)", () => {
+    expect(
+      businessWindowDecision("GET", "/dlt/bdf/api/bridge/current-business-window", day(), CLOSED_AM).blocked,
+    ).toBe(false);
+  });
+  it("never gates health, unknown, or non-official paths", () => {
+    expect(businessWindowDecision("GET", "/dlt/bdf/api/octopus/health", day(), CLOSED_AM).blocked).toBe(false);
+    expect(businessWindowDecision("POST", "/admin/business-window", day(), CLOSED_AM).blocked).toBe(false);
+    expect(businessWindowDecision("GET", "/check/ip", day(), CLOSED_AM).blocked).toBe(false);
   });
   it("recognises official API paths", () => {
     expect(isOfficialApiPath("/dlt/bdf/api/octopus/tms/funding-requests")).toBe(true);
     expect(isOfficialApiPath("/igw/bdf/v1/xvps")).toBe(true);
     expect(isOfficialApiPath("/admin/business-window")).toBe(false);
-    expect(isOfficialApiPath("/check/health")).toBe(false);
-  });
-});
-
-describe("validateBusinessWindowUpdate (issue #59)", () => {
-  const current = bw();
-  it("accepts a sub-list of fields", () => {
-    expect(validateBusinessWindowUpdate({ currentWindow: "CLOSED" }, current)).toEqual({
-      update: { currentWindow: "CLOSED" },
-    });
-    expect(validateBusinessWindowUpdate({ openTime: "09:00" }, current).update).toEqual({ openTime: "09:00" });
-  });
-  it("rejects unknown fields", () => {
-    const r = validateBusinessWindowUpdate({ foo: "bar" }, current);
-    expect(r.error).toMatch(/Unknown field/);
-  });
-  it("rejects an empty body", () => {
-    expect(validateBusinessWindowUpdate({}, current).error).toMatch(/at least one/);
-  });
-  it("rejects a bad time format", () => {
-    expect(validateBusinessWindowUpdate({ openTime: "9am" }, current).error).toMatch(/HH:mm/);
-    expect(validateBusinessWindowUpdate({ closeTime: "25:00" }, current).error).toMatch(/HH:mm/);
-  });
-  it("rejects an invalid currentWindow", () => {
-    expect(validateBusinessWindowUpdate({ currentWindow: "MAYBE" }, current).error).toMatch(/currentWindow/);
-  });
-  it("requires closeTime > openTime (against the merged result)", () => {
-    expect(validateBusinessWindowUpdate({ closeTime: "07:00" }, current).error).toMatch(/must be greater/);
-    expect(validateBusinessWindowUpdate({ openTime: "18:00", closeTime: "18:00" }, current).error).toMatch(/must be greater/);
-    // Partial update compared against the stored openTime (08:00).
-    expect(validateBusinessWindowUpdate({ closeTime: "07:30" }, current).error).toMatch(/must be greater/);
-  });
-  it("rejects a bad businessDate", () => {
-    expect(validateBusinessWindowUpdate({ businessDate: "15-06-2026" }, current).error).toMatch(/YYYY-MM-DD/);
   });
 });

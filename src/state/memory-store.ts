@@ -3,7 +3,7 @@ import type {
   Wallet,
   Transaction,
   Draft,
-  BusinessWindow,
+  BusinessDay,
 } from "./mock-store.js";
 import type { CacheInterface } from "../cache/index.js";
 import { fatalPersistError } from "../cache/index.js";
@@ -22,11 +22,16 @@ import {
   type CanDebitResult,
 } from "./dcw.js";
 
-const DEFAULT_BUSINESS_WINDOW: BusinessWindow = {
-  currentWindow: "OPEN_FOR_ALL",
+// Sane defaults (issue #81): the day is Open for All for essentially the whole
+// Frankfurt day, so a freshly-started mock is usable at any hour and the admin
+// panel never shows a misleading "closed". Narrow the times via the admin
+// endpoint to exercise window-restricted flows.
+const DEFAULT_BUSINESS_DAY: BusinessDay = {
   businessDate: new Date().toISOString().slice(0, 10),
-  openTime: "08:00",
-  closeTime: "18:00",
+  sodStart: "00:00",
+  ofaStart: "00:01",
+  ofaEnd: "23:58",
+  eodEnd: "23:59",
 };
 
 /** Redis keys for persisted state (no expiry — mock state must not drop). */
@@ -42,7 +47,7 @@ export class MemoryStore implements MockStore {
   private drafts: Map<string, Draft> = new Map();
   /** Per-(prefix, yyMMdd) monotonic counter backing nextId(). */
   private sequences: Map<string, number> = new Map();
-  private businessWindow: BusinessWindow = { ...DEFAULT_BUSINESS_WINDOW };
+  private businessWindow: BusinessDay = { ...DEFAULT_BUSINESS_DAY };
   /** Accepted NCB short names (seeded from the official enum; updatable later). */
   private validNcbs: string[] = [...OFFICIAL_NCBS];
 
@@ -267,12 +272,12 @@ export class MemoryStore implements MockStore {
 
   // --- Business Window ---
 
-  getBusinessWindow(): BusinessWindow {
+  getBusinessDay(): BusinessDay {
     return { ...this.businessWindow };
   }
 
-  setBusinessWindow(bw: Partial<BusinessWindow>): void {
-    this.businessWindow = { ...this.businessWindow, ...bw };
+  setBusinessDay(day: Partial<BusinessDay>): void {
+    this.businessWindow = { ...this.businessWindow, ...day };
   }
 
   // --- Reference data ---
@@ -288,7 +293,7 @@ export class MemoryStore implements MockStore {
     this.transactions = [];
     this.drafts.clear();
     this.sequences.clear();
-    this.businessWindow = { ...DEFAULT_BUSINESS_WINDOW };
+    this.businessWindow = { ...DEFAULT_BUSINESS_DAY };
     this.persistWallets();
     this.persistDrafts();
     this.persistTransactions();

@@ -1,36 +1,60 @@
 /**
- * Business-window model helpers (issue #59).
+ * Business-day / business-window helpers (issues #59, #81).
  *
- * The mock's business window is now *enforced* (optionally) on official write
- * calls, not merely displayed. `openTime`/`closeTime` are interpreted in
- * **Frankfurt local time** (the ECB Pontes reference timezone), so the window is
- * open when the current Frankfurt wall-clock time falls inside `[openTime,
- * closeTime)` — unless an admin has hard-closed it (`currentWindow: "CLOSED"`).
+ * The mock records the *structure of a day* ({@link BusinessDay}: the four
+ * boundary times that partition the Frankfurt day) and derives the current
+ * official window from the Frankfurt-local wall-clock time. There is no stored
+ * "current window" — it is always computed, so the admin panel and the API can
+ * never contradict each other.
  *
- * These helpers are pure (side-effect-free, `now` is injectable) so the window
+ *   [sodStart, ofaStart) → Start of Day
+ *   [ofaStart, ofaEnd)   → Open for All
+ *   [ofaEnd,  eodEnd)    → End of Day
+ *   otherwise             → Closed   (bounds wrap: eodEnd → sodStart)
+ *
+ * All helpers are pure (side-effect-free, `now` is injectable) so the window
  * logic can be unit-tested independently of HTTP.
  */
 
-import type { BusinessWindow } from "./mock-store.js";
+import type { BusinessDay, BusinessWindowName } from "./mock-store.js";
 
 /** ECB Pontes reference timezone (FFT local time). */
 export const FRANKFURT_TZ = "Europe/Berlin";
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const WINDOW_STATES: BusinessWindow["currentWindow"][] = [
-  "CLOSED",
+
+/** The mutable admin fields, mirroring the body accepted by the admin endpoint. */
+export const BUSINESS_DAY_FIELDS = [
+  "businessDate",
+  "sodStart",
+  "ofaStart",
+  "ofaEnd",
+  "eodEnd",
+] as const;
+
+/** Time fields, in the order they must be non-decreasing. */
+const TIME_FIELDS = ["sodStart", "ofaStart", "ofaEnd", "eodEnd"] as const;
+
+/** Window sequence within a day (used to compute the "next" window). */
+export const WINDOW_SEQUENCE: readonly BusinessWindowName[] = [
   "START_OF_DAY",
   "OPEN_FOR_ALL",
   "END_OF_DAY",
+  "CLOSED",
 ];
-/** The mutable admin fields, mirroring what `GET /admin/business-window` returns. */
-export const BUSINESS_WINDOW_FIELDS = [
-  "currentWindow",
-  "businessDate",
-  "openTime",
-  "closeTime",
-] as const;
+
+const DISPLAY_NAME: Record<BusinessWindowName, string> = {
+  START_OF_DAY: "Start of Day",
+  OPEN_FOR_ALL: "Open for All",
+  END_OF_DAY: "End of Day",
+  CLOSED: "Closed",
+};
+
+/** Human-readable window name per the official spec. */
+export function windowDisplayName(name: BusinessWindowName): string {
+  return DISPLAY_NAME[name];
+}
 
 /** Current Frankfurt-local wall-clock time as a zero-padded `HH:mm` string. */
 export function frankfurtTimeHHmm(now: Date = new Date()): string {
@@ -46,69 +70,97 @@ export function frankfurtTimeHHmm(now: Date = new Date()): string {
   return `${hh === "24" ? "00" : hh}:${mm}`;
 }
 
+export interface CurrentWindow {
+  /** Machine name, e.g. `OPEN_FOR_ALL`. */
+  name: BusinessWindowName;
+  /** Human-readable name, e.g. `Open for All`. */
+  displayName: string;
+  /** Start of the current window (HH:mm, Frankfurt time). */
+  startTime: string;
+  /** End of the current window (HH:mm, Frankfurt time). */
+  endTime: string;
+  /** Name of the window that follows the current one in sequence. */
+  nextName: BusinessWindowName;
+}
+
 /**
- * Is the window currently open? Open ⇔ not hard-closed by the admin AND the
- * Frankfurt-local time is within `[openTime, closeTime)`. A non-positive range
- * (`openTime >= closeTime`) is treated as closed.
+ * Derive the current window from a business day and an instant. Boundaries are
+ * half-open: a window runs `[start, end)`. Outside `[sodStart, eodEnd)` the day
+ * is Closed (its bounds wrap: `eodEnd → sodStart`).
  */
-export function isBusinessWindowOpen(bw: BusinessWindow, now: Date = new Date()): boolean {
-  if (bw.currentWindow === "CLOSED") return false;
-  if (bw.openTime >= bw.closeTime) return false;
+export function currentWindow(day: BusinessDay, now: Date = new Date()): CurrentWindow {
   const t = frankfurtTimeHHmm(now);
-  return bw.openTime <= t && t < bw.closeTime;
+  let name: BusinessWindowName;
+  let startTime: string;
+  let endTime: string;
+  if (t < day.sodStart) {
+    name = "CLOSED";
+    startTime = day.eodEnd;
+    endTime = day.sodStart;
+  } else if (t < day.ofaStart) {
+    name = "START_OF_DAY";
+    startTime = day.sodStart;
+    endTime = day.ofaStart;
+  } else if (t < day.ofaEnd) {
+    name = "OPEN_FOR_ALL";
+    startTime = day.ofaStart;
+    endTime = day.ofaEnd;
+  } else if (t < day.eodEnd) {
+    name = "END_OF_DAY";
+    startTime = day.ofaEnd;
+    endTime = day.eodEnd;
+  } else {
+    name = "CLOSED";
+    startTime = day.eodEnd;
+    endTime = day.sodStart;
+  }
+  return { name, displayName: DISPLAY_NAME[name], startTime, endTime, nextName: nextWindowName(name) };
 }
 
-/** Human-readable window name per the official spec, derived from the live state. */
-export function effectiveWindowName(bw: BusinessWindow, now: Date = new Date()): string {
-  return isBusinessWindowOpen(bw, now) ? "Open for All" : "Closed";
+/** The window that follows `name` in the daily sequence (Closed → Start of Day). */
+export function nextWindowName(name: BusinessWindowName): BusinessWindowName {
+  const i = WINDOW_SEQUENCE.indexOf(name);
+  return WINDOW_SEQUENCE[(i + 1) % WINDOW_SEQUENCE.length];
 }
 
-/** The name of the window that follows the current effective one. */
-export function nextEffectiveWindowName(bw: BusinessWindow, now: Date = new Date()): string {
-  return isBusinessWindowOpen(bw, now) ? "Closed" : "Open for All";
+/** Is the market open (any window other than Closed) at `now`? */
+export function isBusinessOpen(day: BusinessDay, now: Date = new Date()): boolean {
+  return currentWindow(day, now).name !== "CLOSED";
 }
 
-export interface BusinessWindowUpdateResult {
-  update?: Partial<BusinessWindow>;
+export interface BusinessDayUpdateResult {
+  update?: Partial<BusinessDay>;
   error?: string;
 }
 
 /**
- * Validate a `PUT /admin/business-window` body: it must be a **sub-list of the
- * fields returned by `GET /admin/business-window`** (no unknown fields), each of
- * the right shape, and the resulting `closeTime` must be strictly greater than
- * `openTime` (issue #59). Returns the sanitised partial update or an error
- * message.
+ * Validate an admin business-window update: it must be a **sub-list of the day
+ * fields** (no unknown fields), each of the right shape, and the resulting time
+ * boundaries must be non-decreasing (`sodStart ≤ ofaStart ≤ ofaEnd ≤ eodEnd`).
+ * Returns the sanitised partial update or an error message.
  */
-export function validateBusinessWindowUpdate(
+export function validateBusinessDayUpdate(
   body: unknown,
-  current: BusinessWindow,
-): BusinessWindowUpdateResult {
+  current: BusinessDay,
+): BusinessDayUpdateResult {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { error: "Request body must be a JSON object." };
   }
   const input = body as Record<string, unknown>;
   const keys = Object.keys(input);
   if (keys.length === 0) {
-    return { error: `Provide at least one of: ${BUSINESS_WINDOW_FIELDS.join(", ")}.` };
+    return { error: `Provide at least one of: ${BUSINESS_DAY_FIELDS.join(", ")}.` };
   }
-  const allowed = BUSINESS_WINDOW_FIELDS as readonly string[];
+  const allowed = BUSINESS_DAY_FIELDS as readonly string[];
   const unknown = keys.filter((k) => !allowed.includes(k));
   if (unknown.length) {
     return {
-      error: `Unknown field(s): ${unknown.join(", ")}. Allowed: ${BUSINESS_WINDOW_FIELDS.join(", ")}.`,
+      error: `Unknown field(s): ${unknown.join(", ")}. Allowed: ${BUSINESS_DAY_FIELDS.join(", ")}.`,
     };
   }
 
-  const update: Partial<BusinessWindow> = {};
-  if ("currentWindow" in input) {
-    const v = input.currentWindow;
-    if (typeof v !== "string" || !WINDOW_STATES.includes(v as BusinessWindow["currentWindow"])) {
-      return { error: `currentWindow must be one of: ${WINDOW_STATES.join(", ")}.` };
-    }
-    update.currentWindow = v as BusinessWindow["currentWindow"];
-  }
-  for (const field of ["openTime", "closeTime"] as const) {
+  const update: Partial<BusinessDay> = {};
+  for (const field of TIME_FIELDS) {
     if (field in input) {
       const v = input[field];
       if (typeof v !== "string" || !HHMM.test(v)) {
@@ -125,10 +177,18 @@ export function validateBusinessWindowUpdate(
     update.businessDate = v;
   }
 
-  const openTime = update.openTime ?? current.openTime;
-  const closeTime = update.closeTime ?? current.closeTime;
-  if (closeTime <= openTime) {
-    return { error: `closeTime (${closeTime}) must be greater than openTime (${openTime}).` };
+  // Coherence: the merged boundary times must be in non-decreasing order.
+  const merged = { ...current, ...update };
+  for (let i = 1; i < TIME_FIELDS.length; i++) {
+    const prev = TIME_FIELDS[i - 1];
+    const cur = TIME_FIELDS[i];
+    if (merged[cur] < merged[prev]) {
+      return {
+        error:
+          `Times must be in increasing order (sodStart ≤ ofaStart ≤ ofaEnd ≤ eodEnd): ` +
+          `${cur} (${merged[cur]}) is before ${prev} (${merged[prev]}).`,
+      };
+    }
   }
   return { update };
 }

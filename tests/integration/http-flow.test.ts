@@ -28,6 +28,11 @@ import { toNodeListener, type App } from "h3";
 import jwt from "jsonwebtoken";
 import * as x509 from "@peculiar/x509";
 
+// Drive the API irrespective of the wall-clock: the spec-driven business window
+// (issue #81) would otherwise time-restrict some writes. Window behaviour is
+// covered in tests/business-window.test.ts.
+process.env.PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN = "true";
+
 import { buildApp } from "../../src/app.js";
 import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
