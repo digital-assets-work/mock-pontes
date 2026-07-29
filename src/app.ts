@@ -107,7 +107,7 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
 
   // Health + native UI (unauthenticated), before the auth middlewares.
   app.use(createHealthRouter().handler);
-  app.use(createUiRouter().handler);
+  app.use(createUiRouter({ serverCaCertificatePem: runtimePki.serverCaCertificatePem }).handler);
 
   // Enrolment (token + CSR).
   app.use(

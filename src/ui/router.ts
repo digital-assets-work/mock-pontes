@@ -3,6 +3,7 @@
  *
  * Routes (all unauthenticated — dev only):
  *   GET  /                     → redirect to /ui
+ *   GET  /ca.pem               → runtime server-CA certificate (PEM) for TLS verification
  *   GET  /ui                   → home: marketing landing page
  *   GET  /ui/config            → control panel: runtime config + connectivity URLs
  *   GET  /ui/enroll            → upload a CSR, enroll a user, download the signed cert
@@ -226,12 +227,41 @@ async function renderPage(
   return applyTokens(html, extra);
 }
 
-export function createUiRouter() {
+export interface UiRouterOptions {
+  /**
+   * The runtime PKI's server-CA certificate (PEM). Exposed unauthenticated at
+   * `GET /ca.pem` so clients can verify the mock's self-signed server cert
+   * instead of disabling TLS verification (issue #89). When the mock is fronted
+   * by a publicly-trusted cert (e.g. Let's Encrypt via `TLS_CERT_FILE`) this CA
+   * is not needed for verification but is still served (harmless).
+   */
+  serverCaCertificatePem?: string;
+}
+
+export function createUiRouter(options: UiRouterOptions = {}) {
   const router = createRouter();
 
   router.get(
     "/",
     defineEventHandler((event) => sendRedirect(event, "/ui", 302)),
+  );
+
+  // Expose the runtime server CA so clients can verify the mock's self-signed
+  // TLS cert (issue #89). Unauthenticated by design — a CA certificate is
+  // public material. Returns 404 only if the bundle lacks the CA (should not
+  // happen in normal operation).
+  router.get(
+    "/ca.pem",
+    defineEventHandler((event) => {
+      const pem = options.serverCaCertificatePem;
+      if (!pem) {
+        setResponseStatus(event, 404);
+        return { error: "not_found", detail: "server CA certificate is not available" };
+      }
+      setResponseHeader(event, "content-type", "application/x-pem-file");
+      setResponseHeader(event, "content-disposition", 'inline; filename="mock-ca.pem"');
+      return pem;
+    }),
   );
 
   router.get(
@@ -316,6 +346,7 @@ export function createUiRouter() {
           health: `${baseUrl}/dlt/${ncb}/api/octopus/health`,
           checkIp: `${baseUrl}/check/ip`,
           checkMtls: `${baseUrl}/check/mtls`,
+          caPem: `${baseUrl}/ca.pem`,
           csr: `${baseUrl}/iam/realms/${ncb}/protocol/openid-connect/csr`,
           token: `${baseUrl}/iam/realms/${ncb}/protocol/openid-connect/token`,
           openapi: `${baseUrl}/openapi.json`,

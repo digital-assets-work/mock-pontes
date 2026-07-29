@@ -101,10 +101,18 @@ For an existing user, the mock validates the `password` and re-issues.
 ## 3. Enroll in the mock
 
 Point your enrollment at a running mock (default `https://localhost:3001`; the
-examples below use `bdf` as the NCB/realm). The mock uses a self-signed server
-cert, so pass `-k`/`--insecure` for local testing. (Against the hosted instance
+examples below use `bdf` as the NCB/realm). Against the hosted instance
 <https://mock.integration.pontes.ca-dag.work> the server cert is publicly trusted,
-so `-k` is not needed.)
+so `curl` verifies normally with no extra flags. For a **local** mock (self-signed
+cert), fetch its CA once and verify against it:
+
+```bash
+curl -sk https://localhost:3001/ca.pem -o mock-ca.pem   # one-time -k just to fetch the public CA
+# thereafter add --cacert mock-ca.pem to your curl calls (shown below)
+```
+
+The `curl` snippets below use `--cacert mock-ca.pem` for the local mock; drop it
+against the hosted instance.
 
 ### Path A — the built-in UI (recommended)
 
@@ -129,9 +137,9 @@ jq -n --arg csr "$(cat user.csr)" \
     profile:"PILOT_READ_WRITE",
     entityBIC:"BSUIFRPPXXX",
     csr:$csr}' \
-| curl -sk -X POST https://localhost:3001/iam/realms/bdf/protocol/openid-connect/csr \
+| curl -s --cacert mock-ca.pem -X POST https://localhost:3001/iam/realms/bdf/protocol/openid-connect/csr \
     -H 'content-type: application/json' -d @- \
-| jq -r .certificate > user.crt
+    | jq -r .certificate > user.crt
 ```
 
 `user.crt` now holds the issued certificate (PEM). Response codes: `200` success,

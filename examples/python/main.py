@@ -30,7 +30,13 @@ BASE_URL = os.environ.get("BASE_URL", "https://localhost:3001")
 NCB = os.environ.get("NCB", "bdf")
 CLIENT_CERT = os.environ.get("CLIENT_CERT", "user.crt")
 CLIENT_KEY = os.environ.get("CLIENT_KEY", "user.key")
-CA_CERT = os.environ.get("CA_CERT")  # optional; when unset the server cert is not verified
+# TLS server verification (issue #89):
+#   - CA_CERT set            -> verify against that CA (local self-signed: fetch it from GET /ca.pem)
+#   - CA_CERT unset          -> verify against the system trust store (works out-of-the-box
+#                               against the hosted Let's Encrypt cert)
+#   - INSECURE_SKIP_VERIFY   -> explicit, loud opt-out (dev only); never skip silently
+CA_CERT = os.environ.get("CA_CERT")
+INSECURE = os.environ.get("INSECURE_SKIP_VERIFY", "").lower() in ("1", "true", "yes")
 USERNAME = os.environ.get("PONTES_USERNAME", "PFRBSUIFRPPXXX0001")
 PASSWORD = os.environ.get("PONTES_PASSWORD", "initiator-secret")
 
@@ -49,7 +55,8 @@ MANAGER_BIC = os.environ.get("MANAGER_BIC", "BDFEFRPPXXX")
 def new_session(cert, key):
     session = requests.Session()
     session.cert = (cert, key)
-    session.verify = CA_CERT if CA_CERT else False
+    # Verify by default; a custom CA takes precedence; skip only on explicit opt-in.
+    session.verify = CA_CERT if CA_CERT else (not INSECURE)
     return session
 
 
@@ -68,9 +75,10 @@ def get_token(session, username, password):
 
 
 def main() -> None:
-    if not CA_CERT:
+    if not CA_CERT and INSECURE:
         import urllib3
 
+        print("WARNING: TLS server verification is DISABLED (INSECURE_SKIP_VERIFY). Dev use only.")
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     session = new_session(CLIENT_CERT, CLIENT_KEY)

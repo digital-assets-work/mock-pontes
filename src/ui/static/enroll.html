@@ -96,8 +96,10 @@ security find-identity -v ~/Library/Keychains/login.keychain-db | grep PFRBSUIFR
       <pre>Settings → Privacy &amp; Security → Certificates → View Certificates
   → Your Certificates → Import… → select the .p12</pre>
       <label>Use directly for CLI / app mTLS (no install)</label>
-      <pre>curl --cert &lt;your_cert&gt;.pem --key &lt;your_private_key&gt;.pem \
-     -k https://localhost:3001/check/mtls</pre>
+      <pre># fetch the mock's CA once (one-time -k), then verify against it:
+curl -sk https://localhost:3001/ca.pem -o mock-ca.pem
+curl --cert &lt;your_cert&gt;.pem --key &lt;your_private_key&gt;.pem \
+     --cacert mock-ca.pem https://localhost:3001/check/mtls</pre>
     </div>
   </main>
   <script src="/ui/static/enroll.js"></script>

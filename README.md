@@ -33,14 +33,17 @@ The ECB publishes the Pontes specifications and API documentation here:
 docker run --rm -p 3001:3001 ghcr.io/digital-assets-work/mock-pontes:latest
 ```
 
-Then call a public endpoint (the mock uses a self-signed certificate, so pass
-`-k`/`--insecure` for local testing):
+Then call a public endpoint. The mock uses a self-signed certificate locally, so
+first fetch its CA and verify against it (or, against the hosted instance, `curl`
+verifies normally with no flags):
 
 ```bash
-curl -sk https://localhost:3001/dlt/bdf/api/octopus/health
+curl -sk https://localhost:3001/ca.pem -o mock-ca.pem   # one-time -k just to fetch the public CA
+
+curl -s --cacert mock-ca.pem https://localhost:3001/dlt/bdf/api/octopus/health
 # {"octopus":"UP","server":"UP","mock":true}
 
-curl -sk https://localhost:3001/check/ip
+curl -s --cacert mock-ca.pem https://localhost:3001/check/ip
 # {"status":"OK","check":"ip","ip":"...","mock":true}
 ```
 
