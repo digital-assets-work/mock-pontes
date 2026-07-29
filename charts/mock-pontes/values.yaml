@@ -1,0 +1,185 @@
+# Default values for mock-pontes.
+# This is a YAML-formatted file. Values here are the safe, works-out-of-the-box
+# defaults: a single in-memory replica serving HTTPS with a self-signed runtime
+# certificate. See the chart README for the common recipes (Ingress, external
+# Redis for multi-replica / persistent PKI, external TLS certificate).
+
+# -- Number of mock-pontes replicas. Scaling beyond 1 requires shared state —
+# set `config.redisUrl` so the runtime PKI and enrolled users are consistent
+# across pods (otherwise each replica has its own in-memory CA).
+replicaCount: 1
+
+image:
+  repository: ghcr.io/digital-assets-work/mock-pontes
+  pullPolicy: IfNotPresent
+  # Overrides the image tag. Defaults to the chart's appVersion when empty.
+  tag: ""
+
+# Image pull secrets for private registries (the default image is public).
+imagePullSecrets: []
+
+# Partially/fully override the generated names.
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Create a dedicated ServiceAccount. No RBAC is required for the mock, so you can disable this and use a shared SA if you prefer.
+  create: false
+  # Annotations to add to the ServiceAccount (e.g. cloud IAM role bindings).
+  annotations: {}
+  # Name to use; generated from the fullname template when empty.
+  name: ""
+
+# The mock never calls the Kubernetes API, so its ServiceAccount token is not
+# mounted into the pod by default — removing a credential the app never uses.
+# Set to true only if you add a sidecar / tooling that needs API access.
+automountServiceAccountToken: false
+
+# Extra annotations/labels for the pods.
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context. The distroless image already runs as the nonroot
+# user (uid/gid 65532); these settings make that explicit and harden the pod.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  # The mock keeps state in memory / Redis and does not write to disk, so the
+  # root filesystem can be read-only.
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  # Service port. The container always serves HTTPS on `targetPort`.
+  port: 443
+  # Container port the app listens on (PORT). The app serves HTTPS here.
+  targetPort: 3001
+  annotations: {}
+  # nodePort: 30081   # only when type is NodePort/LoadBalancer
+
+ingress:
+  enabled: false
+  className: ""
+  # NOTE: the app terminates TLS itself (HTTPS backend). If your controller
+  # talks to the backend, set its "backend protocol = HTTPS" annotation, e.g.
+  # for ingress-nginx: nginx.ingress.kubernetes.io/backend-protocol: "HTTPS".
+  annotations: {}
+  hosts:
+    - host: mock-pontes.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: mock-pontes-tls
+  #    hosts:
+  #      - mock-pontes.local
+
+# Application configuration → environment variables.
+config:
+  # Bind address inside the container. Must be 0.0.0.0 so the Service can reach
+  # it (the app's own default is localhost).
+  host: "0.0.0.0"
+  nodeEnv: "production"
+
+  # Optional external Redis for multi-replica / persistent runtime PKI and
+  # enrolled users (issue #85). Example: redis://my-redis:6379
+  # When empty the mock keeps state in memory (single replica only).
+  redisUrl: ""
+
+  # Default NCB/realm used by the landing page and health examples.
+  defaultNcb: ""
+
+  # Public URL the instance is reached at (used by the landing page / OIDC
+  # discovery issuer), e.g. https://mock.example.com
+  externalUrl: ""
+
+  # Disable business-window enforcement entirely (handy for shared test
+  # instances and CI at odd hours). Leave unset to keep spec-driven enforcement.
+  businessWindowAlwaysOpen: false
+
+  # Extra Subject Alternative Names baked into the self-signed runtime server
+  # certificate, in the app's TLS_SAN syntax, e.g.
+  #   "dns:mock.example.com;ip:10.0.0.5"
+  # The in-cluster Service DNS names are always included automatically.
+  extraTlsSan: ""
+
+  # Subject for the self-signed runtime server certificate (TLS_SUBJECT).
+  tlsSubject: ""
+
+# Admin surface gating (ADMIN_TOKEN). While unset, /admin/reset,
+# /admin/business-window and /admin/enrolled-users are OPEN — set a token on any
+# shared/public instance.
+admin:
+  # Provide a token; the chart renders it into a Secret and injects ADMIN_TOKEN.
+  token: ""
+  # Or reference an existing Secret that already holds an ADMIN_TOKEN key.
+  existingSecret: ""
+  existingSecretKey: "ADMIN_TOKEN"
+
+# Serve an externally-provided TLS certificate (e.g. from cert-manager) instead
+# of the app's self-signed runtime cert. Point at a Secret with tls.crt/tls.key
+# (a standard kubernetes.io/tls Secret) and it is mounted and wired via
+# TLS_CERT_FILE / TLS_KEY_FILE.
+tls:
+  existingSecret: ""
+  # Keys inside the Secret (defaults match kubernetes.io/tls Secrets).
+  certKey: "tls.crt"
+  keyKey: "tls.key"
+  mountPath: "/etc/tls"
+
+# Arbitrary extra environment variables (list of name/value or name/valueFrom).
+extraEnv: []
+#  - name: PONTES_XVP_TIMEOUT_SEC
+#    value: "3600"
+
+# Liveness/readiness probes. The health endpoint is unauthenticated and served
+# over HTTPS; it requires a valid NCB in the path.
+probes:
+  path: "/dlt/bdf/api/octopus/health"
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 256Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Extra volumes / mounts if you need them (the TLS secret above is handled for
+# you when tls.existingSecret is set).
+volumes: []
+volumeMounts: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Pod Disruption Budget (useful once you run multiple replicas with Redis).
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
