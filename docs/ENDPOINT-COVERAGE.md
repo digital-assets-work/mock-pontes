@@ -74,7 +74,7 @@ including the JWT `401` on `/dlt` — is normalised.
 | `JWT` | Bearer token validated (ES256), `event.context.auth` populated | `src/auth/jwt-middleware.ts` (applied to `/dlt` prefix) |
 | `mTLS` | Authenticated call's client cert must match the cert associated with the user | `src/auth/middleware.ts` (`createMtlsConsistencyMiddleware`) |
 | `mTLS-req` | A valid client certificate is required (independent of JWT) | handler / `src/routes/health.ts` (`/check/mtls`), `src/auth/enrollment-routes.ts` (token) |
-| `PROFILE:X` | Route requires profile `X` in strict mode; bypassed by `PONTES_MOCK_LENIENT_PROFILE=true` | `src/auth/profile-authorization-middleware.ts` |
+| `PROFILE:X` | Route requires profile `X` (always strict — no bypass) | `src/auth/profile-authorization-middleware.ts` |
 | `NRO` | Signer-cert consistency + ECDSA P-256/SHA-256 signature verification | `src/auth/nro-middleware.ts` + cert check, patterns in `src/index.ts` |
 | `STATE` | Handler-level validation (required fields, wallet/draft existence, draft lifecycle state) | route handler |
 | `none` | No auth (registered before the auth middlewares) | — |
