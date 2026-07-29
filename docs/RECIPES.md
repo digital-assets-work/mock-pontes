@@ -98,6 +98,10 @@ Gotchas that produce opaque errors:
   `400 HL-VAL-001` (see the caveats below).
 - **`cbdcRequestType`** is `PAYMENT` or `OPERATION` — use **`OPERATION`** for an
   ordinary transfer; **`type`** is `TRANSFER` / `ISSUANCE` / `REDEMPTION`.
+- **The 1-step bridge payment 200 is `application/json` whose body is a JSON
+  *string*** — `"Cash Token Payment Settled Succesfully"` (with quotes), per the
+  official spec (`200` = `application/json`, `type: string`). It is **not**
+  `text/plain` and **not** a JSON object; read it with `.json()`.
 - The ECB spelling **"Succesfully"** in confirmation strings is intentional wire
   fidelity — match it, don't "fix" it.
 
@@ -248,7 +252,10 @@ curl -s $CACERT --cert ext.crt --key ext.key \
   "debitedCashWalletManagerID": "BDFEFRPPXXX"
 }
 JSON
-# → 200 with the plain-text "…Succesfully…" confirmation string (spelling is faithful).
+# → 200, Content-Type: application/json, body is a JSON *string* (with quotes):
+#     "Cash Token Payment Settled Succesfully"
+#   Parse it with .json() — it is not a JSON object, and not text/plain. The ECB
+#   "Succesfully" spelling is intentional (wire fidelity).
 ```
 
 ---
