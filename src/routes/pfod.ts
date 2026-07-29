@@ -9,16 +9,10 @@ import type { MockStore, Draft } from "../state/mock-store.js";
 import { track } from "../http/route-registry.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { PfodWorkflow } from "../workflows/pfod.js";
-import { isWorkflowRejection } from "../workflows/workflow.js";
+import { isWorkflowRejection, unknownWalletMessage } from "../workflows/workflow.js";
 
 /** Match window before an unmatched PFoD leg is considered expired. */
 const PFOD_MATCH_WINDOW_SEC = Number(process.env.PONTES_PFOD_MATCH_WINDOW_SEC || 3600);
-
-function ensureWallet(store: MockStore, alias: string, managerNCB: string, ownerEntityID?: string): void {
-  if (!alias || store.getWallet(alias)) return;
-  store.ensureWallet(alias, { managerNCB, ownerEntityID, ownerBIC: ownerEntityID });
-  console.log(`[mock-pontes] Auto-created wallet ${alias}`);
-}
 
 const deliverId = (tradeID: string) => `PFOD-${tradeID}-DELI`;
 const receiveId = (tradeID: string) => `PFOD-${tradeID}-RECE`;
@@ -124,9 +118,12 @@ export function createPfodRouter(store: MockStore) {
         setResponseStatus(event, 400);
         return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, sellerCashTokenWalletRef" }] };
       }
-      // The seller cash wallet is the DEBIT side of the matched settlement — per
-      // issue #23 it is NOT auto-created; the match raises a condition error if
-      // it does not exist.
+      // The seller cash wallet is the DEBIT side of the matched settlement and
+      // must already exist (issue #93) — it is never auto-created.
+      if (!store.getWallet(sellerCashTokenWalletRef)) {
+        setResponseStatus(event, 422);
+        return { businessErrors: [{ errorCode: "HL-WAL-002", errorDescription: unknownWalletMessage("Debit", sellerCashTokenWalletRef) }] };
+      }
       storeLeg(deliverId(tradeID), tradeID, amount, currency, sellerCashTokenWalletRef, "", (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);
       return tryMatch(event, tradeID);
@@ -143,10 +140,12 @@ export function createPfodRouter(store: MockStore) {
         setResponseStatus(event, 400);
         return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, buyerCashTokenWalletRef" }] };
       }
-      // The buyer wallet is owned by the entity named in the request (issue
-      // #56), never the caller.
-      const buyerEntity = body.buyerID;
-      ensureWallet(store, buyerCashTokenWalletRef, body.buyerCAMBIC || "UNKNOWN", buyerEntity);
+      // The buyer cash wallet is the CREDIT side of the matched settlement and
+      // must already exist (issue #93) — it is never auto-created.
+      if (!store.getWallet(buyerCashTokenWalletRef)) {
+        setResponseStatus(event, 422);
+        return { businessErrors: [{ errorCode: "HL-WAL-003", errorDescription: unknownWalletMessage("Credit", buyerCashTokenWalletRef) }] };
+      }
       storeLeg(receiveId(tradeID), tradeID, amount, currency, "", buyerCashTokenWalletRef, (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);
       return tryMatch(event, tradeID);

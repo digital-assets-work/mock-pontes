@@ -12,13 +12,6 @@ import type { AuthContext } from "../auth/jwt-middleware.js";
 import { PaymentWorkflow } from "../workflows/payment.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
-/** Auto-create a wallet, owned by `ownerEntityID` when known (for debit rights). */
-function ensureWallet(store: MockStore, alias: string, managerNCB: string, ownerEntityID?: string): void {
-  if (!alias || store.getWallet(alias)) return;
-  store.ensureWallet(alias, { managerNCB, ownerEntityID, ownerBIC: ownerEntityID });
-  console.log(`[mock-pontes] Auto-created wallet ${alias}`);
-}
-
 /**
  * Bridge Cash Token Payments router.
  * 1-step payment endpoint — no draft/approve cycle.
@@ -68,18 +61,12 @@ export function createBridgePaymentsRouter(store: MockStore) {
         };
       }
 
-      // Auto-create only the CREDIT-side wallet (issue #23). The debit-side
-      // source must already exist; the workflow raises a condition error if not.
-      // The wallet is owned by the entity named in the request (issue #56),
-      // never the caller.
+      // Both the debit source and the credited wallet must already exist
+      // (issue #93): an unknown wallet is rejected by the workflow (422
+      // HL-WAL-002/003) pointing at POST .../ams/wallets/one-step, rather than
+      // silently auto-created (which hid funds in an ownerless wallet).
       const auth = event.context.auth as AuthContext | undefined;
       const callerEntity = auth?.entityBIC;
-      ensureWallet(
-        store,
-        creditedCashWalletAlias,
-        creditedCashWalletManagerID || "UNKNOWN",
-        body.creditedCashWalletOwnerID,
-      );
 
       // Execute the 1-step payment via the shared workflow engine (checked debit).
       try {

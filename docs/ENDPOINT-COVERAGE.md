@@ -115,7 +115,7 @@ including the JWT `401` on `/dlt` — is normalised.
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}` | IMPLEMENTED | same | `JWT` `mTLS` `STATE` (404 if unknown) | v0.1.0 |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets/{walias}/transactions` | IMPLEMENTED | same | `JWT` `mTLS` `STATE` (404 if unknown) | v0.1.0 |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets` | IMPLEMENTED | same | `JWT` `mTLS` | unreleased |
-| POST | `/dlt/{ncb}/api/octopus/ams/wallets` | NOT IMPLEMENTED | — (mock auto-creates wallets on first use) | — | — |
+| POST | `/dlt/{ncb}/api/octopus/ams/wallets` | NOT IMPLEMENTED | — (two-step draft; use the mock-only `.../ams/wallets/one-step` to create a wallet) | — | — |
 | GET | `/dlt/{ncb}/api/octopus/ams/wallets-drafts/{id}` | NOT IMPLEMENTED | — | — | — |
 | PUT | `/dlt/{ncb}/api/octopus/ams/wallets-drafts/{id}/{status}` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/octopus/ams/totalundermanagement` | NOT IMPLEMENTED | — | — | — |
@@ -323,8 +323,9 @@ official funding/defunding/transaction/wallet endpoints instead.
   wallet not blocked/out-of-validity) and it must hold **sufficient available
   balance now**. Failures return `403` (rights) or `422` (insufficient balance);
   missing fields still return `400`; success returns `200` + the confirmation
-  string. The source DCW is auto-created **owned by the caller's entity** so a
-  party paying from its own wallet passes the rights check.
+  string. Both the debit source and the credited wallet must **already exist**
+  (issue #93); an unknown wallet is rejected (`422 HL-WAL-002`/`HL-WAL-003`)
+  pointing at `POST .../ams/wallets/one-step`, never silently auto-created.
 - **Direct RTGS payment (composite).** A direct-RTGS payment is modelled as a
   **defund(source) + fund(target)** composite workflow — net effect: checked
   debit of the payer + credit of the receiver. Both a **two-step** variant
@@ -356,12 +357,14 @@ official funding/defunding/transaction/wallet endpoints instead.
   deployment would keep the execution secret with the initiator.)* NRO-signed on
   init (`xvpTransactionId + amount + buyer.bic + seller.bic`). The `/igw` surface
   is not behind the JWT layer; the caller's entity is taken from the seller BIC.
-- **Auto-created wallets (credit side only).** RVS/TMS/bridge/IGW handlers
-  auto-create a referenced wallet only when it is on the **credit side** (via the
-  DCW create primitive: zero balances, same-entity debit rights, no PoA/whitelist)
-  instead of requiring the official AMS wallet-creation flow. A **debit-side**
-  wallet is **never** auto-created (issue #23): if it does not exist the workflow
-  raises a condition error (`422 HL-WAL-002`) before any state change.
+- **Auto-created wallets (funding only).** Only the **funding** path auto-creates
+  its credited wallet (owned by the caller's entity, from the JWT — issue #77),
+  as the on-ramp for cash. **Every other settlement path** (RVS transfers,
+  bridge/direct-RTGS payments, PFoD, XvP) rejects an **unknown credit- or
+  debit-side wallet** with `422 HL-WAL-003`/`HL-WAL-002` and points the caller at
+  `POST .../ams/wallets/one-step` (issue #93), rather than silently auto-creating
+  it (which hid funds in an ownerless wallet). Debit-side wallets were never
+  auto-created (issue #23).
 - **Infinite funding source.** The token-issuance wallet
   `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` that sources funding is treated as
   having an infinite balance: funding approvals credit the target wallet without

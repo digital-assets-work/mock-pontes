@@ -170,6 +170,26 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     expect(total()).toBeCloseTo(before); // conserved
   });
 
+  it("a 1-step bridge payment to an unknown credited wallet is rejected (422) and conserves value (#93)", async () => {
+    const before = total();
+    const srcBefore = avail("S-SRC");
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-93-1", amount: "75.00", currency: "EUR",
+        creditedCashWalletAlias: "S-GHOST", creditedCashWalletManagerID: "BDFEFRPPXXX", // never created
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "ECBFDEFFXXX",
+      },
+    });
+    expect(pay.status).toBe(422);
+    expect(pay.json.businessErrors[0].errorCode).toBe("HL-WAL-003");
+    expect(JSON.stringify(pay.json)).toMatch(/ams\/wallets\/one-step/);
+    // No wallet was created and no value moved (the reported symptom must not happen).
+    expect(store.getWallet("S-GHOST")).toBeUndefined();
+    expect(avail("S-SRC")).toBe(srcBefore);
+    expect(total()).toBeCloseTo(before); // conserved — nothing burned
+  });
+
   it("an overdrawing transfer is rejected (422) and conserves value", async () => {
     const before = total();
     const create = await request(server.port, "POST", `/dlt/${NCB}/api/octopus/rvs/transactions-requests`, {

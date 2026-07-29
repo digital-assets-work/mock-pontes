@@ -356,6 +356,12 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${funded.json.id}/approve`, {
       headers: { authorization: `Bearer ${u2}` },
     });
+    // Pre-create the destination wallet — it is no longer auto-created (#93).
+    const mkDst = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WPAY-DST-82" },
+    });
+    expect(mkDst.status).toBe(201);
     // 1-step bridge payments require the EXTERNAL_USER profile.
     const ext = await mintJwt("user-ext", "EXTERNAL_USER");
     const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
@@ -373,6 +379,39 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(pay.status).toBe(200);
     expect(String(pay.headers["content-type"])).toMatch(/application\/json/);
     expect(pay.json).toBe("Cash Token Payment Settled Succesfully");
+  });
+
+  it("rejects a 1-step bridge payment to an unknown credited wallet (422 HL-WAL-003, #93)", async () => {
+    // Fund a source so the debit side exists; the credited wallet does NOT exist.
+    const funded = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
+      body: fundingBody({ creditedCashWalletAlias: "WPAY-SRC-93", techFundRequestID: "FUND-93" }),
+    });
+    expect(funded.status).toBe(201);
+    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${funded.json.id}/approve`, {
+      headers: { authorization: `Bearer ${u2}` },
+    });
+    const ext = await mintJwt("user-ext-93", "EXTERNAL_USER");
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-93",
+        amount: "10.00",
+        currency: "EUR",
+        creditedCashWalletAlias: "WPAY-GHOST-93", // never created
+        creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "WPAY-SRC-93",
+        debitedCashWalletManagerID: "ECBFDEFFXXX",
+      },
+    });
+    expect(pay.status).toBe(422);
+    expect(pay.json.businessErrors[0].errorCode).toBe("HL-WAL-003");
+    expect(JSON.stringify(pay.json)).toMatch(/ams\/wallets\/one-step/);
+    // The debit side must be untouched — funds are not moved on rejection.
+    const src = await request(server.port, "GET", `${BASE}/ams/wallets/WPAY-SRC-93`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(src.json.availableBalance).toBe("1000.00");
   });
 
   it("creates a wallet for the caller's own entity via POST ams/wallets/one-step (#77)", async () => {

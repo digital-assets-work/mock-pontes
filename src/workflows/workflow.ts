@@ -56,6 +56,19 @@ export function isWorkflowRejection(e: unknown): e is WorkflowRejection {
   return e instanceof WorkflowRejection;
 }
 
+/**
+ * Standard message for an unknown debit/credit wallet (issue #93). The mock does
+ * NOT silently auto-create wallets on settlement (except funding, which mints
+ * the credited wallet) — an unknown wallet is rejected and the caller is pointed
+ * at the mock's one-step wallet-creation endpoint.
+ */
+export function unknownWalletMessage(side: "Debit" | "Credit", alias: string): string {
+  return (
+    `${side} wallet ${alias} does not exist. ` +
+    `Create it first via POST /dlt/{ncb}/api/octopus/ams/wallets/one-step.`
+  );
+}
+
 /** Fields required to open a workflow record. */
 export interface WorkflowInit {
   id: string;
@@ -234,7 +247,7 @@ export abstract class Workflow {
     if (!this.debitsSource) return;
     const alias = record.debitedWalletAlias;
     if (alias && !this.store.getWallet(alias)) {
-      throw new WorkflowRejection(422, "HL-WAL-002", `Debit wallet ${alias} does not exist`);
+      throw new WorkflowRejection(422, "HL-WAL-002", unknownWalletMessage("Debit", alias));
     }
   }
 
@@ -252,7 +265,7 @@ export abstract class Workflow {
   /** Throw unless the credited wallet exists (issue #77). */
   protected requireCreditWallet(alias: string): void {
     if (alias && !this.store.getWallet(alias)) {
-      throw new WorkflowRejection(422, "HL-WAL-003", `Credit wallet ${alias} does not exist`);
+      throw new WorkflowRejection(422, "HL-WAL-003", unknownWalletMessage("Credit", alias));
     }
   }
 
@@ -279,7 +292,7 @@ export abstract class Workflow {
    */
   protected rawCredit(alias: string, amount: string): void {
     const w = this.store.getWallet(alias);
-    if (!w) throw new WorkflowRejection(422, "HL-WAL-003", `Credit wallet ${alias} does not exist`);
+    if (!w) throw new WorkflowRejection(422, "HL-WAL-003", unknownWalletMessage("Credit", alias));
     let a: number;
     try {
       a = parseAmount(amount);
