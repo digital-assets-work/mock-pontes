@@ -6,7 +6,13 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
-import { schemaForRequest, validateRequestBody, currencyError } from "../src/http/request-validation.js";
+import {
+  schemaForRequest,
+  validateRequestBody,
+  currencyError,
+  moneyPrecisionErrors,
+  MONEY_PATTERN,
+} from "../src/http/request-validation.js";
 function validFunding() {
   return {
     type: "FUNDING",
@@ -38,6 +44,30 @@ describe("currencyError (issue #80)", () => {
     expect(currencyError({})).toBeNull();
     expect(currencyError({ amount: "1.00" })).toBeNull();
     expect(currencyError(undefined)).toBeNull();
+  });
+});
+
+describe("moneyPrecisionErrors (issue #97)", () => {
+  const TRANSFER = "requestvalidation.CreateOperationRequest";
+  it("rejects an over-precise transfer amountTransferred (>2 decimals)", () => {
+    const errs = moneyPrecisionErrors(TRANSFER, { amountTransferred: "10.123" });
+    expect(errs).toHaveLength(1);
+    expect(errs[0].errorCode).toBe("HL-VAL-001");
+    expect(errs[0].errorDescription).toMatch(/amountTransferred/);
+  });
+  it("accepts a 0/1/2-decimal transfer amount", () => {
+    expect(moneyPrecisionErrors(TRANSFER, { amountTransferred: "10" })).toEqual([]);
+    expect(moneyPrecisionErrors(TRANSFER, { amountTransferred: "10.5" })).toEqual([]);
+    expect(moneyPrecisionErrors(TRANSFER, { amountTransferred: "10.50" })).toEqual([]);
+  });
+  it("does not double-report `amount` fields the schema already patterns", () => {
+    // Funding `amount` carries a spec pattern (ajv covers it), so the overlay
+    // must add nothing — avoiding a duplicate HL-VAL-001 for the same field.
+    expect(moneyPrecisionErrors(FUNDING, { amount: "10.123" })).toEqual([]);
+  });
+  it("uses the canonical 2-decimal money pattern", () => {
+    expect(MONEY_PATTERN.test("10.12")).toBe(true);
+    expect(MONEY_PATTERN.test("10.123")).toBe(false);
   });
 });
 

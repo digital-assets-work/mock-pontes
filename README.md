@@ -62,6 +62,10 @@ npm run dev      # hot-reload dev server
 npm run build && npm run run   # production build + run
 ```
 
+> **Next step — the recipes.** [`docs/RECIPES.md`](docs/RECIPES.md) has a
+> copy-pasteable `curl` block for every flow (funding, defunding, transfer,
+> 1-step bridge payment) plus the profile/client-id table and signing gotchas.
+
 ## API surface
 
 The mock's OpenAPI description is served in **both JSON and YAML**, and the
@@ -200,6 +204,9 @@ enrolled users across restarts and to run multiple replicas.
 
 ## Documentation
 
+- [`docs/RECIPES.md`](docs/RECIPES.md) — copy-pasteable `curl` recipes for every
+  flow (funding, defunding, transfer, 1-step bridge payment), the
+  profile→client_id table, and the field-name / NRO-signing gotchas.
 - [`examples/`](examples/) — runnable **mTLS + NRO** client examples in
   TypeScript, Python, and Java (check-mtls → health → token → NRO-signed funding).
 - [`docs/DOMAIN-MODEL.md`](docs/DOMAIN-MODEL.md) — the Pontes functional object

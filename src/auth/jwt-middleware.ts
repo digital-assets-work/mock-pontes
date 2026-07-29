@@ -75,6 +75,27 @@ export function createJwtMiddleware(
         entityBIC: decoded.entity_bic,
         realm: decoded.realm,
       } satisfies AuthContext;
+
+      // NCB scoping (issue #97): the `{ncb}` segment of the URL must match the
+      // token's `realm`. Real Pontes partitions per NCB, but the mock keeps a
+      // single global ledger — so without this check a `bdf`-realm token could
+      // query `/dlt/bbk/...` and appear to work, masking an isolation bug that
+      // would fail against the real environment. Reject a cross-realm call 403.
+      const urlNcb = path.split("/")[2];
+      const realm = decoded.realm;
+      if (urlNcb && realm && urlNcb.toLowerCase() !== String(realm).toLowerCase()) {
+        setResponseStatus(event, 403);
+        return {
+          businessErrors: [
+            {
+              errorCode: "HL-ATH-003",
+              errorDescription:
+                `Token realm '${realm}' is not authorized for NCB '${urlNcb}'. ` +
+                `Acquire a token from /iam/realms/${urlNcb}/protocol/openid-connect/token.`,
+            },
+          ],
+        };
+      }
     } catch (err: any) {
       setResponseStatus(event, 401);
       return {
