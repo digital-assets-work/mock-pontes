@@ -84,6 +84,21 @@ npm run build && npm run run   # production build + run
 > copy-pasteable `curl` block for every flow (funding, defunding, transfer,
 > 1-step bridge payment) plus the profile/client-id table and signing gotchas.
 
+## Quick start (Kubernetes / Helm)
+
+A standard Helm chart is included at [`charts/mock-pontes`](charts/mock-pontes).
+A default install needs no external services (self-signed HTTPS, in-memory state):
+
+```bash
+helm install my-pontes ./charts/mock-pontes -n pontes --create-namespace
+kubectl -n pontes port-forward svc/my-pontes-mock-pontes 8443:443
+curl -sk https://localhost:8443/dlt/bdf/api/octopus/health
+```
+
+See the [chart README](charts/mock-pontes/README.md) for pinning a version,
+gating the admin surface, running multiple replicas with Redis, serving a real
+TLS certificate, and Ingress.
+
 ## API surface
 
 The mock's OpenAPI description is served in **both JSON and YAML**, and the
@@ -222,6 +237,9 @@ enrolled users across restarts and to run multiple replicas.
 
 ## Documentation
 
+- [`charts/mock-pontes`](charts/mock-pontes) — a clean, standard **Helm chart**
+  for deploying the mock on Kubernetes (self-signed HTTPS out of the box;
+  optional Redis, Ingress, external TLS, and admin gating).
 - [`docs/RECIPES.md`](docs/RECIPES.md) — copy-pasteable `curl` recipes for every
   flow (funding, defunding, transfer, 1-step bridge payment), the
   profile→client_id table, and the field-name / NRO-signing gotchas.

@@ -1,0 +1,50 @@
+mock-pontes has been deployed as release "{{ .Release.Name }}".
+
+Image: {{ include "mock-pontes.image" . }}
+
+The mock serves HTTPS on the "{{ include "mock-pontes.fullname" . }}" Service
+(port {{ .Values.service.port }}) using
+{{- if .Values.tls.existingSecret }} the TLS certificate from Secret "{{ .Values.tls.existingSecret }}".
+{{- else }} a self-signed runtime certificate (valid for the in-cluster Service DNS names).
+{{- end }}
+
+1. Check the rollout:
+
+   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "mock-pontes.fullname" . }}
+
+{{- if .Values.ingress.enabled }}
+
+2. It is exposed via Ingress at:
+{{- range .Values.ingress.hosts }}
+   https://{{ .host }}
+{{- end }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+
+2. Reach it locally by port-forwarding (the app serves HTTPS, so use -k or its CA):
+
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "mock-pontes.fullname" . }} 8443:{{ .Values.service.port }}
+   curl -sk https://localhost:8443{{ .Values.probes.path }}
+   # {"octopus":"UP","server":"UP","mock":true}
+
+   # Drop the -k by fetching the mock's CA first:
+   curl -sk https://localhost:8443/ca.pem -o mock-ca.pem
+   curl -s --cacert mock-ca.pem https://localhost:8443{{ .Values.probes.path }}
+{{- else }}
+
+2. The Service type is {{ .Values.service.type }}; reach it on the assigned address/port.
+{{- end }}
+
+{{- if and (gt (int .Values.replicaCount) 1) (not .Values.config.redisUrl) }}
+
+WARNING: replicaCount is {{ .Values.replicaCount }} but config.redisUrl is not set.
+Each replica keeps its own in-memory runtime PKI, so certificates enrolled on one
+pod are rejected by the others. Set config.redisUrl to share state across pods.
+{{- end }}
+
+{{- if not (or .Values.admin.token .Values.admin.existingSecret) }}
+
+NOTE: ADMIN_TOKEN is not set, so the admin surface (/admin/*) is OPEN. Set
+admin.token (or admin.existingSecret) on any shared or public instance.
+{{- end }}
+
+Docs: https://github.com/digital-assets-work/mock-pontes
