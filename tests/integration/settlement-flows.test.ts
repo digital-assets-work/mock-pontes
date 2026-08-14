@@ -170,6 +170,24 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     expect(total()).toBeCloseTo(before); // conserved
   });
 
+  it("a 1-step bridge payment carries supplementaryData through to the settled transaction", async () => {
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-29-1", amount: "10.00", currency: "EUR",
+        creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX", creditedCashWalletOwnerID: ENTITY,
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "ECBFDEFFXXX",
+        supplementaryData: "invoice-2026-08-14-001",
+      },
+    });
+    expect(pay.status).toBe(200);
+    const list = await request(server.port, "GET", `/dlt/${NCB}/api/octopus/ams/wallets/S-DST/transactions`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    const tx = list.json.transactions.find((t: any) => t.id === "TX-PAY-29-1");
+    expect(tx.supplementaryData).toBe("invoice-2026-08-14-001");
+  });
+
   it("a 1-step bridge payment to an unknown credited wallet is rejected (422) and conserves value (#93)", async () => {
     const before = total();
     const srcBefore = avail("S-SRC");

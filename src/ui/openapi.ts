@@ -13,11 +13,15 @@
  *   - every operation gains a default error response referencing the official
  *     `ErrorResponse` (issue #33);
  *   - the mock-only helpers (CSR enrolment, connectivity checks, `/admin/**`)
- *     are appended under `Mock ·` tags so they stay documented.
+ *     are appended under `Mock ·` tags so they stay documented;
+ *   - `supplementaryData` (undocumented in the official spec, confirmed
+ *     accepted/echoed via direct correspondence with ECB support) is added to
+ *     the three schemas it applies to — see {@link SUPPLEMENTARY_DATA_SCHEMAS}.
  *
  * The implemented-set comes from the {@link registeredKeySet} route registry —
  * populated as routes are declared — so it cannot drift from the live routes.
- * The pristine official spec remains available at `/openapi/official.json`.
+ * The pristine official spec remains available at `/openapi/official.json`
+ * (never mutated — only the clone built by {@link buildServedSpec} is).
  */
 
 import officialSpec from "./spec/pontes-official-v1.0.json";
@@ -348,6 +352,36 @@ export const mockExtras = {
 type AnyObj = Record<string, any>;
 
 /**
+ * Request/response schemas confirmed, via direct correspondence with ECB
+ * support, to accept/echo `supplementaryData` — even though the official spec
+ * never names the field on any of them.
+ */
+export const SUPPLEMENTARY_DATA_SCHEMAS = [
+  "bridge.PaymentRequest",
+  "requestvalidation.CreateOperationRequest",
+  "requestvalidation.OperationRequest",
+] as const;
+
+/**
+ * Add the undocumented-but-confirmed `supplementaryData` property to the
+ * schemas in {@link SUPPLEMENTARY_DATA_SCHEMAS}, in place. Never applied to the
+ * vendored spec directly — only to the clone `annotateSpec` receives.
+ */
+function annotateSupplementaryData(schemas: AnyObj): void {
+  for (const name of SUPPLEMENTARY_DATA_SCHEMAS) {
+    const props = schemas[name]?.properties;
+    if (props && !props.supplementaryData) {
+      props.supplementaryData = {
+        type: "string",
+        description:
+          "Free-text reference. Undocumented in the official ECB spec, but " +
+          "confirmed accepted/echoed via direct correspondence with ECB support.",
+      };
+    }
+  }
+}
+
+/**
  * Pure transform: annotate a (cloned) official spec against the implemented-set
  * and merge the mock-only extras. Exposed for testing.
  */
@@ -391,6 +425,7 @@ export function annotateSpec(
     ...(spec.components.schemas || {}),
     ...mockExtras.components.schemas,
   };
+  annotateSupplementaryData(spec.components.schemas);
   spec.tags = [...(spec.tags || []), ...mockExtras.tags];
 
   spec.info = {

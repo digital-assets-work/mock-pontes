@@ -9,7 +9,7 @@ import {
   track,
   recordRoute,
 } from "../src/http/route-registry.js";
-import { annotateSpec, mockExtras } from "../src/ui/openapi.js";
+import { annotateSpec, mockExtras, SUPPLEMENTARY_DATA_SCHEMAS } from "../src/ui/openapi.js";
 
 describe("normalizePath (issue #34)", () => {
   it("collapses :param and {param} to {} (param-name-agnostic)", () => {
@@ -133,5 +133,29 @@ describe("annotateSpec (issue #34)", () => {
   it("exposes the mock-only paths via mockExtras", () => {
     expect(Object.keys(mockExtras.paths)).toContain("/admin/reset");
     expect(Object.keys(mockExtras.paths)).toContain("/check/mtls");
+  });
+
+  it("annotates supplementaryData onto the confirmed-but-undocumented schemas", () => {
+    const spec = fakeOfficial() as any;
+    spec.components.schemas["bridge.PaymentRequest"] = {
+      type: "object",
+      properties: { amount: { type: "string" } },
+    };
+    spec.components.schemas["requestvalidation.CreateOperationRequest"] = { type: "object", properties: {} };
+    spec.components.schemas["requestvalidation.OperationRequest"] = { type: "object", properties: {} };
+
+    const annotated = annotateSpec(spec, new Set(), "9.9.9");
+
+    for (const name of SUPPLEMENTARY_DATA_SCHEMAS) {
+      const prop = annotated.components.schemas[name].properties.supplementaryData;
+      expect(prop.type).toBe("string");
+      expect(prop.description).toContain("ECB support");
+    }
+    // Pre-existing properties are untouched.
+    expect(annotated.components.schemas["bridge.PaymentRequest"].properties.amount).toEqual({ type: "string" });
+  });
+
+  it("skips supplementaryData annotation when a confirmed-but-undocumented schema is absent (no crash)", () => {
+    expect(() => annotateSpec(fakeOfficial(), new Set(), "9.9.9")).not.toThrow();
   });
 });

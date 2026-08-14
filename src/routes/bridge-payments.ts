@@ -21,6 +21,10 @@ import { isWorkflowRejection } from "../workflows/workflow.js";
  * (bridge.PaymentRequest): required fields amount, currency, paymentID, and the
  * credited/debited wallet aliases + credited manager ID. On success it returns
  * HTTP 200 with the plain-text confirmation string used by the real API.
+ *
+ * `supplementaryData` (undocumented in the official spec, confirmed accepted
+ * via direct correspondence with ECB support) is carried through to the
+ * settled transaction, readable via GET .../ams/wallets/{walias}/transactions.
  */
 export function createBridgePaymentsRouter(store: MockStore) {
   const router = track(createRouter());
@@ -39,6 +43,7 @@ export function createBridgePaymentsRouter(store: MockStore) {
         creditedCashWalletManagerID,
         amount,
         currency,
+        supplementaryData,
       } = body;
 
       // Validate required fields per the official bridge.PaymentRequest schema.
@@ -77,6 +82,7 @@ export function createBridgePaymentsRouter(store: MockStore) {
             currency: currency || "EUR",
             creditedWalletAlias: creditedCashWalletAlias,
             debitedWalletAlias: debitedCashWalletAlias,
+            supplementaryData,
           },
           { caller: callerEntity ? { entityBIC: callerEntity } : undefined },
         );

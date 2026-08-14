@@ -190,8 +190,11 @@ A wallet-to-wallet cash-token transfer/payment (2-step).
   `*.Response` schemas), `amountTransferred`, `currency`
   (`EUR`), `creditedCashWalletAlias`, `debitedCashWalletAlias`,
   `creditedCashWalletManagerID`, `debitedCashWalletManagerID`, `type`,
-  `cbdcRequestType`, `instructingPartyID`, `status`, and the non-official
-  `supplementaryData` ("reason of payment").
+  `cbdcRequestType`, `instructingPartyID`, `status`, and the undocumented
+  `supplementaryData` ("reason of payment" — confirmed accepted, via direct
+  correspondence with ECB support, on both the 1-step `bridge/payments` and
+  2-step `rvs/transactions-requests` endpoints, though absent from the
+  published spec).
 - Cardinality: debits **1** DCW, credits **1** DCW; produces **1** Settlement.
 - Mock: `POST .../rvs/transactions-requests` (draft) + `PUT .../transactions-drafts/{id}/approve|cancel`.
 - **Id sourcing** (issue #32): a client-supplied instruction id is honoured where
