@@ -96,7 +96,11 @@ textarea {
   resize: vertical;
 }
 
-button {
+/* Scoped to exclude #swagger-mock/#swagger-official: swagger-ui-dist renders its
+   own (unclassed) <button> tabs there (e.g. "Example Value" / "Schema") relying
+   on inherited text color — this blanket reset was clobbering that, making them
+   invisible (dark-on-dark). */
+button:not(#swagger-mock button, #swagger-official button) {
   background: var(--accent);
   color: #04283a;
   border: 0;
@@ -107,12 +111,12 @@ button {
   margin-top: 12px;
 }
 
-button.secondary {
+button:not(#swagger-mock button, #swagger-official button).secondary {
   background: var(--line);
   color: var(--fg);
 }
 
-button:disabled {
+button:not(#swagger-mock button, #swagger-official button):disabled {
   opacity: .5;
   cursor: not-allowed;
 }
@@ -194,19 +198,23 @@ a.link {
   font-size: .8rem;
 }
 
-.tabs {
+/* Own page-level tabs — named to avoid colliding with swagger-ui-dist's unscoped
+   internal .tab class (that collision made its Example Value/Schema toggle
+   render dark-on-dark: our background/color leaked onto its container while its
+   own text color stayed unchanged). */
+.page-tabs {
   display: flex;
   gap: 8px;
   margin-bottom: 4px;
 }
 
-.tab {
+.page-tab {
   margin-top: 0;
   background: var(--line);
   color: var(--fg);
 }
 
-.tab.active {
+.page-tab.active {
   background: var(--accent);
   color: #04283a;
 }

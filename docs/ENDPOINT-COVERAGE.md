@@ -374,15 +374,14 @@ official funding/defunding/transaction/wallet endpoints instead.
   businessdate values but does not reject transactions outside an open window.
 - **IMS list returns drafts.** `GET .../ims/transactions` returns in-flight mock
   drafts rather than the full settled-transaction extract model of the real API.
-- **`supplementaryData` (non-official, "reason of payment").** The **2-step**
+- **`supplementaryData` (undocumented, "reason of payment").** The **2-step**
   transaction endpoint `POST .../rvs/transactions-requests` accepts an optional
-  `supplementaryData` string and carries it through the draft, the settled
-  transaction, and the `GET .../ims/transactions` query. This anticipates the ECB
-  change (Jul 2026 clarification) that surfaces the Pontes **U2A** "reason for the
-  payment" in `octopus.Settlement.supplementaryData` — it is *readable* in the
-  official spec but not officially settable via A2A submission. Note: the
-  **1-step** `POST .../bridge/payments` endpoint does **not** accept
-  `supplementaryData`.
+  `supplementaryData` string and carries it through the draft (`GET
+  .../transactions-drafts/{id}`), the settled transaction, and the `GET
+  .../ims/transactions` query. Direct correspondence with ECB support confirmed
+  the field is also accepted on the **1-step** `POST .../bridge/payments`
+  endpoint (implemented — see `routes/bridge-payments.ts`). The field is
+  absent from the official OpenAPI spec/SDD.
 
 ### Gaps worth follow-up (not fixed here)
 
