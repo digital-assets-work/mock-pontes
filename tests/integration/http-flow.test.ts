@@ -658,6 +658,51 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       await local.close();
     }
   });
+
+  it("XvP records never surface via the Cash Token Transaction list (ims/transactions) — #102", async () => {
+    // The XvP HTLC record lives in the /igw domain (read via GET /igw/.../xvps/{id}),
+    // not the Cash Token Transaction list. It must not appear in ims/transactions —
+    // it is a different transaction domain, and its supplementaryData carries the
+    // execution/cancellation keys that must not leak.
+    const s = new MemoryStore();
+    // Seller wallet owned by the querying caller's BIC, so the XvP draft is
+    // *readable* by that caller — proving it is the type filter (not wallet
+    // scoping) that hides it.
+    s.ensureWallet("WSELL-IMS", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    // A genuine Cash Token transfer draft that *should* be listed.
+    s.addDraft({
+      id: "TR-IMS-1", type: "TRANSFER", status: "PENDING_APPROVAL", amount: "5.00", currency: "EUR",
+      creditedWalletAlias: "WSELL-IMS", debitedWalletAlias: "",
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-IMS" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      expect(init.status).toBe(200);
+      const xvpId = init.json.xvpTransactionId as string;
+      const execKey = init.json.executionKey as string;
+      const cancelKey = init.json.cancellationKey as string;
+
+      const token = await mintJwt("user-ims");
+      const list = await request(local.port, "GET", `${BASE}/ims/transactions`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(list.status).toBe(200);
+      const ids = (list.json as Array<{ id: string }>).map((t) => t.id);
+      // The Cash Token transfer is listed; the XvP record is not.
+      expect(ids).toContain("TR-IMS-1");
+      expect(ids).not.toContain(xvpId);
+      // None of the XvP secrets leak into the payload.
+      const raw = JSON.stringify(list.json);
+      expect(raw).not.toContain(execKey);
+      expect(raw).not.toContain(cancelKey);
+    } finally {
+      await local.close();
+    }
+  });
 });
 
 describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {

@@ -89,21 +89,29 @@ export function createTransfersRouter(store: MockStore) {
   // GET /dlt/:ncb/api/octopus/ims/transactions — Retrieve Cash Token Transaction
   // List (any status, including PENDING_APPROVAL). Mirrors the real Pontes
   // `ims/transactions` query endpoint used to surface in-flight drafts.
+  //
+  // XvP HTLC records belong to the separate `/igw` domain and are read via
+  // GET /igw/{ncb}/v1/xvps/{id}; they are not Cash Token Transactions and their
+  // supplementaryData carries the execution/cancellation keys, so they must
+  // never surface through this list.
   router.get(
     "/dlt/:ncb/api/octopus/ims/transactions",
     defineEventHandler((event) => {
       const { caller } = authCaller(event);
-      return store.getDrafts(caller).map((d) => ({
-        id: d.id,
-        type: d.type,
-        etatsUX: d.status,
-        amountTransferred: d.amount,
-        currency: d.currency,
-        creditedCashWalletAlias: d.creditedWalletAlias,
-        debitedCashWalletAlias: d.debitedWalletAlias,
-        creationDate: d.createdAt,
-        supplementaryData: d.supplementaryData,
-      }));
+      return store
+        .getDrafts(caller)
+        .filter((d) => d.type !== "XVP")
+        .map((d) => ({
+          id: d.id,
+          type: d.type,
+          etatsUX: d.status,
+          amountTransferred: d.amount,
+          currency: d.currency,
+          creditedCashWalletAlias: d.creditedWalletAlias,
+          debitedCashWalletAlias: d.debitedWalletAlias,
+          creationDate: d.createdAt,
+          supplementaryData: d.supplementaryData,
+        }));
     }),
   );
 
