@@ -213,7 +213,9 @@ export class XvpWorkflow extends Workflow {
     this.rawCredit(rec.sellerWalletAlias, rec.amount);
     this.store.updateDraft(rec.id, { status: "SETTLED", debitedWalletAlias: params.buyerWalletAlias });
     this.store.addTransaction({
-      id: `TX-${rec.id}`,
+      // Identify the settled cash movement by its payment id, and link it back
+      // to the originating XvP via supplementaryData (as other payments do).
+      id: rec.paymentId ?? `TX-${rec.id}`,
       type: "XVP",
       status: "SETTLED",
       amount: rec.amount,
@@ -222,6 +224,7 @@ export class XvpWorkflow extends Workflow {
       debitedWalletAlias: params.buyerWalletAlias,
       createdAt: new Date().toISOString(),
       settledAt: new Date().toISOString(),
+      supplementaryData: xvpTransactionId,
     });
     return {
       xvpTransactionId,

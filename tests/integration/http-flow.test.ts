@@ -577,6 +577,9 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       const tx = s.getTransactions().find((t) => t.type === "XVP");
       expect(tx?.debitedWalletAlias).toBe("EIB-XFER-01");
       expect(tx?.creditedWalletAlias).toBe("WSELL-XFER");
+      // Identified by the payment id; linked back to the XvP via supplementaryData.
+      expect(tx?.id).toBe(pay.json.payment.id);
+      expect(tx?.supplementaryData).toBe(xvpId);
     } finally {
       await local.close();
     }

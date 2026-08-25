@@ -445,6 +445,9 @@ describe("XvpWorkflow (cash leg: buyer → seller — issue #21)", () => {
     expect(tx.type).toBe("XVP");
     expect(tx.debitedWalletAlias).toBe("BUYER-W");
     expect(tx.creditedWalletAlias).toBe("SELLER-W");
+    // Identified by the payment id; linked back to the XvP via supplementaryData.
+    expect(tx.id).toBe(p.paymentId);
+    expect(tx.supplementaryData).toBe("XVP1");
   });
 
   it("rejects pay when the buyer has insufficient funds (422)", () => {
