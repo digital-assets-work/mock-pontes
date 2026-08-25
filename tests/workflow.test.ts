@@ -489,6 +489,19 @@ describe("XvpWorkflow (cash leg: buyer → seller — issue #21)", () => {
     }
     expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
   });
+
+  it("rejects pay after the timeout (409) without debiting the buyer", () => {
+    const store = seed();
+    const wf = new XvpWorkflow(store);
+    wf.init({ xvpTransactionId: "XVP-TO", transactionType: "DVP", amount: "40.00", currency: "EUR", sellerWalletAlias: "SELLER-W", sellerBic: "BANKAXXXXXX", buyerBic: "BANKBXXXXXX", timeoutSec: -1 });
+    try {
+      wf.pay("XVP-TO", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR", caller: BUYER });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(409);
+    }
+    expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
+  });
 });
 
 describe("Debit-side wallet must pre-exist (issue #23)", () => {

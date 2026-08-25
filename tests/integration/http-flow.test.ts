@@ -581,6 +581,53 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       await local.close();
     }
   });
+
+  it("GET /xvps/{id} returns the official XvPInitResponse fields (no status/transactionType) — #102", async () => {
+    const init = await request(server.port, "POST", `/igw/${NCB}/v1/xvps`, {
+      body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "MARKDEFFXXX", cashWalletAlias: "WSELL-GET" }, buyer: { bic: "BEIILULUXXX" }, amount: "12.00", currency: "EUR", type: "DVP" },
+    });
+    expect(init.status).toBe(200);
+    const get = await request(server.port, "GET", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}`);
+    expect(get.status).toBe(200);
+    expect(get.json.xvpTransactionId).toBe(init.json.xvpTransactionId);
+    expect(get.json.type).toBe("DVP");
+    expect(get.json.buyer.bic).toBe("BEIILULUXXX");
+    expect(get.json.seller.bic).toBe("BSUIFRPPXXX");
+    // Fields not in the spec must be absent.
+    expect(get.json.status).toBeUndefined();
+    expect(get.json.transactionType).toBeUndefined();
+  });
+
+  it("XvP timeout: buyer pay fails 409; seller GET payment?key=CANCELLATION returns the cancellation key — #102", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-TO", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    s.ensureWallet("EIB-TO", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+    s.credit("EIB-TO", "1000.00");
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      // timeoutSec in the past → the XvP is already expired.
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-TO" }, buyer: { bic: "BEIILULUXXX" }, amount: "40.00", currency: "EUR", type: "DVP", timeoutSec: -1 },
+      });
+      expect(init.status).toBe(200);
+      const xvpId = init.json.xvpTransactionId as string;
+      // Buyer pays after the timeout → 409, no debit.
+      const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
+        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "EIB-TO" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
+      });
+      expect(pay.status).toBe(409);
+      expect(s.getWallet("EIB-TO")?.balance).toBe("1000.00");
+      // Seller requests the cancellation key after the timeout → returned.
+      const cancel = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment?key=CANCELLATION`);
+      expect(cancel.status).toBe(200);
+      expect(cancel.json.payment.status).toBe("UNSETTLED");
+      expect(cancel.json.cancellationKey).toHaveLength(64);
+      expect(cancel.json.executionKey).toBeUndefined();
+    } finally {
+      await local.close();
+    }
+  });
 });
 
 describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {

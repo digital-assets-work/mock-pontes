@@ -13,6 +13,8 @@ export interface XvpInitParams {
   sellerWalletAlias: string; // where the seller is PAID (credited on execution)
   sellerBic?: string;
   buyerBic?: string;         // the entity expected to pay
+  seller?: unknown;          // echoed back by GET (Participant)
+  buyer?: unknown;           // echoed back by GET (SimpleParticipant)
   timeoutSec?: number;
 }
 
@@ -101,6 +103,8 @@ export class XvpWorkflow extends Workflow {
         paymentId,
         sellerBic: params.sellerBic,
         buyerBic: params.buyerBic,
+        seller: params.seller,
+        buyer: params.buyer,
       }),
     });
 
@@ -132,6 +136,8 @@ export class XvpWorkflow extends Workflow {
     paymentId?: string;
     sellerBic?: string;
     buyerBic?: string;
+    seller?: unknown;
+    buyer?: unknown;
   } | undefined {
     const d = this.store.getDraft(xvpTransactionId);
     if (!d || d.type !== "XVP") return undefined;
@@ -152,6 +158,8 @@ export class XvpWorkflow extends Workflow {
       paymentId: meta.paymentId,
       sellerBic: meta.sellerBic,
       buyerBic: meta.buyerBic,
+      seller: meta.seller,
+      buyer: meta.buyer,
     };
   }
 
@@ -176,7 +184,7 @@ export class XvpWorkflow extends Workflow {
     }
     if (rec.timeout && Date.parse(rec.timeout) < Date.now()) {
       this.store.updateDraft(rec.id, { status: "EXPIRED" });
-      throw new WorkflowRejection(410, "HL-XVP-004", `XvP ${xvpTransactionId} has timed out`);
+      throw new WorkflowRejection(409, "HL-XVP-004", `XvP ${xvpTransactionId} has timed out and can no longer be paid`);
     }
     // The payment must match the initialisation.
     if (rec.buyerBic && params.buyerBic && params.buyerBic !== rec.buyerBic) {

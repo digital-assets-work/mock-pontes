@@ -1,6 +1,7 @@
 import {
   createRouter,
   defineEventHandler,
+  getQuery,
   getRouterParam,
   readBody,
   setResponseStatus,
@@ -81,6 +82,8 @@ export function createXvpRouter(store: MockStore) {
         sellerWalletAlias: sellerWallet,
         sellerBic,
         buyerBic,
+        seller: body.seller,
+        buyer: body.buyer,
         timeoutSec: body.timeoutSec,
       });
       // Official success is 200 + XvPInitResponse (echoes buyer/seller/amount/
@@ -109,7 +112,7 @@ export function createXvpRouter(store: MockStore) {
   router.post("/igw/:ncb/v1/xvps", initHandler);
   router.post("/igw/:ncb/v1/direct-rtgs/xvps", initHandler);
 
-  // GET XvP status
+  // GET XvP status — official XvPInitResponse shape.
   router.get(
     "/igw/:ncb/v1/xvps/:id",
     defineEventHandler((event) => {
@@ -121,13 +124,14 @@ export function createXvpRouter(store: MockStore) {
       }
       return {
         xvpTransactionId: rec.id,
-        status: rec.status,
-        transactionType: rec.transactionType,
-        amount: rec.amount,
-        currency: rec.currency,
         executionHash: rec.executionHash,
         cancellationHash: rec.cancellationHash,
         timeout: rec.timeout,
+        buyer: rec.buyer,
+        seller: rec.seller,
+        amount: rec.amount,
+        currency: rec.currency,
+        type: rec.transactionType,
       };
     }),
   );
@@ -178,7 +182,11 @@ export function createXvpRouter(store: MockStore) {
     }),
   );
 
-  // GET payment status — official PaymentResponse for the cash leg.
+  // GET payment status — official PaymentResponse. The required `key` query
+  // (EXECUTION|CANCELLATION) selects which HLC secret the caller wants; the key
+  // is only returned when its status allows it: executionKey to the buyer once
+  // SETTLED; cancellationKey to the seller once the payment is UNSETTLED/BURNED
+  // — which includes a passed timeout.
   router.get(
     "/igw/:ncb/v1/xvps/:id/payment",
     defineEventHandler((event) => {
@@ -188,19 +196,22 @@ export function createXvpRouter(store: MockStore) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-XVP-002", errorDescription: `XvP transaction ${id} not found` }] };
       }
+      const requested = String(getQuery(event).key || "").toUpperCase();
+      const timedOut = !!rec.timeout && Date.parse(rec.timeout) < Date.now();
       const status =
-        rec.status === "SETTLED" ? "SETTLED" : rec.status === "INITIALIZED" ? "PENDING" : "UNSETTLED";
-      // executionKey only when SETTLED (buyer); cancellationKey only when
-      // UNSETTLED/BURNED (seller); neither while PENDING (PaymentResponse rules).
-      const keys =
-        status === "SETTLED"
-          ? { executionKey: rec.executionKey }
-          : status === "UNSETTLED"
-            ? { cancellationKey: rec.cancellationKey }
-            : {};
+        rec.status === "SETTLED"
+          ? "SETTLED"
+          : rec.status === "INITIALIZED"
+            ? timedOut
+              ? "UNSETTLED"
+              : "PENDING"
+            : "UNSETTLED";
+      const keys: { executionKey?: string; cancellationKey?: string } = {};
+      if (status === "SETTLED" && requested !== "CANCELLATION") keys.executionKey = rec.executionKey;
+      if (status === "UNSETTLED" && requested !== "EXECUTION") keys.cancellationKey = rec.cancellationKey;
       return {
         xvpTransactionId: rec.id,
-        payment: { id: rec.paymentId, status, reason: `XvP ${rec.status}` },
+        payment: { id: rec.paymentId, status, reason: `XvP ${status.toLowerCase()}` },
         ...keys,
       };
     }),
