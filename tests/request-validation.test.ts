@@ -123,3 +123,32 @@ describe("validateRequestBody — funding create (issue #53)", () => {
     expect(errs).not.toMatch(/additional/i);
   });
 });
+
+describe("XvP validator compiles despite the ECB `{1, 15}` quantifier typo", () => {
+  const validXvp = {
+    seller: { bic: "SELLFRPPXXX", marketDLTOperator: "MARKDEFFXXX" },
+    buyer: { bic: "BUYRDEFFXXX" },
+    amount: "10000.50",
+    currency: "EUR",
+    type: "DVP",
+  };
+
+  it("accepts a valid XvP init body (validator is active, not failed-open)", () => {
+    expect(validateRequestBody("XvPInitRequest", validXvp)).toEqual([]);
+  });
+
+  it("reports missing required fields — proving validation runs, not skipped", () => {
+    const errs = validateRequestBody("XvPInitRequest", { amount: "10.00", currency: "EUR", type: "DVP" })
+      .map((e) => e.errorDescription)
+      .join(" ");
+    expect(errs).toMatch(/seller/);
+    expect(errs).toMatch(/buyer/);
+  });
+
+  it("enforces the amount pattern once the quantifier is normalised", () => {
+    const errs = validateRequestBody("XvPInitRequest", { ...validXvp, amount: "10.123" })
+      .map((e) => e.errorDescription)
+      .join(" ");
+    expect(errs).toMatch(/amount/i);
+  });
+});

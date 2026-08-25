@@ -18,7 +18,7 @@ import {
   createNroMiddleware,
   createProfileAuthorizationMiddleware,
 } from "./auth/index.js";
-import { createNroCertCheckMiddleware } from "./auth/nro-middleware.js";
+import { createNroCertCheckMiddleware, deriveNroRouteMatchers } from "./auth/nro-middleware.js";
 import { createNcbValidationMiddleware } from "./auth/ncb-middleware.js";
 import { createMtlsConsistencyMiddleware } from "./auth/middleware.js";
 import { createLoggingMiddleware } from "./logger/middleware.js";
@@ -45,15 +45,13 @@ import { createBusinessWindowGuardMiddleware } from "./http/business-window-guar
 import { createNotImplementedMiddleware } from "./http/not-implemented.js";
 import { mockVersion } from "./version.js";
 
-/** API patterns that require NRO signature verification (CREATE endpoints only). */
-export const nroRoutePatterns: readonly RegExp[] = [
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/funding-requests(?:$|\?)/,
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/defunding-requests(?:$|\?)/,
-  /\/dlt\/[^/]+\/api\/octopus\/tms\/direct-rtgs\/payments(?:$|\?)/,
-  /\/dlt\/[^/]+\/api\/bridge\/direct-rtgs\/payments(?:$|\?)/,
-  /\/igw\/[^/]+\/v1\/xvps(?:$|\?)/,
-  /\/igw\/[^/]+\/v1\/direct-rtgs\/xvps(?:$|\?)/,
-];
+/**
+ * Routes that require NRO signature verification, derived from the vendored spec
+ * (an operation needs NRO iff its request schema carries `signature`/`signerPEM`,
+ * i.e. it documents a `## Signing Rules:` section). Deriving this keeps
+ * enforcement in lock-step with the contract instead of a hand-maintained list.
+ */
+export const nroRouteMatchers = deriveNroRouteMatchers();
 
 export interface AppDeps {
   store: MockStore;
@@ -127,10 +125,10 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   // masked by a later signature or window rejection.
   app.use(createRequestValidationMiddleware());
 
-  // Non-repudiation of origin: certificate presence then signature verification
-  // (CREATE endpoints only).
-  app.use(createNroCertCheckMiddleware(nroRoutePatterns));
-  app.use(createNroMiddleware(nroRoutePatterns));
+  // Non-repudiation of origin: certificate presence then signature verification,
+  // on exactly the spec's NRO-signed routes (see nroRouteMatchers).
+  app.use(createNroCertCheckMiddleware(nroRouteMatchers));
+  app.use(createNroMiddleware(nroRouteMatchers));
 
   // Business-window enforcement (issues #59, #81) — spec-driven and always on;
   // rejects official API calls not accessible in the current (Frankfurt-time)

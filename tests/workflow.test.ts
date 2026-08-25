@@ -394,82 +394,100 @@ describe("PfodWorkflow (matched settlement — issue #20)", () => {
   });
 });
 
-describe("XvpWorkflow (hash-lock — issue #21)", () => {
-  const SELLER = { entityBIC: "BANKAXXXXXX" };
+describe("XvpWorkflow (cash leg: buyer → seller — issue #21)", () => {
+  const BUYER = { entityBIC: "BANKBXXXXXX" };
 
-  function init(store = seededStore(), amount = "40.00") {
+  function seed() {
+    const s = new MemoryStore();
+    s.ensureWallet("SELLER-W", { ownerEntityID: "BANKAXXXXXX", managerNCB: "BDF" });
+    s.ensureWallet("BUYER-W", { ownerEntityID: "BANKBXXXXXX", managerNCB: "BDF", availableBalance: "100.00" });
+    return s;
+  }
+  function init(store = seed(), amount = "40.00") {
     const wf = new XvpWorkflow(store);
     const r = wf.init({
       xvpTransactionId: "XVP1",
       transactionType: "DVP",
       amount,
       currency: "EUR",
-      sourceWalletAlias: "SRC",
-      targetWalletAlias: "DST",
-      caller: SELLER,
+      sellerWalletAlias: "SELLER-W",
+      sellerBic: "BANKAXXXXXX",
+      buyerBic: "BANKBXXXXXX",
     });
     return { store, wf, r };
   }
 
-  it("init locks the seller's funds and issues hashes + timeout", () => {
+  it("init registers the XvP and issues hashes without moving funds", () => {
     const { store, r } = init();
     expect(r.status).toBe("INITIALIZED");
     expect(r.executionHash).toHaveLength(64);
     expect(r.cancellationHash).toHaveLength(64);
     expect(r.timeout).toBeDefined();
-    expect(store.getWallet("SRC")?.balance).toBe("60.00");
-    expect(store.getWallet("SRC")?.lockedBalance).toBe("40.00");
+    expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
+    expect(store.getWallet("SELLER-W")?.balance).toBe("0.00");
   });
 
-  it("EXECUTION preimage settles the lock, credits the buyer and reveals the key", () => {
-    const { store, wf, r } = init();
-    const p = wf.payment("XVP1", r.executionKey);
-    expect(p.status).toBe("SETTLED");
-    expect(p.keyType).toBe("EXECUTION");
-    expect(p.executionKey).toBe(r.executionKey);
-    expect(store.getWallet("SRC")?.lockedBalance).toBe("0.00");
-    expect(store.getWallet("SRC")?.balance).toBe("60.00");
-    expect(store.getWallet("DST")?.balance).toBe("40.00");
-    expect(store.getTransactions()[0].type).toBe("XVP");
-  });
-
-  it("CANCELLATION preimage releases the lock", () => {
-    const { store, wf, r } = init();
-    const p = wf.payment("XVP1", r.cancellationKey);
-    expect(p.status).toBe("CANCELLED");
-    expect(store.getWallet("SRC")?.balance).toBe("100.00");
-    expect(store.getWallet("SRC")?.lockedBalance).toBe("0.00");
-  });
-
-  it("rejects an invalid preimage with 400 and keeps funds locked", () => {
+  it("pay debits the buyer, credits the seller and records the transfer", () => {
     const { store, wf } = init();
-    try {
-      wf.payment("XVP1", "not-a-valid-preimage");
-      throw new Error("expected rejection");
-    } catch (e) {
-      expect((e as WorkflowRejection).statusCode).toBe(400);
-    }
-    expect(store.getWallet("SRC")?.lockedBalance).toBe("40.00");
+    const p = wf.pay("XVP1", {
+      buyerWalletAlias: "BUYER-W",
+      buyerBic: "BANKBXXXXXX",
+      sellerBic: "BANKAXXXXXX",
+      amount: "40.00",
+      currency: "EUR",
+      caller: BUYER,
+    });
+    expect(p.status).toBe("SETTLED");
+    expect(p.executionKey).toHaveLength(64);
+    expect(store.getWallet("BUYER-W")?.balance).toBe("60.00");
+    expect(store.getWallet("SELLER-W")?.balance).toBe("40.00");
+    const tx = store.getTransactions()[0];
+    expect(tx.type).toBe("XVP");
+    expect(tx.debitedWalletAlias).toBe("BUYER-W");
+    expect(tx.creditedWalletAlias).toBe("SELLER-W");
   });
 
-  it("init rejects with 422 when the seller has insufficient available balance", () => {
-    const store = seededStore();
-    const wf = new XvpWorkflow(store);
+  it("rejects pay when the buyer has insufficient funds (422)", () => {
+    const { store, wf } = init(seed(), "500.00");
     try {
-      wf.init({
-        xvpTransactionId: "XVP2",
-        transactionType: "DVP",
-        amount: "500.00",
-        currency: "EUR",
-        sourceWalletAlias: "SRC",
-        targetWalletAlias: "DST",
-        caller: SELLER,
-      });
+      wf.pay("XVP1", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "500.00", currency: "EUR", caller: BUYER });
       throw new Error("expected rejection");
     } catch (e) {
       expect((e as WorkflowRejection).statusCode).toBe(422);
     }
-    expect(store.getWallet("SRC")?.lockedBalance).toBe("0.00");
+    expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
+    expect(store.getWallet("SELLER-W")?.balance).toBe("0.00");
+  });
+
+  it("rejects pay on a buyer-BIC / seller-BIC / amount / currency mismatch (400)", () => {
+    const bads = [
+      { buyerBic: "WRONGBICXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR" },
+      { buyerBic: "BANKBXXXXXX", sellerBic: "WRONGBICXXX", amount: "40.00", currency: "EUR" },
+      { buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "41.00", currency: "EUR" },
+      { buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "USD" },
+    ];
+    for (const bad of bads) {
+      const { wf } = init();
+      try {
+        wf.pay("XVP1", { buyerWalletAlias: "BUYER-W", caller: BUYER, ...bad });
+        throw new Error("expected rejection");
+      } catch (e) {
+        expect((e as WorkflowRejection).statusCode).toBe(400);
+      }
+    }
+  });
+
+  it("rejects pay on an unknown seller (credit) wallet without debiting the buyer (422)", () => {
+    const store = seed();
+    const wf = new XvpWorkflow(store);
+    wf.init({ xvpTransactionId: "XVP9", transactionType: "DVP", amount: "40.00", currency: "EUR", sellerWalletAlias: "GHOST", sellerBic: "BANKAXXXXXX", buyerBic: "BANKBXXXXXX" });
+    try {
+      wf.pay("XVP9", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR", caller: BUYER });
+      throw new Error("expected rejection");
+    } catch (e) {
+      expect((e as WorkflowRejection).statusCode).toBe(422);
+    }
+    expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
   });
 });
 

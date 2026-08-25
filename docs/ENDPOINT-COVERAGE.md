@@ -75,7 +75,7 @@ including the JWT `401` on `/dlt` — is normalised.
 | `mTLS` | Authenticated call's client cert must match the cert associated with the user | `src/auth/middleware.ts` (`createMtlsConsistencyMiddleware`) |
 | `mTLS-req` | A valid client certificate is required (independent of JWT) | handler / `src/routes/health.ts` (`/check/mtls`), `src/auth/enrollment-routes.ts` (token) |
 | `PROFILE:X` | Route requires profile `X` (always strict — no bypass) | `src/auth/profile-authorization-middleware.ts` |
-| `NRO` | Signer-cert consistency + ECDSA P-256/SHA-256 signature verification | `src/auth/nro-middleware.ts` + cert check, patterns in `src/index.ts` |
+| `NRO` | Signer-cert consistency + ECDSA P-256/SHA-256 signature verification | `src/auth/nro-middleware.ts` (route set derived from the spec's `signature`/`signerPEM` request fields) |
 | `STATE` | Handler-level validation (required fields, wallet/draft existence, draft lifecycle state) | route handler |
 | `none` | No auth (registered before the auth middlewares) | — |
 
@@ -144,8 +144,8 @@ including the JWT `401` on `/dlt` — is normalised.
 |--------|---------------|--------|-----------|----------|-------|
 | POST | `/dlt/{ncb}/api/octopus/tms/funding-requests` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` | v0.1.0 |
 | POST | `/dlt/{ncb}/api/octopus/tms/defunding-requests` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` | v0.1.0 |
-| PUT | `/dlt/{ncb}/api/octopus/tms/funding-requests-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (four-eyes) | unreleased |
-| PUT | `/dlt/{ncb}/api/octopus/tms/defunding-requests-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (four-eyes, availability@approve) | unreleased |
+| PUT | `/dlt/{ncb}/api/octopus/tms/funding-requests-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` (four-eyes) | unreleased |
+| PUT | `/dlt/{ncb}/api/octopus/tms/defunding-requests-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` (four-eyes, availability@approve) | unreleased |
 | GET | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests-drafts/{id}` | IMPLEMENTED | same (funding or defunding) | `JWT` `mTLS` `STATE` (404) | unreleased |
 | GET | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests/{id}` | IMPLEMENTED | same (funding or defunding) | `JWT` `mTLS` `STATE` (404) | unreleased |
 | POST | `/dlt/{ncb}/api/octopus/tms/funding-defunding-requests/extract` | NOT IMPLEMENTED | — | — | — |
@@ -153,7 +153,7 @@ including the JWT `401` on `/dlt` — is normalised.
 | POST | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` | unreleased |
 | GET | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments/{id}` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (404) | unreleased |
 | GET | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}` | IMPLEMENTED | same | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (404) | unreleased |
-| PUT | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `STATE` (four-eyes, availability@approve) | unreleased |
+| PUT | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments-drafts/{id}/{status}` | IMPLEMENTED | same (generic `{status}`: `approve`/`cancel`) | `JWT` `mTLS` `PROFILE:PILOT_READ_WRITE` `NRO` `STATE` (four-eyes, availability@approve) | unreleased |
 | POST | `/dlt/{ncb}/api/octopus/tms/direct-rtgs/payments/extract` | NOT IMPLEMENTED | — | — | — |
 | POST | `/dlt/{ncb}/api/octopus/tms/instruct-on-behalf-drafts` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/octopus/tms/instruct-on-behalf/{id}` | NOT IMPLEMENTED | — | — | — |
@@ -200,11 +200,11 @@ including the JWT `401` on `/dlt` — is normalised.
 
 | Method | Official path | Status | Mock path | Controls | Since |
 |--------|---------------|--------|-----------|----------|-------|
-| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | `NRO` `STATE` (locks funds; no `JWT`/`PROFILE` on `/igw`) | unreleased |
+| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | `STATE` (locks funds; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
 | GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | `STATE` (404) | unreleased |
-| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (preimage verification) | unreleased |
+| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (buyer pays: debit buyer + credit seller) | unreleased |
 | GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (404) | unreleased |
-| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | `NRO` `STATE` (locks funds; no `JWT`/`PROFILE` on `/igw`) | unreleased |
+| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | `STATE` (locks funds; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
 | POST | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
@@ -332,9 +332,10 @@ official funding/defunding/transaction/wallet endpoints instead.
   (`POST/PUT/GET .../octopus/tms/direct-rtgs/payments(-drafts)/{id}/{status}`,
   PILOT_READ_WRITE) and a **one-step** variant
   (`POST .../bridge/direct-rtgs/payments`, EXTERNAL_USER, returns `200` + a
-  confirmation string) are served. Both are **NRO-signed on create** (signature
+  confirmation string) are served. Both are **NRO-signed** (signature
   over `id + amount + payerBank + receiverBank`, `signerPEM` = presented mTLS
-  cert). Availability + debit rights are checked at approval (two-step) or
+  cert); the two-step variant also signs the draft approve/cancel transition.
+  Availability + debit rights are checked at approval (two-step) or
   immediately (one-step). *(Mock-defined bridge paths, distinct from the
   `/igw/…` XvP surface — which **is** implemented; see the XvP section below.)*
 - **PFoD (matched, 2-sided).** The deliver (`POST .../bridge/initpfoddeli`,
@@ -344,19 +345,23 @@ official funding/defunding/transaction/wallet endpoints instead.
   the matched wallet payment fires (checked debit of the seller + credit of the
   buyer) → `SETTLED`; inconsistent legs → `422`; an unmatched leg past its window
   (`PONTES_PFOD_MATCH_WINDOW_SEC`, default 1h) is lazily marked `EXPIRED` (`410`).
-- **XvP (hash-link / hashed time-lock) — the only fund-locking workflow.** On the
-  IGW surface: `POST /igw/{ncb}/v1/xvps` (and `.../direct-rtgs/xvps`) **locks** the
-  seller's available balance (checked rights + availability → DCW `lock`) and
-  issues an `executionHash`, a `cancellationHash` and a `timeout` (persisted as an
-  `XVP` draft). `POST .../xvps/{id}/payment` reveals a preimage: hashing to the
-  execution hash → `settleLocked(source)` + credit(target) → `SETTLED` (the key is
-  echoed back); hashing to the cancellation hash — or a passed `timeout` — →
-  `release(source)` → `CANCELLED`/`EXPIRED`. `GET .../xvps/{id}` and
-  `.../payment` report status. *(Mock convenience: the init response also returns
-  the two preimage keys so a client can drive execution/cancellation; a real
-  deployment would keep the execution secret with the initiator.)* NRO-signed on
-  init (`xvpTransactionId + amount + buyer.bic + seller.bic`). The `/igw` surface
-  is not behind the JWT layer; the caller's entity is taken from the seller BIC.
+- **XvP (hash-linked cash leg).** On the IGW surface the **seller** registers the
+  XvP — `POST /igw/{ncb}/v1/xvps` (and `.../direct-rtgs/xvps`) — naming their
+  receive wallet (`seller.cashWalletAlias`) and the buyer's BIC, and receives an
+  `executionHash`, a `cancellationHash` and a `timeout` (persisted as an `XVP`
+  draft). **No funds move at init.** The **buyer** then pays —
+  `POST .../xvps/{id}/payment` — naming their cash wallet: when the buyer/seller
+  BICs, amount and currency match the initialisation, the buyer wallet is funded,
+  and the caller may debit it, the buyer's wallet is **debited** and the seller's
+  wallet **credited** (a new `XVP` transaction), returning the `executionKey` (to
+  the buyer, on `SETTLED`). `GET .../xvps/{id}` and `.../payment` report status.
+  *(Mock convenience: the hash-lock secrets are returned so a client can drive the
+  asset leg; a real deployment keeps them with the parties.)* XvP **init**
+  is **not** NRO-signed (the spec models no `## Signing Rules:` there); per the
+  spec, NRO applies to the direct-RTGS XvP `/payment`
+  (`xvpTransactionId + amount + buyer.bic + seller.bic`), effective once that
+  route is implemented (#102). The `/igw` surface is not behind the JWT layer;
+  the caller's entity is taken from the seller BIC.
 - **Auto-created wallets (funding only).** Only the **funding** path auto-creates
   its credited wallet (owned by the caller's entity, from the JWT — issue #77),
   as the on-ramp for cash. **Every other settlement path** (RVS transfers,
@@ -385,11 +390,14 @@ official funding/defunding/transaction/wallet endpoints instead.
 
 ### Gaps worth follow-up (not fixed here)
 
-- **NRO is create-only (by design).** `NRO` is verified on funding/defunding
-  **create** POSTs only (signature over
+- **NRO enforcement is spec-derived (#102).** A route requires `NRO` iff the
+  official request schema carries `signature`/`signerPEM` (equivalently a
+  `## Signing Rules:` section) — the ECB signs the writes that update RTGS
+  directly: the funding/defunding/direct-RTGS **create** POSTs (signature over
   `techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID`,
-  with `signerPEM` matched to the presented mTLS cert). The `-drafts/{id}/{status}`
-  approve/cancel PUTs are **not** signature-checked — the route patterns are now
-  anchored to the create paths so approval is no longer erroneously rejected for a
-  missing signature (fixed in the funding issue). Four-eyes (approver ≠ initiator)
-  is enforced on funding/defunding approval instead.
+  or `id + amount + payerBank + receiverBank`, with `signerPEM` matched to the
+  presented mTLS cert), their `-drafts/{id}/{status}` approve/cancel PUTs, and the
+  direct-RTGS XvP `/payment`. XvP **init** is not signed and is not NRO-gated.
+  Four-eyes (approver ≠ initiator) is enforced on the approvals in addition to NRO.
+  Follow-up: the direct-RTGS XvP `/payment` route is not implemented yet, so its
+  NRO becomes effective only once that route is added.

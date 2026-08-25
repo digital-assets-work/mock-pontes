@@ -221,6 +221,29 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     return { ...b, signature, signerPEM: nro.certPem };
   }
 
+  // Approve/cancel a funding draft with a valid NRO signature — the draft
+  // transitions are NRO-signed per the spec (#102). The transition handler
+  // ignores the body, so any self-consistent signed funding payload satisfies
+  // the check.
+  function nroFundingTransition(id: string, user: string, status = "approve") {
+    const f = {
+      techFundRequestID: "FUND-APPROVE",
+      amount: "1.00",
+      creditedCashWalletOwnerID: "BSUIFRPPXXX",
+      debitedCashWalletOwnerID: "ECBFDEFFXXX",
+    };
+    const signature = nro.sign(
+      f.techFundRequestID + f.amount + f.creditedCashWalletOwnerID + f.debitedCashWalletOwnerID,
+    );
+    return request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${id}/${status}`, {
+      headers: {
+        authorization: `Bearer ${user}`,
+        "x-forwarded-client-cert": encodeURIComponent(nro.certPem),
+      },
+      body: { ...f, signature, signerPEM: nro.certPem },
+    });
+  }
+
   it("rejects an unknown {ncb} with 404 (#36)", async () => {
     const res = await request(server.port, "GET", `/dlt/ZZZZ/api/octopus/ams/wallets`);
     expect(res.status).toBe(404);
@@ -298,17 +321,14 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     assertConforms(created.json, "triggermanagement.FundingRequestResponse", ["status", "createdAt"]);
     const id = created.json.id;
 
-    // self-approval by the initiator → 403 (four-eyes, #28)
-    const self = await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${id}/approve`, {
-      headers: { authorization: `Bearer ${u1}` },
-    });
+    // self-approval by the initiator → 403 (four-eyes, #28). NRO now guards the
+    // transition (#102), so the request is signed to reach the four-eyes check.
+    const self = await nroFundingTransition(id, u1);
     expect(self.status).toBe(403);
     expect(self.json.businessErrors[0].errorCode).toBe("HL-GER-003");
 
     // approval by a distinct user → 200
-    const ok = await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${id}/approve`, {
-      headers: { authorization: `Bearer ${u2}` },
-    });
+    const ok = await nroFundingTransition(id, u2);
     expect(ok.status).toBe(200);
     expect(ok.json.status).toBe("SETTLED");
 
@@ -386,9 +406,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       body: fundingBody({ creditedCashWalletAlias: "WPAY-SRC-82", techFundRequestID: "FUND-82" }),
     });
     expect(funded.status).toBe(201);
-    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${funded.json.id}/approve`, {
-      headers: { authorization: `Bearer ${u2}` },
-    });
+    await nroFundingTransition(funded.json.id, u2);
     // Pre-create the destination wallet — it is no longer auto-created (#93).
     const mkDst = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
       headers: { authorization: `Bearer ${u1}` },
@@ -421,9 +439,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       body: fundingBody({ creditedCashWalletAlias: "WPAY-SRC-93", techFundRequestID: "FUND-93" }),
     });
     expect(funded.status).toBe(201);
-    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${funded.json.id}/approve`, {
-      headers: { authorization: `Bearer ${u2}` },
-    });
+    await nroFundingTransition(funded.json.id, u2);
     const ext = await mintJwt("user-ext-93", "EXTERNAL_USER");
     const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
       headers: { authorization: `Bearer ${ext}` },
@@ -490,14 +506,80 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       body: fundingBody({ creditedCashWalletAlias: "WAUTO-77", creditedCashWalletOwnerID: "IGNOREDBICXXX" }),
     });
     expect(created.status).toBe(201);
-    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${created.json.id}/approve`, {
-      headers: { authorization: `Bearer ${u2}` },
-    });
+    await nroFundingTransition(created.json.id, u2);
     const w = await request(server.port, "GET", `${BASE}/ams/wallets/WAUTO-77`, {
       headers: { authorization: `Bearer ${u1}` },
     });
     expect(w.status).toBe(200);
     expect(w.json.ownerEntityID).toBe("BSUIFRPPXXX"); // caller entity, not the body's owner
+  });
+
+  it("400s a funding draft approve with no NRO signature (spec signs the transition, #102)", async () => {
+    const created = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
+      body: fundingBody({ techFundRequestID: "FUND-NRO-102", creditedCashWalletAlias: "WNRO-102-01" }),
+    });
+    expect(created.status).toBe(201);
+    // Approve WITHOUT signing → the NRO check now rejects the transition.
+    const res = await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${created.json.id}/approve`, {
+      headers: { authorization: `Bearer ${u2}` },
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-NRO-001");
+  });
+
+  it("accepts a spec-valid XvP init (seller registers; no funds move) — #102", async () => {
+    // Official XvPInitRequest: the seller names their receive wallet, the buyer
+    // is a BIC only. Init moves no funds.
+    const res = await request(server.port, "POST", `/igw/${NCB}/v1/xvps`, {
+      body: {
+        seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "MARKDEFFXXX", cashWalletAlias: "WSELL-XVP-INIT" },
+        buyer: { bic: "BEIILULUXXX" },
+        amount: "10.00",
+        currency: "EUR",
+        type: "DVP",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.status).toBe("INITIALIZED");
+    expect(res.json.xvpTransactionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(res.json.executionHash).toHaveLength(64);
+  });
+
+  it("XvP payment: buyer pays — debits buyer, credits seller, returns PaymentResponse + executionKey (#102)", async () => {
+    // Own store so the transfer can be inspected. The seller receives (starts
+    // empty); the buyer's wallet is funded and is the one debited.
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-XFER", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    s.ensureWallet("EIB-XFER-01", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+    s.credit("EIB-XFER-01", "1000.00");
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-XFER" }, buyer: { bic: "BEIILULUXXX" }, amount: "40.00", currency: "EUR", type: "DVP" },
+      });
+      expect(init.status).toBe(200);
+      const xvpId = init.json.xvpTransactionId as string;
+      // The buyer pays, naming their (funded) wallet.
+      const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
+        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "EIB-XFER-01" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
+      });
+      expect(pay.status).toBe(200);
+      expect(pay.json.xvpTransactionId).toBe(xvpId);
+      expect(pay.json.payment.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(pay.json.payment.status).toBe("SETTLED");
+      expect(pay.json.executionKey).toHaveLength(64);
+      expect(pay.json.cancellationKey).toBeUndefined();
+      // Buyer debited, seller credited, transaction records buyer → seller.
+      expect(s.getWallet("EIB-XFER-01")?.balance).toBe("960.00");
+      expect(s.getWallet("WSELL-XFER")?.balance).toBe("40.00");
+      const tx = s.getTransactions().find((t) => t.type === "XVP");
+      expect(tx?.debitedWalletAlias).toBe("EIB-XFER-01");
+      expect(tx?.creditedWalletAlias).toBe("WSELL-XFER");
+    } finally {
+      await local.close();
+    }
   });
 });
 

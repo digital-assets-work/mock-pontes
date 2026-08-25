@@ -6,6 +6,7 @@ import {
   setResponseStatus,
 } from "h3";
 import type { H3Event } from "h3";
+import { randomUUID } from "node:crypto";
 import type { MockStore } from "../state/mock-store.js";
 import { track } from "../http/route-registry.js";
 import { XvpWorkflow, type XvpTransactionType } from "../workflows/xvp.js";
@@ -40,39 +41,66 @@ export function createXvpRouter(store: MockStore) {
 
   const initHandler = defineEventHandler(async (event: H3Event) => {
     const body = await readBody(event);
-    const source = body.sellerCashWalletRef || body.seller?.cashWalletRef || body.seller?.cashTokenWalletRef;
-    const target = body.buyerCashWalletRef || body.buyer?.cashWalletRef || body.buyer?.cashTokenWalletRef;
+
     const sellerBic = body.seller?.bic || body.sellerBIC;
     const buyerBic = body.buyer?.bic || body.buyerBIC;
-    const xvpTransactionId = body.xvpTransactionId;
+    // The seller names the wallet where they want to be PAID. The buyer is
+    // identified by BIC only at init — their wallet is named at payment.
+    const sellerWallet =
+      body.seller?.cashWalletAlias ||
+      body.sellerCashWalletRef ||
+      body.seller?.cashWalletRef ||
+      (sellerBic ? `${sellerBic}-XVP-CASH` : undefined);
+    // Spec: xvpTransactionId is a UUID (format:uuid); server-generated. A
+    // client-supplied id is tolerated.
+    const xvpTransactionId = body.xvpTransactionId || randomUUID();
+    const transactionType = (body.type || body.transactionType || "DVP") as XvpTransactionType;
 
-    if (!xvpTransactionId || !body.amount || !body.currency || !source || !target) {
+    if (!body.amount || !body.currency || !sellerWallet || !sellerBic || !buyerBic) {
       setResponseStatus(event, 400);
       return {
         businessErrors: [
-          { errorCode: "HL-VAL-001", errorDescription: "Missing required fields: xvpTransactionId, amount, currency, seller/buyer cash wallet refs" },
+          {
+            errorCode: "HL-VAL-001",
+            errorDescription:
+              "Missing required fields: amount, currency, seller (bic + cashWalletAlias), buyer bic",
+          },
         ],
       };
     }
 
-    // Auto-create only the CREDIT-side (buyer) wallet (issue #23). The seller's
-    // source wallet is the debit/lock side and must already exist; init raises a
-    // condition error (rights/availability check) if it does not.
-    ensureWallet(store, target, buyerBic);
+    // Ensure the seller's receive wallet exists (credit side); no funds move at init.
+    ensureWallet(store, sellerWallet, sellerBic);
 
     try {
       const result = workflow.init({
         xvpTransactionId,
-        transactionType: (body.transactionType || "DVP") as XvpTransactionType,
+        transactionType,
         amount: body.amount,
         currency: body.currency,
-        sourceWalletAlias: source,
-        targetWalletAlias: target,
+        sellerWalletAlias: sellerWallet,
+        sellerBic,
+        buyerBic,
         timeoutSec: body.timeoutSec,
-        caller: sellerBic ? { entityBIC: sellerBic } : undefined,
       });
-      setResponseStatus(event, 201);
-      return result;
+      // Official success is 200 + XvPInitResponse (echoes buyer/seller/amount/
+      // currency/type alongside the hash-lock params). The preimage keys are a
+      // mock convenience, outside the official schema.
+      setResponseStatus(event, 200);
+      return {
+        xvpTransactionId: result.xvpTransactionId,
+        executionHash: result.executionHash,
+        cancellationHash: result.cancellationHash,
+        timeout: result.timeout,
+        buyer: body.buyer,
+        seller: body.seller,
+        amount: body.amount,
+        currency: body.currency,
+        type: transactionType,
+        status: result.status,
+        executionKey: result.executionKey,
+        cancellationKey: result.cancellationKey,
+      };
     } catch (e) {
       return reject(event, e);
     }
@@ -104,26 +132,53 @@ export function createXvpRouter(store: MockStore) {
     }),
   );
 
-  // POST payment (execute/cancel via preimage)
+  // POST payment — official "Execute payment for a given XvP" (one-step): the
+  // BUYER pays. Debits the buyer's named wallet and credits the seller's wallet,
+  // returning the PaymentResponse + HLC secrets.
   router.post(
     "/igw/:ncb/v1/xvps/:id/payment",
     defineEventHandler(async (event) => {
       const id = getRouterParam(event, "id")!;
       const body = await readBody(event);
-      const preimage = body.key || body.preimage || body.executionKey || body.cancellationKey;
-      if (!preimage) {
+      const buyerBic = body.buyer?.bic || body.buyerBIC;
+      const sellerBic = body.seller?.bic || body.sellerBIC;
+      // The buyer names the wallet to be DEBITED (spec PaymentRequest.buyer).
+      const buyerWallet =
+        body.buyer?.cashWalletAlias || body.buyerCashWalletRef || body.buyer?.cashWalletRef;
+      if (!buyerWallet || !body.amount || !body.currency) {
         setResponseStatus(event, 400);
-        return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required field: key (preimage)" }] };
+        return {
+          businessErrors: [
+            { errorCode: "HL-VAL-001", errorDescription: "Missing required fields: buyer.cashWalletAlias, amount, currency" },
+          ],
+        };
       }
       try {
-        return workflow.payment(id, preimage);
+        const result = workflow.pay(id, {
+          buyerWalletAlias: buyerWallet,
+          buyerBic,
+          sellerBic,
+          amount: body.amount,
+          currency: body.currency,
+          caller: buyerBic ? { entityBIC: buyerBic } : undefined,
+        });
+        // Per PaymentResponse: executionKey is returned (to the buyer) on SETTLED.
+        return {
+          xvpTransactionId: id,
+          payment: {
+            id: result.paymentId,
+            status: "SETTLED",
+            reason: "Cash leg settled",
+          },
+          executionKey: result.executionKey,
+        };
       } catch (e) {
         return reject(event, e);
       }
     }),
   );
 
-  // GET payment status
+  // GET payment status — official PaymentResponse for the cash leg.
   router.get(
     "/igw/:ncb/v1/xvps/:id/payment",
     defineEventHandler((event) => {
@@ -133,9 +188,21 @@ export function createXvpRouter(store: MockStore) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-XVP-002", errorDescription: `XvP transaction ${id} not found` }] };
       }
-      const paymentStatus =
+      const status =
         rec.status === "SETTLED" ? "SETTLED" : rec.status === "INITIALIZED" ? "PENDING" : "UNSETTLED";
-      return { xvpTransactionId: rec.id, status: rec.status, paymentStatus };
+      // executionKey only when SETTLED (buyer); cancellationKey only when
+      // UNSETTLED/BURNED (seller); neither while PENDING (PaymentResponse rules).
+      const keys =
+        status === "SETTLED"
+          ? { executionKey: rec.executionKey }
+          : status === "UNSETTLED"
+            ? { cancellationKey: rec.cancellationKey }
+            : {};
+      return {
+        xvpTransactionId: rec.id,
+        payment: { id: rec.paymentId, status, reason: `XvP ${rec.status}` },
+        ...keys,
+      };
     }),
   );
 

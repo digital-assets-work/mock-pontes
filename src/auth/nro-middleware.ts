@@ -1,8 +1,13 @@
 /**
  * NRO (Non-Repudiation of Origin) signature verification middleware.
  *
- * Only applies to funding/defunding routes that require signature + signerPEM.
- * Verifies ECDSA P-256 + SHA-256 signature against the provided certificate.
+ * Applies to exactly the operations the official spec marks as NRO-signed — the
+ * RTGS-affecting writes that carry `signature` + `signerPEM` in their request
+ * schema (equivalently, a `## Signing Rules:` section). The enforced route set is
+ * derived from the vendored spec (see {@link deriveNroRouteMatchers}) so it stays
+ * in lock-step with the contract instead of a hand-maintained list.
+ *
+ * Verifies an ECDSA P-256 + SHA-256 signature against the provided certificate.
  */
 
 import {
@@ -13,14 +18,104 @@ import {
   type H3Event,
 } from "h3";
 import { createVerify, X509Certificate } from "node:crypto";
+import officialSpec from "../ui/spec/pontes-official-v1.0.json";
+
+/** An NRO-enforced route: the HTTP method plus a matcher for the request path. */
+export interface NroRouteMatcher {
+  readonly method: "POST" | "PUT";
+  readonly regex: RegExp;
+}
+
+type SpecNode = Record<string, unknown>;
+
+/** Follow `$ref` chains within the vendored spec (cycle-safe). */
+function resolveRef(node: unknown, seen: Set<string>): unknown {
+  let current = node;
+  while (
+    current &&
+    typeof current === "object" &&
+    typeof (current as SpecNode).$ref === "string"
+  ) {
+    const ref = (current as SpecNode).$ref as string;
+    if (seen.has(ref)) return undefined;
+    seen.add(ref);
+    current = ref
+      .split("/")
+      .slice(1)
+      .reduce<unknown>(
+        (acc, key) => (acc == null ? acc : (acc as SpecNode)[key]),
+        officialSpec as unknown,
+      );
+  }
+  return current;
+}
+
+/** True if a request schema (following `$ref`/`allOf`/`oneOf`/`anyOf`) carries NRO fields. */
+function schemaHasNroFields(schema: unknown, seen: Set<string>): boolean {
+  const resolved = resolveRef(schema, seen) as SpecNode | undefined;
+  if (!resolved || typeof resolved !== "object") return false;
+  const props = resolved.properties as SpecNode | undefined;
+  if (props && (props.signature || props.signerPEM)) return true;
+  for (const key of ["allOf", "oneOf", "anyOf"] as const) {
+    const branch = resolved[key];
+    if (Array.isArray(branch) && branch.some((s) => schemaHasNroFields(s, seen)))
+      return true;
+  }
+  return false;
+}
+
+/** True if the operation's JSON request body carries `signature`/`signerPEM`. */
+function operationRequiresNro(operation: unknown): boolean {
+  const op = operation as SpecNode | undefined;
+  if (!op) return false;
+  const requestBody = resolveRef(op.requestBody, new Set()) as SpecNode | undefined;
+  const content = requestBody?.content as SpecNode | undefined;
+  if (!content) return false;
+  const media = (content["application/json"] ??
+    content[Object.keys(content)[0]]) as SpecNode | undefined;
+  return schemaHasNroFields(media?.schema, new Set());
+}
+
+/** Turn an OpenAPI path template into an anchored regex (each `{param}` → one path segment). */
+function pathTemplateToRegex(template: string): RegExp {
+  const body = template
+    .split("/")
+    .map((seg) =>
+      /^\{.+\}$/.test(seg) ? "[^/]+" : seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    )
+    .join("/");
+  return new RegExp(`^${body}(?:$|\\?)`);
+}
+
+/**
+ * Derive the NRO-enforced route set directly from the vendored OpenAPI spec: a
+ * POST/PUT operation needs NRO iff its request body schema carries a
+ * `signature`/`signerPEM` field. This is the single source of truth for "which
+ * endpoints require NRO", keeping enforcement aligned with the published
+ * contract (ECB signs the writes that update RTGS directly).
+ */
+export function deriveNroRouteMatchers(): readonly NroRouteMatcher[] {
+  const matchers: NroRouteMatcher[] = [];
+  const paths = ((officialSpec as SpecNode).paths ?? {}) as Record<string, SpecNode>;
+  for (const [template, item] of Object.entries(paths)) {
+    for (const method of ["post", "put"] as const) {
+      if (operationRequiresNro(item[method])) {
+        matchers.push({
+          method: method.toUpperCase() as "POST" | "PUT",
+          regex: pathTemplateToRegex(template),
+        });
+      }
+    }
+  }
+  return matchers;
+}
 
 function requiresNRO(
   path: string,
   method: string,
-  routePatterns: readonly RegExp[],
+  matchers: readonly NroRouteMatcher[],
 ): boolean {
-  if (method !== "POST" && method !== "PUT") return false;
-  return routePatterns.some((pattern) => pattern.test(path));
+  return matchers.some((m) => m.method === method && m.regex.test(path));
 }
 
 /**
@@ -108,12 +203,12 @@ function decodeCertPem(signerPEM: string): string {
   return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
 }
 
-export function createNroMiddleware(routePatterns: readonly RegExp[]) {
+export function createNroMiddleware(matchers: readonly NroRouteMatcher[]) {
   return defineEventHandler(async (event: H3Event) => {
     const path = event.path || "";
     const method = getMethod(event);
 
-    if (!requiresNRO(path, method, routePatterns)) return;
+    if (!requiresNRO(path, method, matchers)) return;
 
     // Read body — we need to peek at it for NRO validation
     const body = await readBody(event);
@@ -229,12 +324,12 @@ function resolveClientCert(event: H3Event): X509Certificate | null {
   return null;
 }
 
-export function createNroCertCheckMiddleware(routePatterns: readonly RegExp[]) {
+export function createNroCertCheckMiddleware(matchers: readonly NroRouteMatcher[]) {
   return defineEventHandler(async (event) => {
     const path = event.path || "";
     const method = getMethod(event);
 
-    if (!requiresNRO(path, method, routePatterns)) return;
+    if (!requiresNRO(path, method, matchers)) return;
 
     const body =
       event.context?.parsedBody ||

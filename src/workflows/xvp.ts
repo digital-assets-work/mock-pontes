@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { DcwCaller } from "../state/dcw.js";
 import { Workflow, WorkflowRejection } from "./workflow.js";
 
@@ -10,10 +10,19 @@ export interface XvpInitParams {
   transactionType: XvpTransactionType;
   amount: string;
   currency: string;
-  sourceWalletAlias: string; // seller cash wallet (locked)
-  targetWalletAlias: string; // buyer cash wallet (credited on execution)
+  sellerWalletAlias: string; // where the seller is PAID (credited on execution)
+  sellerBic?: string;
+  buyerBic?: string;         // the entity expected to pay
   timeoutSec?: number;
-  caller?: DcwCaller;
+}
+
+export interface XvpPaymentParams {
+  buyerWalletAlias: string; // the buyer's cash wallet, DEBITED on execution
+  buyerBic?: string;
+  sellerBic?: string;
+  amount: string;
+  currency: string;
+  caller?: DcwCaller;       // buyer's entity, for debit rights
 }
 
 export interface XvpInitResult {
@@ -34,40 +43,39 @@ function sha256Hex(preimage: string): string {
 }
 
 /**
- * XvP (Hash-Link / hashed time-lock) — the only workflow that reserves funds.
+ * XvP (Hash-Linked cash leg).
  *
- * `init` locks the seller's cash and issues an `executionHash`, a
- * `cancellationHash` and a `timeout`. A later payment reveals a preimage that
- * hashes to one of them: the EXECUTION preimage settles the lock and credits the
- * buyer; the CANCELLATION preimage (or a timeout) releases the lock.
+ * `init` (by the seller) registers the XvP — the seller's receive wallet, the
+ * buyer's BIC, amount/currency — and issues an `executionHash`, a
+ * `cancellationHash` and a `timeout`. No funds move at init.
  *
- * XvP records are persisted as `XVP` drafts (hash/timeout metadata in
+ * `pay` (by the buyer) settles the cash leg: it debits the buyer's wallet
+ * and credits the seller's wallet, provided the buyer/seller BICs, amount and
+ * currency match the initialisation, the buyer wallet is funded, and the caller
+ * may debit it. The HLC secrets are returned so the buyer can drive the asset
+ * leg.
+ *
+ * XvP records are persisted as `XVP` drafts (hash/key/BIC metadata in
  * `supplementaryData` as JSON).
  */
 export class XvpWorkflow extends Workflow {
   readonly type = "XVP" as const;
   protected readonly notFoundLabel = "XvP transaction";
 
-  // The base `apply()` is unused: XvP settles via lock/settleLocked/release below.
+  // The base `apply()` is unused: XvP settles via execute() below.
   protected apply(): void {
     throw new WorkflowRejection(500, "HL-XVP-000", "XvP does not use the generic apply()");
   }
 
-  /** Reserve the seller's funds and issue the hash-lock. Persists INITIALIZED. */
+  /** Register the XvP and issue the hash-lock. No funds are moved. */
   init(params: XvpInitParams): XvpInitResult {
     if (params.transactionType !== "DVP" && params.transactionType !== "PVP") {
       throw new WorkflowRejection(400, "HL-XVP-001", `Invalid XvP transactionType '${params.transactionType}'`);
     }
-    // Rights + availability, then lock.
-    this.assertCanDebit(params.sourceWalletAlias, params.amount, params.caller);
-    try {
-      this.store.lock(params.sourceWalletAlias, params.amount);
-    } catch (e) {
-      throw new WorkflowRejection(422, "HL-BAL-001", `Cannot lock ${params.amount} on ${params.sourceWalletAlias}`);
-    }
 
     const executionKey = randomBytes(32).toString("hex");
     const cancellationKey = randomBytes(32).toString("hex");
+    const paymentId = randomUUID();
     const executionHash = sha256Hex(executionKey);
     const cancellationHash = sha256Hex(cancellationKey);
     const now = new Date();
@@ -79,8 +87,8 @@ export class XvpWorkflow extends Workflow {
       status: "INITIALIZED",
       amount: params.amount,
       currency: params.currency,
-      creditedWalletAlias: params.targetWalletAlias,
-      debitedWalletAlias: params.sourceWalletAlias,
+      creditedWalletAlias: params.sellerWalletAlias, // the seller is paid here
+      debitedWalletAlias: "",                          // the buyer wallet is named at execution
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       expiresAt: timeout,
@@ -88,6 +96,11 @@ export class XvpWorkflow extends Workflow {
         transactionType: params.transactionType,
         executionHash,
         cancellationHash,
+        executionKey,
+        cancellationKey,
+        paymentId,
+        sellerBic: params.sellerBic,
+        buyerBic: params.buyerBic,
       }),
     });
 
@@ -108,12 +121,17 @@ export class XvpWorkflow extends Workflow {
     status: string;
     amount: string;
     currency: string;
-    source: string;
-    target: string;
+    sellerWalletAlias: string;
+    buyerWalletAlias: string;
     timeout?: string;
     executionHash: string;
     cancellationHash: string;
     transactionType: string;
+    executionKey?: string;
+    cancellationKey?: string;
+    paymentId?: string;
+    sellerBic?: string;
+    buyerBic?: string;
   } | undefined {
     const d = this.store.getDraft(xvpTransactionId);
     if (!d || d.type !== "XVP") return undefined;
@@ -123,25 +141,31 @@ export class XvpWorkflow extends Workflow {
       status: d.status,
       amount: d.amount,
       currency: d.currency,
-      source: d.debitedWalletAlias,
-      target: d.creditedWalletAlias,
+      sellerWalletAlias: d.creditedWalletAlias,
+      buyerWalletAlias: d.debitedWalletAlias,
       timeout: d.expiresAt,
       executionHash: meta.executionHash,
       cancellationHash: meta.cancellationHash,
       transactionType: meta.transactionType,
+      executionKey: meta.executionKey,
+      cancellationKey: meta.cancellationKey,
+      paymentId: meta.paymentId,
+      sellerBic: meta.sellerBic,
+      buyerBic: meta.buyerBic,
     };
   }
 
   /**
-   * Submit a preimage. If it hashes to the executionHash → settle the lock and
-   * credit the buyer (SETTLED, reveals the key). If it hashes to the
-   * cancellationHash → release the lock (CANCELLED). A timeout releases too.
+   * Execute the cash leg (the buyer pays): validate the request matches the
+   * initialisation (BICs, amount, currency), then debit the buyer's wallet and
+   * credit the seller's wallet. Returns the HLC secrets for the asset leg.
    */
-  payment(xvpTransactionId: string, preimage: string): {
+  pay(xvpTransactionId: string, params: XvpPaymentParams): {
     xvpTransactionId: string;
-    status: "SETTLED" | "CANCELLED";
-    keyType: XvpKeyType;
+    status: "SETTLED";
     executionKey?: string;
+    cancellationKey?: string;
+    paymentId?: string;
   } {
     const rec = this.get(xvpTransactionId);
     if (!rec) {
@@ -151,43 +175,46 @@ export class XvpWorkflow extends Workflow {
       throw new WorkflowRejection(409, "HL-XVP-003", `XvP ${xvpTransactionId} is already ${rec.status}`);
     }
     if (rec.timeout && Date.parse(rec.timeout) < Date.now()) {
-      this.releaseAndCancel(rec.id, rec.source, rec.amount, "EXPIRED");
+      this.store.updateDraft(rec.id, { status: "EXPIRED" });
       throw new WorkflowRejection(410, "HL-XVP-004", `XvP ${xvpTransactionId} has timed out`);
     }
-    const providedHash = sha256Hex(preimage);
-    if (providedHash === rec.executionHash) {
-      // The buyer's wallet must exist before we settle the seller's lock, so we
-      // never burn the locked funds against an unknown credit wallet (issue #77).
-      this.requireCreditWallet(rec.target);
-      this.store.settleLocked(rec.source, rec.amount);
-      this.rawCredit(rec.target, rec.amount);
-      this.store.updateDraft(rec.id, { status: "SETTLED" });
-      this.store.addTransaction({
-        id: `TX-${rec.id}`,
-        type: "XVP",
-        status: "SETTLED",
-        amount: rec.amount,
-        currency: rec.currency,
-        creditedWalletAlias: rec.target,
-        debitedWalletAlias: rec.source,
-        createdAt: new Date().toISOString(),
-        settledAt: new Date().toISOString(),
-      });
-      return { xvpTransactionId, status: "SETTLED", keyType: "EXECUTION", executionKey: preimage };
+    // The payment must match the initialisation.
+    if (rec.buyerBic && params.buyerBic && params.buyerBic !== rec.buyerBic) {
+      throw new WorkflowRejection(400, "HL-XVP-006", `Buyer BIC '${params.buyerBic}' does not match the XvP buyer '${rec.buyerBic}'`);
     }
-    if (providedHash === rec.cancellationHash) {
-      this.releaseAndCancel(rec.id, rec.source, rec.amount, "CANCELED");
-      return { xvpTransactionId, status: "CANCELLED", keyType: "CANCELLATION" };
+    if (rec.sellerBic && params.sellerBic && params.sellerBic !== rec.sellerBic) {
+      throw new WorkflowRejection(400, "HL-XVP-006", `Seller BIC '${params.sellerBic}' does not match the XvP seller '${rec.sellerBic}'`);
     }
-    throw new WorkflowRejection(400, "HL-XVP-005", "Preimage does not match the execution or cancellation hash");
-  }
-
-  private releaseAndCancel(id: string, source: string, amount: string, finalStatus: "CANCELED" | "EXPIRED"): void {
-    try {
-      this.store.release(source, amount);
-    } catch {
-      // lock already gone — ignore in the mock
+    if (params.amount !== rec.amount) {
+      throw new WorkflowRejection(400, "HL-XVP-006", `Payment amount '${params.amount}' does not match the XvP amount '${rec.amount}'`);
     }
-    this.store.updateDraft(id, { status: finalStatus });
+    if (params.currency !== rec.currency) {
+      throw new WorkflowRejection(400, "HL-XVP-006", `Payment currency '${params.currency}' does not match the XvP currency '${rec.currency}'`);
+    }
+    // Conservation (issue #77): the seller's credit wallet must exist before we
+    // debit the buyer, so a settlement never debits and then discards the credit.
+    this.requireCreditWallet(rec.sellerWalletAlias);
+    // Debit the buyer (rights + availability), then credit the seller.
+    this.checkedDebit(params.buyerWalletAlias, rec.amount, params.caller);
+    this.rawCredit(rec.sellerWalletAlias, rec.amount);
+    this.store.updateDraft(rec.id, { status: "SETTLED", debitedWalletAlias: params.buyerWalletAlias });
+    this.store.addTransaction({
+      id: `TX-${rec.id}`,
+      type: "XVP",
+      status: "SETTLED",
+      amount: rec.amount,
+      currency: rec.currency,
+      creditedWalletAlias: rec.sellerWalletAlias,
+      debitedWalletAlias: params.buyerWalletAlias,
+      createdAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
+    });
+    return {
+      xvpTransactionId,
+      status: "SETTLED",
+      executionKey: rec.executionKey,
+      cancellationKey: rec.cancellationKey,
+      paymentId: rec.paymentId,
+    };
   }
 }

@@ -83,25 +83,25 @@ describe("Conservation of value on credit (issue #77)", () => {
     expect(total(s)).toBeCloseTo(before);
   });
 
-  it("rejects XvP execution crediting an unknown buyer, keeping the seller's lock intact", () => {
-    const s = seed();
+  it("rejects XvP payment crediting an unknown seller wallet, without debiting the buyer", () => {
+    const s = seed(); // A-DCW1 = the buyer's wallet (1000, owned BANKAXXXXXX)
     const wf = new XvpWorkflow(s);
     const before = total(s);
-    const init = wf.init({
+    wf.init({
       xvpTransactionId: "XV1",
       transactionType: "DVP",
       amount: "100.00",
       currency: "EUR",
-      sourceWalletAlias: "A-DCW1",
-      targetWalletAlias: "GHOST",
-      caller: OWNER,
+      sellerWalletAlias: "GHOST", // unknown seller (credit) wallet
+      sellerBic: "BANKAXXXXXX",
+      buyerBic: "BANKAXXXXXX",
     });
-    expect(s.getWallet("A-DCW1")!.lockedBalance).toBe("100.00");
-    const err = reject(() => wf.payment("XV1", init.executionKey));
+    const err = reject(() =>
+      wf.pay("XV1", { buyerWalletAlias: "A-DCW1", buyerBic: "BANKAXXXXXX", sellerBic: "BANKAXXXXXX", amount: "100.00", currency: "EUR", caller: OWNER }),
+    );
     expect(err.errorCode).toBe("HL-WAL-003");
-    // Locked funds are NOT burned — available + locked unchanged, value conserved.
-    expect(s.getWallet("A-DCW1")!.lockedBalance).toBe("100.00");
-    expect(s.getWallet("A-DCW1")!.balance).toBe("900.00");
+    // The buyer is NOT debited — value conserved.
+    expect(s.getWallet("A-DCW1")!.balance).toBe("1000.00");
     expect(total(s)).toBeCloseTo(before);
   });
 });

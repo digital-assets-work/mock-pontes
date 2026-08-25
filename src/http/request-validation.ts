@@ -51,25 +51,35 @@ const ROUTE_SCHEMAS: Record<string, string> = {
 const ajv = new Ajv({ allErrors: true, strict: false });
 
 /**
- * Relax `additionalProperties: false` everywhere so unknown fields are ignored
- * (not rejected) — the issue #53 policy — and the mock-only `supplementaryData`
- * field is always accepted, even on schemas (e.g. XvP) that otherwise seal the
- * object. Required/type/pattern constraints are unaffected.
+ * Sanitise the vendored spec before ajv compiles it:
+ *  - relax `additionalProperties: false` everywhere so unknown fields are ignored
+ *    (issue #53 policy) and the mock-only `supplementaryData` is always accepted,
+ *    even on schemas (e.g. XvP) that otherwise seal the object;
+ *  - normalise malformed regex quantifiers in `pattern` keywords. The ECB spec
+ *    ships `{1, 15}` / `{64, 128}` (a space after the comma), an invalid
+ *    ECMAScript quantifier: ajv throws "Incomplete quantifier" and fails the
+ *    schema open, silently disabling validation (e.g. XvPInitRequest). Stripping
+ *    the space at compile time keeps the vendored spec byte-faithful to the ECB
+ *    source while restoring validation.
+ * Required/type/pattern semantics are otherwise unaffected.
  */
-function relaxAdditionalProps(node: unknown): void {
+function sanitizeForAjv(node: unknown): void {
   if (Array.isArray(node)) {
-    node.forEach(relaxAdditionalProps);
+    node.forEach(sanitizeForAjv);
     return;
   }
   if (node && typeof node === "object") {
     const obj = node as Record<string, unknown>;
     if (obj.additionalProperties === false) delete obj.additionalProperties;
-    for (const value of Object.values(obj)) relaxAdditionalProps(value);
+    if (typeof obj.pattern === "string") {
+      obj.pattern = obj.pattern.replace(/\{(\d+)\s*,\s*(\d+)\}/g, "{$1,$2}");
+    }
+    for (const value of Object.values(obj)) sanitizeForAjv(value);
   }
 }
 
 const specForAjv = JSON.parse(JSON.stringify(officialSpec)) as object;
-relaxAdditionalProps(specForAjv);
+sanitizeForAjv(specForAjv);
 ajv.addSchema({ $id: "pontes", ...specForAjv });
 
 /** Cache of compiled validators (or `null` when a schema failed to compile). */
