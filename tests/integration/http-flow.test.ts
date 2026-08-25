@@ -598,7 +598,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(get.json.transactionType).toBeUndefined();
   });
 
-  it("XvP timeout: buyer pay fails 409; seller GET payment?key=CANCELLATION returns the cancellation key — #102", async () => {
+  it("XvP timeout with no payment → BURNED; buyer pay fails 409; seller ?key=CANCELLATION returns the cancellation key — #102", async () => {
     const s = new MemoryStore();
     s.ensureWallet("WSELL-TO", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
     s.ensureWallet("EIB-TO", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
@@ -606,7 +606,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
     const local = await listen(localApp);
     try {
-      // timeoutSec in the past → the XvP is already expired.
+      // timeoutSec in the past → the XvP is already expired (no payment attempted).
       const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
         body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-TO" }, buyer: { bic: "BEIILULUXXX" }, amount: "40.00", currency: "EUR", type: "DVP", timeoutSec: -1 },
       });
@@ -618,12 +618,42 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       });
       expect(pay.status).toBe(409);
       expect(s.getWallet("EIB-TO")?.balance).toBe("1000.00");
-      // Seller requests the cancellation key after the timeout → returned.
+      // No payment was ever attempted → the payment is BURNED; the seller still
+      // gets the cancellation key.
+      const cancel = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment?key=CANCELLATION`);
+      expect(cancel.status).toBe(200);
+      expect(cancel.json.payment.status).toBe("BURNED");
+      expect(cancel.json.cancellationKey).toHaveLength(64);
+      expect(cancel.json.executionKey).toBeUndefined();
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("XvP timeout after a failed payment attempt → UNSETTLED (seller still gets the cancellation key) — #102", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-UN", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    s.ensureWallet("EIB-UN", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" }); // no funds
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-UN" }, buyer: { bic: "BEIILULUXXX" }, amount: "40.00", currency: "EUR", type: "DVP" },
+      });
+      expect(init.status).toBe(200);
+      const xvpId = init.json.xvpTransactionId as string;
+      // Buyer initiates a well-formed payment within the window but has no funds
+      // → 422 (the attempt is recorded).
+      const failed = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
+        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "EIB-UN" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
+      });
+      expect(failed.status).toBe(422);
+      // Force the timeout to pass.
+      s.updateDraft(xvpId, { expiresAt: new Date(Date.now() - 1000).toISOString() });
       const cancel = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment?key=CANCELLATION`);
       expect(cancel.status).toBe(200);
       expect(cancel.json.payment.status).toBe("UNSETTLED");
       expect(cancel.json.cancellationKey).toHaveLength(64);
-      expect(cancel.json.executionKey).toBeUndefined();
     } finally {
       await local.close();
     }

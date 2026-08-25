@@ -138,6 +138,7 @@ export class XvpWorkflow extends Workflow {
     buyerBic?: string;
     seller?: unknown;
     buyer?: unknown;
+    paymentAttempted?: boolean;
   } | undefined {
     const d = this.store.getDraft(xvpTransactionId);
     if (!d || d.type !== "XVP") return undefined;
@@ -160,6 +161,7 @@ export class XvpWorkflow extends Workflow {
       buyerBic: meta.buyerBic,
       seller: meta.seller,
       buyer: meta.buyer,
+      paymentAttempted: meta.paymentAttempted,
     };
   }
 
@@ -199,6 +201,10 @@ export class XvpWorkflow extends Workflow {
     if (params.currency !== rec.currency) {
       throw new WorkflowRejection(400, "HL-XVP-006", `Payment currency '${params.currency}' does not match the XvP currency '${rec.currency}'`);
     }
+    // A well-formed payment has been initiated — record it so a later timeout is
+    // reported as UNSETTLED (payment attempted) rather than BURNED (never
+    // attempted).
+    this.markPaymentAttempted(rec.id);
     // Conservation (issue #77): the seller's credit wallet must exist before we
     // debit the buyer, so a settlement never debits and then discards the credit.
     this.requireCreditWallet(rec.sellerWalletAlias);
@@ -224,5 +230,19 @@ export class XvpWorkflow extends Workflow {
       cancellationKey: rec.cancellationKey,
       paymentId: rec.paymentId,
     };
+  }
+
+  /**
+   * Record that a well-formed payment was initiated, so a later timeout is
+   * reported as UNSETTLED (a payment was attempted) rather than BURNED (the XvP
+   * timed out with no payment ever initiated).
+   */
+  private markPaymentAttempted(id: string): void {
+    const d = this.store.getDraft(id);
+    if (!d) return;
+    const meta = d.supplementaryData ? JSON.parse(d.supplementaryData) : {};
+    if (meta.paymentAttempted) return;
+    meta.paymentAttempted = true;
+    this.store.updateDraft(id, { supplementaryData: JSON.stringify(meta) });
   }
 }

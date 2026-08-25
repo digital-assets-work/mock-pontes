@@ -198,17 +198,21 @@ export function createXvpRouter(store: MockStore) {
       }
       const requested = String(getQuery(event).key || "").toUpperCase();
       const timedOut = !!rec.timeout && Date.parse(rec.timeout) < Date.now();
+      // Terminal-but-unsettled state: a payment that was attempted → UNSETTLED;
+      // a timeout with no payment ever attempted → BURNED (the spec burns the
+      // payment on timeout to release the seller's cancellation key).
       const status =
         rec.status === "SETTLED"
           ? "SETTLED"
-          : rec.status === "INITIALIZED"
-            ? timedOut
+          : rec.status === "INITIALIZED" && !timedOut
+            ? "PENDING"
+            : rec.paymentAttempted
               ? "UNSETTLED"
-              : "PENDING"
-            : "UNSETTLED";
+              : "BURNED";
       const keys: { executionKey?: string; cancellationKey?: string } = {};
       if (status === "SETTLED" && requested !== "CANCELLATION") keys.executionKey = rec.executionKey;
-      if (status === "UNSETTLED" && requested !== "EXECUTION") keys.cancellationKey = rec.cancellationKey;
+      if ((status === "UNSETTLED" || status === "BURNED") && requested !== "EXECUTION")
+        keys.cancellationKey = rec.cancellationKey;
       return {
         xvpTransactionId: rec.id,
         payment: { id: rec.paymentId, status, reason: `XvP ${status.toLowerCase()}` },
