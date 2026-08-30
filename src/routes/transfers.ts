@@ -45,6 +45,18 @@ function transferView(d: Draft, extra: Record<string, unknown> = {}): Record<str
   };
 }
 
+// Spec `type` vocabulary (requestvalidation.OperationDraftRequestDTO example:
+// "ISSUANCE") is upper-case and differs from the internal Draft.type workflow
+// vocabulary. `etatsUX` needs no such mapping — the schema's own examples
+// (SETTLED, PENDING_APPROVAL, INITIALIZED) are the same tokens as Draft.status.
+const IMS_TYPE_BY_DRAFT_TYPE: Record<Exclude<Draft["type"], "XVP">, string> = {
+  FUNDING: "ISSUANCE",
+  DEFUNDING: "REDEMPTION",
+  TRANSFER: "TRANSFER",
+  DIRECT_RTGS: "PAYMENT",
+  PFOD: "PAYMENT",
+};
+
 export function createTransfersRouter(store: MockStore) {
   const router = track(createRouter());
   const workflow = new TransferWorkflow(store);
@@ -100,10 +112,10 @@ export function createTransfersRouter(store: MockStore) {
       const { caller } = authCaller(event);
       return store
         .getDrafts(caller)
-        .filter((d) => d.type !== "XVP")
+        .filter((d): d is Draft & { type: Exclude<Draft["type"], "XVP"> } => d.type !== "XVP")
         .map((d) => ({
-          id: d.id,
-          type: d.type,
+          instructionLTID: d.id,
+          type: IMS_TYPE_BY_DRAFT_TYPE[d.type],
           etatsUX: d.status,
           amountTransferred: d.amount,
           currency: d.currency,

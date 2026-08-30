@@ -694,7 +694,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(list.status).toBe(200);
-      const ids = (list.json as Array<{ id: string }>).map((t) => t.id);
+      const ids = (list.json as Array<{ instructionLTID: string }>).map((t) => t.instructionLTID);
       // The Cash Token transfer is listed; the XvP record is not.
       expect(ids).toContain("TR-IMS-1");
       expect(ids).not.toContain(xvpId);
