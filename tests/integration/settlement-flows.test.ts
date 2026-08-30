@@ -184,7 +184,7 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     const list = await request(server.port, "GET", `/dlt/${NCB}/api/octopus/ams/wallets/S-DST/transactions`, {
       headers: { authorization: `Bearer ${u1}` },
     });
-    const tx = list.json.transactions.find((t: any) => t.id === "TX-PAY-29-1");
+    const tx = list.json.find((t: any) => t.settlementID === "TX-PAY-29-1");
     expect(tx.supplementaryData).toBe("invoice-2026-08-14-001");
   });
 

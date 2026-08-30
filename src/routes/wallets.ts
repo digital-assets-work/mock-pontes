@@ -6,7 +6,7 @@ import {
   setResponseStatus,
   type H3Event,
 } from "h3";
-import type { MockStore, Wallet } from "../state/mock-store.js";
+import type { MockStore, Transaction, Wallet } from "../state/mock-store.js";
 import type { DcwCaller } from "../state/dcw.js";
 import { totalOf } from "../state/dcw.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
@@ -16,6 +16,59 @@ import { track } from "../http/route-registry.js";
 function callerOf(event: H3Event): DcwCaller {
   const entity = (event.context.auth as AuthContext | undefined)?.entityBIC;
   return entity ? { entityBIC: entity } : {};
+}
+
+const OPERATION_TYPE_BY_TX_TYPE: Record<Transaction["type"], "Issuance" | "Redemption" | "Transfer"> = {
+  FUNDING: "Issuance",
+  DEFUNDING: "Redemption",
+  TRANSFER: "Transfer",
+  DIRECT_RTGS: "Transfer",
+  PFOD: "Transfer",
+  XVP: "Transfer",
+};
+
+// The ECB token-issuance wallet (funding source / defunding sink, see
+// funding.ts) has an infinite balance and is never persisted as a real Wallet
+// record, so `store.getWallet` can't resolve its owner/manager.
+const ISSUANCE_WALLET_ALIAS = "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET";
+const ISSUANCE_WALLET_BIC = "ECBFDEFFXXX";
+
+/** Resolves the owner/manager BIC of a move-leg wallet, with the ECB issuance-wallet fallback. */
+function moveParty(alias: string, store: MockStore): { owner?: string; manager?: string } {
+  const wallet = store.getWallet(alias);
+  if (wallet) return { owner: wallet.ownerBIC, manager: wallet.managerNCB };
+  if (alias === ISSUANCE_WALLET_ALIAS) return { owner: ISSUANCE_WALLET_BIC, manager: ISSUANCE_WALLET_BIC };
+  return {};
+}
+
+/**
+ * Maps an internal Transaction to the spec's `octopus.Settlement` shape, as seen
+ * from the queried wallet (`moveDirection` = CDIT/DBIT relative to `walias`).
+ * The endpoint's spec response is a bare `octopus.Settlement[]`, not the
+ * internal Transaction shape — this was previously leaked verbatim.
+ */
+function toSettlement(tx: Transaction, walias: string, store: MockStore) {
+  const credited = moveParty(tx.creditedWalletAlias, store);
+  const debited = moveParty(tx.debitedWalletAlias, store);
+  const settledAt = tx.settledAt ?? tx.createdAt;
+  return {
+    settlementID: tx.id,
+    type: "CASH",
+    requestType: "OPERATION",
+    operationType: OPERATION_TYPE_BY_TX_TYPE[tx.type],
+    amount: tx.amount,
+    currency: tx.currency,
+    moveDirection: walias === tx.creditedWalletAlias ? "CDIT" : "DBIT",
+    moveSource: tx.debitedWalletAlias,
+    moveSourceOwner: debited.owner,
+    moveSourceManager: debited.manager,
+    moveDestination: tx.creditedWalletAlias,
+    moveDestinationOwner: credited.owner,
+    moveDestinationManager: credited.manager,
+    settlementDate: settledAt.slice(0, 10),
+    settlementTime: settledAt,
+    supplementaryData: tx.supplementaryData,
+  };
 }
 
 function walletNotFound(alias: string) {
@@ -147,7 +200,8 @@ export function createWalletsRouter(store: MockStore) {
         return walletNotFound(walias);
       }
       const transactions = store.getWalletTransactions(walias, caller);
-      return { transactions };
+      // Spec response is a bare octopus.Settlement[], not { transactions }.
+      return transactions.map((tx) => toSettlement(tx, walias, store));
     }),
   );
 
