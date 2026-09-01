@@ -4,6 +4,8 @@ import {
   getRequestHeader,
   setResponseStatus,
 } from "h3";
+import type { PeerCertificate } from "node:tls";
+import type { InMemoryAuthUsersRepository } from "../auth/users-repository.js";
 
 /**
  * Health endpoint — unauthenticated, matches real Pontes common.Health schema.
@@ -21,7 +23,7 @@ function normalizeIp(ip: string | undefined): string {
   return ip.startsWith("::ffff:") ? ip.slice("::ffff:".length) : ip;
 }
 
-export function createHealthRouter() {
+export function createHealthRouter(authUsersRepository: InMemoryAuthUsersRepository) {
   const router = createRouter();
 
   router.get(
@@ -51,7 +53,10 @@ export function createHealthRouter() {
   // GET /check/mtls — client certificate acceptance check.
   // Rejects (403) any request that does not present a VALID client certificate
   // (i.e. one signed by the mock's client-signing CA). On success returns the
-  // SHA-256 fingerprint of the presented certificate.
+  // SHA-256 fingerprint of the presented certificate, the certificate's
+  // subject Common Name, and whether that exact certificate is currently
+  // bound to an enrolled user (a valid, CA-signed cert can still belong to a
+  // user who was since removed via `DELETE /admin/enrolled-users/{username}`).
   router.get(
     "/check/mtls",
     defineEventHandler((event) => {
@@ -70,7 +75,11 @@ export function createHealthRouter() {
         };
       }
 
-      return { status: "OK", check: "mtls", fingerprint, mock: true };
+      const cert = event.context.mtlsCert as PeerCertificate | undefined;
+      const user = cert?.subject?.CN;
+      const enrolled = authUsersRepository.getUsernameByFingerprint(fingerprint) !== undefined;
+
+      return { status: "OK", check: "mtls", fingerprint, user, enrolled, mock: true };
     }),
   );
 

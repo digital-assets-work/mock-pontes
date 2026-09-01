@@ -84,7 +84,7 @@ describe("InMemoryAuthUsersRepository (issue #83)", () => {
     expect(r.getAllUsers()).toHaveLength(3);
   });
 
-  it("fully deletes a user, freeing its username and fingerprint (issue #100)", () => {
+  it("fully deletes a user, freeing its username and fingerprint", () => {
     const r = repo();
     declare(r, "PUSER0001");
     r.setUserCertificate("PUSER0001", "certA", "fp-a");

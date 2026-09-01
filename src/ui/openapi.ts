@@ -85,8 +85,13 @@ export const mockExtras = {
       get: {
         tags: ["Mock · Connectivity"],
         summary: "MOCK: mTLS client-certificate check",
+        description:
+          "Returns the presented certificate's SHA-256 fingerprint, its subject Common Name " +
+          "(`user`), and whether that exact certificate is currently bound to an enrolled user " +
+          "(`enrolled`) — a valid, CA-signed certificate can still belong to a user who was since " +
+          "removed via DELETE /admin/enrolled-users/{username}.",
         responses: {
-          "200": { description: "Certificate accepted (fingerprint returned)" },
+          "200": { description: "Certificate accepted (fingerprint, subject CN, enrollment status returned)" },
           "403": { description: "No/untrusted client certificate" },
         },
       },
@@ -97,7 +102,7 @@ export const mockExtras = {
         summary: "MOCK: submit a CSR and receive a signed certificate",
         description:
           "Mock-only local CA. Declares a NEW user and returns a signed certificate — no password " +
-          "involved (issue #100: real Pontes A2A auth has no per-user password). Re-enrolling an " +
+          "involved (real Pontes A2A auth has no per-user password). Re-enrolling an " +
           "already-enrolled username is rejected (409); an admin must remove it first via " +
           "DELETE /admin/enrolled-users/{username}. Real Pontes has no CSR API — certificates are " +
           "issued via the TARGET Service Desk.",
@@ -123,7 +128,7 @@ export const mockExtras = {
         summary: "MOCK: OAuth2 token endpoint (password + refresh_token grants)",
         description:
           "Keycloak-shaped token endpoint every client must call. Requires mTLS (the client " +
-          "certificate enrolled via /csr). Issue #100 (confirmed against the real `utest` environment): " +
+          "certificate enrolled via /csr). Confirmed against the real `utest` environment: " +
           "A2A has no per-user password — the `password` grant resolves identity purely from the " +
           "presented mTLS certificate (+ `client_id`, and `client_secret` for `EXTERNAL_USER`); " +
           "`username`/`password` fields are not accepted. The `refresh_token` grant (issue #64) " +
@@ -182,7 +187,7 @@ export const mockExtras = {
     "/admin/enrolled-users/{username}": {
       delete: {
         tags: ["Mock · Enrollment"],
-        summary: "MOCK: fully remove an enrolled user (issue #100)",
+        summary: "MOCK: fully remove an enrolled user",
         description:
           "Admin-only re-enrollment control: fully deletes the user record (username, profile, " +
           "entityBIC, uuid, certificate — nothing retained), freeing the username for a fresh " +

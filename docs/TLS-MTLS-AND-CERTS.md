@@ -87,7 +87,7 @@ see the chart README. `getTlsCertConfig()` exposes the resolved subject/SAN for 
 - **Token endpoint** `POST /iam/realms/:ncb/protocol/openid-connect/token`
   ([`auth/enrollment-routes.ts`](../src/auth/enrollment-routes.ts)) — **requires a
   valid client certificate** (mTLS); returns a JWT with the `user_profile` claim.
-  Identity is resolved solely from the certificate (issue #100 — real Pontes A2A
+  Identity is resolved solely from the certificate (real Pontes A2A
   has no per-user password); `username`/`password` are not accepted.
 - **CSR signing** `POST /iam/realms/:ncb/protocol/openid-connect/csr` — body
   `{ username, profile, entityBIC, csr }`, no password. Only declares a brand-new
@@ -198,7 +198,7 @@ Served directly from the backend (no build step), unauthenticated (dev tooling):
 | `/ui/enroll` | CSR enroll / download flow |
 | `/openapi.json`, `/openapi/official.json` | Mock spec (tags `Pontes · X` vs `Mock · X`) and pristine official spec |
 | `POST /ui/inspect` | Parse a CSR/cert (CN, key/curve, privilege, mspid) — [`inspect.ts`](../src/ui/inspect.ts) |
-| `POST /ui/p12` | Build a **PKCS#12** bundle, pure-JS via `pkijs`/`asn1js`/WebCrypto (distroless-safe, no openssl) — [`p12.ts`](../src/ui/p12.ts) |
+| `POST /ui/p12` | Build a **PKCS#12** bundle server-side, pure-JS via `node-forge` (distroless-safe, no openssl) — [`p12.ts`](../src/ui/p12.ts). `/ui/enroll`'s own "Download as PKCS#12" step no longer calls this: it builds the bundle client-side (same `node-forge` logic, `p12-client.js`) so the private key never leaves the browser; this route remains for API/CLI automation. |
 
 ---
 

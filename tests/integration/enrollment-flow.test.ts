@@ -1,5 +1,5 @@
 /**
- * HTTP integration tests for the no-password A2A enrollment flow (issue #100).
+ * HTTP integration tests for the no-password A2A enrollment flow.
  *
  * Real Pontes A2A auth has no per-user password — confirmed by direct testing
  * against the `utest` environment. This exercises the resulting CSR/admin state
@@ -101,7 +101,7 @@ async function makeCsr(username: string): Promise<string> {
 
 const NCB = "bdf";
 
-describe("Enrollment flow — no password (issue #100)", () => {
+describe("Enrollment flow — no password", () => {
   let server: Server;
   let authUsersRepository: InMemoryAuthUsersRepository;
 

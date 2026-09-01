@@ -25,7 +25,7 @@ export interface InMemoryAuthUsersRepository {
   /**
    * Fully remove a user (no trace of username/profile/entityBIC/uuid/cert kept).
    * Also frees its certificate fingerprint mapping. Returns whether a user was
-   * actually removed (issue #100 — admin-gated re-enrollment control).
+   * actually removed (admin-gated re-enrollment control).
    */
   deleteUser(username: string): boolean;
   updateUserMetadata(

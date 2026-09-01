@@ -28,7 +28,7 @@ CACERT="--cacert mock-ca.pem"        # set CACERT="" for the hosted instance
 ```
 
 Acquire a JWT (mTLS only — identity comes from the enrolled client certificate,
-no password is involved; issue #100 confirmed against the real `utest` environment):
+no password is involved; confirmed against the real `utest` environment):
 
 ```bash
 # PILOT_READ_WRITE (funding / defunding / transfer): client_id=esydlt-web-app, no secret

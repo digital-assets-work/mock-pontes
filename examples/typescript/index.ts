@@ -5,7 +5,7 @@
  *   1. GET  /check/mtls                          — prove the client cert is accepted
  *   2. GET  /dlt/{ncb}/api/octopus/health        — unauthenticated round trip
  *   3. POST /iam/realms/{ncb}/.../token          — acquire a JWT (mTLS only, no password;
- *                                                  issue #100 — identity comes from the cert)
+ *                                                  identity comes from the cert)
  *   4. POST /dlt/{ncb}/api/octopus/tms/funding-requests
  *                                                — NRO-signed funding request (2-step)
  *   5. PUT  /dlt/{ncb}/.../funding-requests-drafts/{id}/approve
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   const health = await request("GET", `/dlt/${cfg.ncb}/api/octopus/health`);
   console.log("2) GET .../octopus/health →", health.status, health.body);
 
-  // 3. Token (mTLS only — no password, issue #100)
+  // 3. Token (mTLS only — no password)
   const { status: tokenStatus, token, body: tokenBody } = await getToken(agent);
   console.log("3) POST .../token         →", tokenStatus, token ? "(JWT acquired)" : tokenBody);
   if (!token) throw new Error("No access_token — check the certificate is enrolled (POST /csr)");

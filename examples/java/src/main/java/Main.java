@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
  *   1. GET  /check/mtls                          - prove the client cert is accepted
  *   2. GET  /dlt/{ncb}/api/octopus/health        - unauthenticated round trip
  *   3. POST /iam/realms/{ncb}/.../token          - acquire a JWT (mTLS only, no password;
- *                                                  issue #100 - identity comes from the cert)
+ *                                                  identity comes from the cert)
  *   4. POST /dlt/{ncb}/api/octopus/tms/funding-requests
  *                                                - NRO-signed funding request (2-step)
  *   5. PUT  /dlt/{ncb}/.../funding-requests-drafts/{id}/approve
@@ -81,7 +81,7 @@ public class Main {
         HttpResponse<String> health = send(http, "GET", baseUrl + "/dlt/" + ncb + "/api/octopus/health", null, null, null);
         System.out.println("2) GET .../octopus/health -> " + health.statusCode() + " " + health.body());
 
-        // 3. Token (mTLS only - no password, issue #100)
+        // 3. Token (mTLS only - no password)
         String token = getToken(http, baseUrl, ncb);
         System.out.println("3) POST .../token         -> " + (token != null ? "(JWT acquired)" : "FAILED"));
         if (token == null) {

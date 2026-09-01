@@ -201,8 +201,8 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         return tokenResponse(accessToken, newRefresh, refreshScope, String(claims.user_uuid || claims.sub || ""));
       }
 
-      // Password grant (issue #100): real Pontes A2A auth has no per-user
-      // password — identity comes solely from the enrolled mTLS certificate.
+      // Password grant: real Pontes A2A auth has no per-user password —
+      // identity comes solely from the enrolled mTLS certificate.
       const username = options.authUsersRepository.getUsernameByFingerprint(fingerprint);
       if (!username) {
         setResponseStatus(event, 401);
@@ -265,9 +265,9 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         };
       }
 
-      // Re-enrolling an already-enrolled username is admin-gated (issue #100):
-      // real Pontes A2A has no password, so there is no self-service re-auth
-      // path here — an admin must fully remove the user first
+      // Re-enrolling an already-enrolled username is admin-gated: real Pontes
+      // A2A has no password, so there is no self-service re-auth path here —
+      // an admin must fully remove the user first
       // (DELETE /admin/enrolled-users/{username}) before it can be re-declared.
       if (options.authUsersRepository.getUserByUsername(username)) {
         setResponseStatus(event, 409);
@@ -370,8 +370,8 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
     }),
   );
 
-  // DELETE /admin/enrolled-users/:username — fully remove an enrolled user
-  // (issue #100): admin-only re-enrollment control. Nothing about the user
+  // DELETE /admin/enrolled-users/:username — fully remove an enrolled user:
+  // admin-only re-enrollment control. Nothing about the user
   // (username, profile, entityBIC, uuid, certificate) is retained; the
   // username becomes exactly as if it had never been enrolled.
   router.delete(

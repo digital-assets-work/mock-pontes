@@ -104,7 +104,7 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   app.use(createNcbValidationMiddleware(store));
 
   // Health + native UI (unauthenticated), before the auth middlewares.
-  app.use(createHealthRouter().handler);
+  app.use(createHealthRouter(authUsersRepository).handler);
   app.use(createUiRouter({ serverCaCertificatePem: runtimePki.serverCaCertificatePem }).handler);
 
   // Enrolment (token + CSR).

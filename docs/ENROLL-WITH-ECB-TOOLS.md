@@ -92,7 +92,7 @@ to **declare a new user**:
 | ESY DLT user profile | `profile` | **new users** | e.g. `PILOT_READ_WRITE`, `EXTERNAL_USER` |
 | Privilege `2E`/`4E`, `mspid` | *(carried in the CSR extension)* | — | Preserved as-is in the issued cert |
 
-No password is involved (issue #100 — real Pontes A2A auth has no per-user
+No password is involved (real Pontes A2A auth has no per-user
 password). `username`/`profile`/`entityBIC` only declare a **brand-new** user;
 re-submitting an already-enrolled username is rejected `409` — an admin must
 fully remove it first via `DELETE /admin/enrolled-users/{username}` before it
@@ -162,8 +162,8 @@ On **`/ui/enroll`**, section **"4 · Download as PKCS#12 (.p12)"**:
 2. Choose an **export password**.
 3. Click **"Build & download .p12"**.
 
-> The private key is used in-memory by the local mock only to assemble the bundle
-> and is never stored. For real keys, prefer the command line below.
+> The bundle is assembled entirely in your browser (same approach as the ECB
+> CertApp tool) — the private key is never sent to this or any server.
 
 ### Build the `.p12` with OpenSSL (offline)
 
@@ -180,18 +180,11 @@ openssl pkcs12 -export \
 - **macOS (Keychain):** double-click `user.p12` (or
   `security import user.p12 -k ~/Library/Keychains/login.keychain-db`), enter the
   export password.
-  > ⚠️ **Known macOS bug** (observed on macOS 26.6.2): importing a PKCS#12 with an
-  > **EC (P-256)** private key — the type Pontes requires — can fail with
-  > `OSStatus -26276` (or a crash in the `security` CLI), regardless of which
-  > PKCS#12 cipher was used; an RSA key with the identical cipher choice imports
-  > fine, isolating this to Apple's PKCS#12 importer, not the certificate/key
-  > itself. If you hit this, use Firefox's own certificate store instead (below —
-  > confirmed working), or skip Keychain entirely and use curl/mTLS directly.
 - **Windows:** double-click `user.p12` → **Certificate Import Wizard** → Current
   User store.
 - **Firefox:** Settings → Privacy & Security → Certificates → **View
   Certificates** → *Your Certificates* → **Import…** → select `user.p12`.
-  Uses Firefox's own NSS-based store, independent of the macOS Keychain bug above.
+  Uses Firefox's own NSS-based store, independent of the OS keychain.
 - **curl (mTLS):** use the PEM pair directly:
   `curl --cert user.crt --key user.key https://…`
 
@@ -221,9 +214,10 @@ curl -sk https://localhost:3001/admin/enrolled-users
 # fetch the stored certificate for that user
 curl -sk https://localhost:3001/admin/enrolled-users/PFRBSUIFRPPXXX0001/certificate
 
-# present the cert on an mTLS request — returns the accepted fingerprint
+# present the cert on an mTLS request — returns the accepted fingerprint,
+# the certificate's subject CN, and whether it's bound to an enrolled user
 curl -sk --cert user.crt --key user.key https://localhost:3001/check/mtls
-# {"status":"OK","check":"mtls","fingerprint":"…","mock":true}
+# {"status":"OK","check":"mtls","fingerprint":"…","user":"PFRBSUIFRPPXXX0001","enrolled":true,"mock":true}
 ```
 
 ---

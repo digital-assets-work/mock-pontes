@@ -239,7 +239,7 @@ verify issued JWTs by their `kid`.
 
 | Method | Path | Purpose | Controls | Since |
 |--------|------|---------|----------|-------|
-| POST | `/iam/realms/{ncb}/protocol/openid-connect/token` | Acquire a JWT (grant_type=password; no `username`/`password` — identity comes from the enrolled mTLS cert, issue #100) | `mTLS-req` `STATE` | v0.1.0 |
+| POST | `/iam/realms/{ncb}/protocol/openid-connect/token` | Acquire a JWT (grant_type=password; no `username`/`password` — identity comes from the enrolled mTLS cert) | `mTLS-req` `STATE` | v0.1.0 |
 | GET | `/iam/realms/{ncb}/protocol/openid-connect/certs` | JWKS — signing public key(s) for JWT verification (`kid=mock-pontes-key-1`, ES256) | `none` | unreleased |
 | GET | `/iam/realms/{ncb}/.well-known/openid-configuration` | OIDC discovery (`issuer`, `token_endpoint`, `jwks_uri`) | `none` | unreleased |
 
@@ -249,10 +249,10 @@ Mock-only: real Pontes issues certificates via the TARGET Service Desk, not an A
 
 | Method | Mock path | Purpose | Controls | Since |
 |--------|-----------|---------|----------|-------|
-| POST | `/iam/realms/{ncb}/protocol/openid-connect/csr` | Local CA: submit CSR, declare a NEW user, receive signed cert | `STATE` (username + CSR, no password, issue #100; new users need `profile`+`entityBIC`; already-enrolled username → `409`) | v0.1.0 |
+| POST | `/iam/realms/{ncb}/protocol/openid-connect/csr` | Local CA: submit CSR, declare a NEW user, receive signed cert | `STATE` (username + CSR, no password; new users need `profile`+`entityBIC`; already-enrolled username → `409`) | v0.1.0 |
 | GET | `/admin/enrolled-users` | List enrolled users | `none` | v0.1.0 |
 | GET | `/admin/enrolled-users/{username}/certificate` | Fetch an enrolled user's certificate (PEM) | `none` | v0.1.0 |
-| DELETE | `/admin/enrolled-users/{username}` | Fully remove an enrolled user (username/profile/entityBIC/uuid/cert), freeing it for re-enrollment (issue #100) | `ADMIN_TOKEN` (when configured) | unreleased |
+| DELETE | `/admin/enrolled-users/{username}` | Fully remove an enrolled user (username/profile/entityBIC/uuid/cert), freeing it for re-enrollment | `ADMIN_TOKEN` (when configured) | unreleased |
 
 ### Admin state-simulation (`src/admin/*`)
 

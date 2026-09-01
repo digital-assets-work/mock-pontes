@@ -15,11 +15,11 @@ Minimal, self-contained clients that connect to the mock over **mTLS**, acquire 
 Each example performs the same steps:
 
 1. `GET /check/mtls` — proves the client certificate is accepted (prints the
-   fingerprint the server saw).
+   fingerprint, the certificate's subject CN, and whether it's enrolled).
 2. `GET /dlt/{ncb}/api/octopus/health` — a basic round trip.
 3. `POST /iam/realms/{ncb}/protocol/openid-connect/token` — acquires a JWT using
-   just the client certificate (mTLS); no password is involved (issue #100 —
-   confirmed against the real `utest` environment that A2A has no per-user
+   just the client certificate (mTLS); no password is involved (confirmed
+   against the real `utest` environment that A2A has no per-user
    password, identity comes solely from the enrolled certificate).
 4. `POST /dlt/{ncb}/api/octopus/tms/funding-requests` — a **2-step funding
    request** carrying an **NRO signature**. This is the interesting bit: the
