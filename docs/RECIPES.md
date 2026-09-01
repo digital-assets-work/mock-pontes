@@ -27,15 +27,14 @@ curl -sk "$BASE/ca.pem" -o mock-ca.pem
 CACERT="--cacert mock-ca.pem"        # set CACERT="" for the hosted instance
 ```
 
-Acquire a JWT (mTLS **and** the password grant — the client cert must be the one
-bound to the user):
+Acquire a JWT (mTLS only — identity comes from the enrolled client certificate,
+no password is involved; issue #100 confirmed against the real `utest` environment):
 
 ```bash
 # PILOT_READ_WRITE (funding / defunding / transfer): client_id=esydlt-web-app, no secret
 TOKEN=$(curl -s $CACERT --cert user.crt --key user.key \
   -X POST "$BASE/iam/realms/$NCB/protocol/openid-connect/token" \
-  -d grant_type=password -d username=PFRBSUIFRPPXXX0001 -d password=initiator-secret \
-  -d client_id=esydlt-web-app -d scope=openid | jq -r .access_token)
+  -d grant_type=password -d client_id=esydlt-web-app -d scope=openid | jq -r .access_token)
 ```
 
 For an **EXTERNAL_USER** (1-step bridge) use the backend-service client **and its
@@ -44,8 +43,7 @@ matching secret** (see the table below):
 ```bash
 EXT_TOKEN=$(curl -s $CACERT --cert ext.crt --key ext.key \
   -X POST "$BASE/iam/realms/$NCB/protocol/openid-connect/token" \
-  -d grant_type=password -d username=PFRBSUIFRPPXXX0009 -d password=ext-secret \
-  -d client_id=esydlt-backend-service -d client_secret=esydlt-backend-service \
+  -d grant_type=password -d client_id=esydlt-backend-service -d client_secret=esydlt-backend-service \
   -d scope=openid | jq -r .access_token)
 ```
 
@@ -156,8 +154,7 @@ JSON
 # Four-eyes: a SECOND enrolled user approves (self-approval → 403 HL-GER-003).
 APPROVER_TOKEN=$(curl -s $CACERT --cert approver.crt --key approver.key \
   -X POST "$BASE/iam/realms/$NCB/protocol/openid-connect/token" \
-  -d grant_type=password -d username=PFRBSUIFRPPXXX0002 -d password=approver-secret \
-  -d client_id=esydlt-web-app -d scope=openid | jq -r .access_token)
+  -d grant_type=password -d client_id=esydlt-web-app -d scope=openid | jq -r .access_token)
 
 curl -s $CACERT --cert approver.crt --key approver.key \
   -H "authorization: Bearer $APPROVER_TOKEN" \

@@ -106,12 +106,6 @@ function getCertFingerprint(cert: { raw: Buffer } | undefined): string | null {
   return createHash("sha256").update(cert.raw).digest("hex");
 }
 
-function derCertificateToPem(raw: Buffer): string {
-  const base64 = raw.toString("base64");
-  const wrapped = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
-  return `-----BEGIN CERTIFICATE-----\n${wrapped}\n-----END CERTIFICATE-----`;
-}
-
 export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
   const router = track(createRouter());
 
@@ -134,27 +128,20 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
       const rawBody = await readRawBody(event, "utf-8");
       const params = rawBody ? new URLSearchParams(rawBody) : null;
 
-      let username: string;
-      let password: string;
       let clientId: string;
       let clientSecret: string | null;
       let scope: string;
       let grantType: string;
       let refreshToken: string | null;
-      let body: any = null;
 
       if (params) {
-        username = params.get("username") || "";
-        password = params.get("password") || "";
         clientId = params.get("client_id") || "esydlt-web-app";
         clientSecret = params.get("client_secret") || null;
         scope = params.get("scope") || "openid";
         grantType = params.get("grant_type") || "password";
         refreshToken = params.get("refresh_token");
       } else {
-        body = await readBody(event);
-        username = body.username || "";
-        password = body.password || "";
+        const body = await readBody(event);
         clientId = body.client_id || "esydlt-web-app";
         clientSecret = body.client_secret || null;
         scope = body.scope || "openid";
@@ -163,8 +150,8 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
       }
 
       // Refresh grant (issue #64): exchange a valid refresh token for a fresh
-      // token pair without re-supplying the password. The presented client cert
-      // must still be the one bound to the user (same mTLS invariant).
+      // token pair. The presented client cert must still be the one bound to
+      // the user (same mTLS invariant as the password grant below).
       if (grantType === "refresh_token") {
         if (!refreshToken) {
           setResponseStatus(event, 400);
@@ -214,11 +201,17 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         return tokenResponse(accessToken, newRefresh, refreshScope, String(claims.user_uuid || claims.sub || ""));
       }
 
-      const user = options.authUsersRepository.validateCredentials(username, password);
-      if (!user) {
+      // Password grant (issue #100): real Pontes A2A auth has no per-user
+      // password — identity comes solely from the enrolled mTLS certificate.
+      const username = options.authUsersRepository.getUsernameByFingerprint(fingerprint);
+      if (!username) {
         setResponseStatus(event, 401);
-        return { error: "invalid_grant", error_description: "Invalid user credentials" };
+        return {
+          error: "invalid_client",
+          error_description: "Certificate not enrolled — enrol via /csr first",
+        };
       }
+      const user = options.authUsersRepository.getUserByUsername(username)!;
 
       // Profile/client_id enforcement (Table U) — always strict.
       const validation = validateClientIdForProfile(user.profile, clientId, clientSecret);
@@ -231,34 +224,6 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
           error: "invalid_client",
           error_description: validation.error,
         };
-      }
-
-      const prevFp = options.authUsersRepository.getFingerprintByUsername(username);
-      if (prevFp) {
-        if (prevFp !== fingerprint) {
-          setResponseStatus(event, 401);
-          return {
-            error: "invalid_client",
-            error_description: "User must always use the same certificate",
-          };
-        }
-      }
-
-      const prevUser = options.authUsersRepository.getUsernameByFingerprint(fingerprint);
-      if (prevUser && prevUser !== username) {
-        setResponseStatus(event, 401);
-        return {
-          error: "invalid_client",
-          error_description: "Certificate already associated with a different user",
-        };
-      }
-
-      if (cert.raw && fingerprint) {
-        options.authUsersRepository.setUserCertificate(
-          username,
-          derCertificateToPem(cert.raw),
-          fingerprint,
-        );
       }
 
       const { accessToken, refreshToken: issuedRefresh } = signTokens(
@@ -282,13 +247,13 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
     "/iam/realms/:ncb/protocol/openid-connect/csr",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const { username, password, profile, entityBIC, csr } = body;
+      const { username, profile, entityBIC, csr } = body;
 
-      if (!username || !password) {
+      if (!username) {
         setResponseStatus(event, 400);
         return {
           error: "invalid_request",
-          error_description: "username and password are required",
+          error_description: "username is required",
         };
       }
 
@@ -300,8 +265,19 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         };
       }
 
-      const existingUser = options.authUsersRepository.getUserByUsername(username);
-      if (!existingUser && (!profile || !entityBIC)) {
+      // Re-enrolling an already-enrolled username is admin-gated (issue #100):
+      // real Pontes A2A has no password, so there is no self-service re-auth
+      // path here — an admin must fully remove the user first
+      // (DELETE /admin/enrolled-users/{username}) before it can be re-declared.
+      if (options.authUsersRepository.getUserByUsername(username)) {
+        setResponseStatus(event, 409);
+        return {
+          error: "conflict",
+          error_description: `User '${username}' is already enrolled; an admin must remove it first (DELETE /admin/enrolled-users/${username}) before re-enrolling`,
+        };
+      }
+
+      if (!profile || !entityBIC) {
         setResponseStatus(event, 400);
         return {
           error: "invalid_request",
@@ -312,26 +288,12 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
 
       // Reject a typo'd / unknown profile at enrolment (issue #84) so it cannot
       // silently produce a user that bypasses the Table U client_id binding.
-      if (profile && !isKnownProfile(profile)) {
+      if (!isKnownProfile(profile)) {
         setResponseStatus(event, 400);
         return {
           error: "invalid_request",
           error_description: `Unknown profile '${profile}'. Expected one of: ${[...KNOWN_PROFILES].join(", ")}`,
         };
-      }
-
-      if (existingUser) {
-        const verifiedUser = options.authUsersRepository.validateCredentials(
-          username,
-          password,
-        );
-        if (!verifiedUser) {
-          setResponseStatus(event, 401);
-          return {
-            error: "invalid_grant",
-            error_description: "Invalid user credentials",
-          };
-        }
       }
 
       try {
@@ -347,14 +309,13 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
         // short-lived (1 hour) certificate (#35). The enrolment identity is
         // passed through so the issued cert carries the Fabric attributes
         // (enrolment id + MSP id + CSR-supplied privilege) like the real CA (#72).
-        const effectiveEntityBIC = entityBIC || existingUser?.entityBIC;
         signedCertPem = await signCsr(
           csr,
           options.runtimePki.clientSigningCaPrivateKeyPem,
           options.runtimePki.clientSigningCaCertificatePem,
           {
             username,
-            entityBIC: effectiveEntityBIC,
+            entityBIC,
             ...(adminTokenConfigured() ? { validityMinutes: ADMIN_ENROLMENT_CERT_MINUTES } : {}),
           },
         );
@@ -371,17 +332,11 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
           throw new Error("CERT_FINGERPRINT_MISSING");
         }
 
-        const user = existingUser
-          ? options.authUsersRepository.updateUserMetadata(username, {
-              profile,
-              entityBIC,
-            })
-          : options.authUsersRepository.createDeclaredUser({
-              username,
-              password,
-              profile,
-              entityBIC,
-            });
+        const user = options.authUsersRepository.createDeclaredUser({
+          username,
+          profile,
+          entityBIC,
+        });
 
         options.authUsersRepository.setUserCertificate(
           username,
@@ -412,6 +367,27 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
       return {
         certificate: signedCertPem,
       };
+    }),
+  );
+
+  // DELETE /admin/enrolled-users/:username — fully remove an enrolled user
+  // (issue #100): admin-only re-enrollment control. Nothing about the user
+  // (username, profile, entityBIC, uuid, certificate) is retained; the
+  // username becomes exactly as if it had never been enrolled.
+  router.delete(
+    "/admin/enrolled-users/:username",
+    defineEventHandler((event) => {
+      if (!enforceAdminToken(event)) return adminUnauthorizedBody();
+      const username = decodeURIComponent(getRouterParam(event, "username") || "");
+      const removed = options.authUsersRepository.deleteUser(username);
+      if (!removed) {
+        setResponseStatus(event, 404);
+        return {
+          error: "not_found",
+          error_description: `User '${username}' not found`,
+        };
+      }
+      return { ok: true, message: `User '${username}' fully removed` };
     }),
   );
 

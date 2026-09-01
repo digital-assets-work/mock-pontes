@@ -4,7 +4,6 @@ import { fatalPersistError } from "../cache/index.js";
 
 export interface AuthUserRecord {
   username: string;
-  password: string;
   uuid: string;
   profile: string;
   entityBIC: string;
@@ -16,7 +15,6 @@ export interface AuthUserRecord {
 
 export interface DeclaredUserInput {
   username: string;
-  password: string;
   profile: string;
   entityBIC: string;
 }
@@ -24,7 +22,12 @@ export interface DeclaredUserInput {
 export interface InMemoryAuthUsersRepository {
   createDeclaredUser(input: DeclaredUserInput): AuthUserRecord;
   getUserByUsername(username: string): AuthUserRecord | undefined;
-  validateCredentials(username: string, password: string): AuthUserRecord | undefined;
+  /**
+   * Fully remove a user (no trace of username/profile/entityBIC/uuid/cert kept).
+   * Also frees its certificate fingerprint mapping. Returns whether a user was
+   * actually removed (issue #100 — admin-gated re-enrollment control).
+   */
+  deleteUser(username: string): boolean;
   updateUserMetadata(
     username: string,
     updates: { profile?: string; entityBIC?: string },
@@ -61,10 +64,6 @@ export function createInMemoryAuthUsersRepository(): InMemoryAuthUsersRepository
     const now = new Date().toISOString();
     const created: AuthUserRecord = {
       username,
-      // Store the password as a string. Callers (e.g. CSR enrollment) may pass a
-      // numeric password from JSON, but credential validation always compares
-      // against a string, so coerce here to avoid a type-mismatch auth failure.
-      password: String(input.password),
       uuid: randomUUID(),
       profile: input.profile,
       entityBIC: input.entityBIC,
@@ -80,10 +79,15 @@ export function createInMemoryAuthUsersRepository(): InMemoryAuthUsersRepository
     return usersByUsername.get(normalizeKey(username));
   }
 
-  function validateCredentials(username: string, password: string): AuthUserRecord | undefined {
-    const user = getUserByUsername(username);
-    if (!user || user.password !== String(password)) return undefined;
-    return user;
+  function deleteUser(username: string): boolean {
+    const normalizedUsername = normalizeKey(username);
+    const user = usersByUsername.get(normalizedUsername);
+    if (!user) return false;
+    if (user.certificateFingerprint) {
+      usernameByFingerprint.delete(user.certificateFingerprint);
+    }
+    usersByUsername.delete(normalizedUsername);
+    return true;
   }
 
   function updateUserMetadata(
@@ -179,7 +183,7 @@ export function createInMemoryAuthUsersRepository(): InMemoryAuthUsersRepository
   return {
     createDeclaredUser,
     getUserByUsername,
-    validateCredentials,
+    deleteUser,
     updateUserMetadata,
     setUserCertificate,
     getUsernameByFingerprint,
@@ -221,7 +225,6 @@ export async function createPersistedAuthUsersRepository(
       try {
         repo.createDeclaredUser({
           username: user.username,
-          password: user.password,
           profile: user.profile,
           entityBIC: user.entityBIC,
         });
@@ -250,6 +253,7 @@ export async function createPersistedAuthUsersRepository(
   const originalCreateDeclaredUser = repo.createDeclaredUser;
   const originalSetUserCertificate = repo.setUserCertificate;
   const originalUpdateUserMetadata = repo.updateUserMetadata;
+  const originalDeleteUser = repo.deleteUser;
 
   repo.createDeclaredUser = (input: DeclaredUserInput): AuthUserRecord => {
     const result = originalCreateDeclaredUser(input);
@@ -265,6 +269,12 @@ export async function createPersistedAuthUsersRepository(
   repo.updateUserMetadata = (username: string, updates: { profile?: string; entityBIC?: string }): AuthUserRecord => {
     const result = originalUpdateUserMetadata(username, updates);
     persistState();
+    return result;
+  };
+
+  repo.deleteUser = (username: string): boolean => {
+    const result = originalDeleteUser(username);
+    if (result) persistState();
     return result;
   };
 

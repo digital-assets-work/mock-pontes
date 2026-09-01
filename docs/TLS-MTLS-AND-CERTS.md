@@ -87,10 +87,15 @@ see the chart README. `getTlsCertConfig()` exposes the resolved subject/SAN for 
 - **Token endpoint** `POST /iam/realms/:ncb/protocol/openid-connect/token`
   ([`auth/enrollment-routes.ts`](../src/auth/enrollment-routes.ts)) — **requires a
   valid client certificate** (mTLS); returns a JWT with the `user_profile` claim.
+  Identity is resolved solely from the certificate (issue #100 — real Pontes A2A
+  has no per-user password); `username`/`password` are not accepted.
 - **CSR signing** `POST /iam/realms/:ncb/protocol/openid-connect/csr` — body
-  `{ username, password, profile, entityBIC, csr }`; signs the CSR with
-  `MockPontes-ClientCA`.
-- **Admin** `GET /admin/enrolled-users`, `GET /admin/enrolled-users/:username/certificate`.
+  `{ username, profile, entityBIC, csr }`, no password. Only declares a brand-new
+  username; re-submitting an already-enrolled username is rejected `409` — an
+  admin must remove it first (see below).
+- **Admin** `GET /admin/enrolled-users`, `GET /admin/enrolled-users/:username/certificate`,
+  `DELETE /admin/enrolled-users/:username` (fully removes the user — the only way
+  to free a username for re-enrollment).
 
 ### signCsr ([`auth/csr-handler.ts`](../src/auth/csr-handler.ts))
 

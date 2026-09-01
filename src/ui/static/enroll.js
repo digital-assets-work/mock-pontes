@@ -78,7 +78,6 @@
     var ncb = document.getElementById("ncb").value.trim() || "bdf";
     var body = {
       username: document.getElementById("username").value.trim(),
-      password: document.getElementById("password").value,
       profile: document.getElementById("profile").value,
       entityBIC: document.getElementById("entityBIC").value.trim(),
       csr: document.getElementById("csr").value.trim()

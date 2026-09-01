@@ -87,14 +87,16 @@ to **declare a new user**:
 | ECB CertApp / CSR | Mock enrollment field | Required | Notes |
 |-------------------|-----------------------|----------|-------|
 | CSR Common Name (Username) | `username` | always | Must match the CSR CN |
-| — | `password` | always | Set on first declaration; verified on re-enrollment |
 | the CSR itself | `csr` | always | PKCS#10 PEM |
 | Actor/Participant BIC/LEI | `entityBIC` | **new users** | MSPID / owning entity BIC |
 | ESY DLT user profile | `profile` | **new users** | e.g. `PILOT_READ_WRITE`, `EXTERNAL_USER` |
 | Privilege `2E`/`4E`, `mspid` | *(carried in the CSR extension)* | — | Preserved as-is in the issued cert |
 
-`profile` and `entityBIC` are only required the first time a username is declared.
-For an existing user, the mock validates the `password` and re-issues.
+No password is involved (issue #100 — real Pontes A2A auth has no per-user
+password). `username`/`profile`/`entityBIC` only declare a **brand-new** user;
+re-submitting an already-enrolled username is rejected `409` — an admin must
+fully remove it first via `DELETE /admin/enrolled-users/{username}` before it
+can be re-enrolled.
 
 ---
 
@@ -122,7 +124,6 @@ against the hosted instance.
 3. Under **"2 · User declaration"**, fill in:
    - **NCB / ORG (realm)** — e.g. `bdf`
    - **Username** — must equal the CSR CN
-   - **Password**
    - **Entity BIC (MSPID)**
    - **Profile**
 4. Click **"Enroll & issue certificate"**. The issued certificate appears in
@@ -133,7 +134,6 @@ against the hosted instance.
 ```bash
 jq -n --arg csr "$(cat user.csr)" \
   '{username:"PFRBSUIFRPPXXX0001",
-    password:"initiator-secret",
     profile:"PILOT_READ_WRITE",
     entityBIC:"BSUIFRPPXXX",
     csr:$csr}' \
@@ -143,8 +143,9 @@ jq -n --arg csr "$(cat user.csr)" \
 ```
 
 `user.crt` now holds the issued certificate (PEM). Response codes: `200` success,
-`400` missing fields / invalid CSR, `401` wrong password for an existing user,
-`409` the certificate fingerprint is already mapped to another user.
+`400` missing fields / invalid CSR, `409` username already enrolled (an admin must
+`DELETE /admin/enrolled-users/{username}` first) or the certificate fingerprint is
+already mapped to another user.
 
 ---
 

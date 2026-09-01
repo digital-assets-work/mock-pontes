@@ -4,7 +4,8 @@
  * Flow:
  *   1. GET  /check/mtls                          — prove the client cert is accepted
  *   2. GET  /dlt/{ncb}/api/octopus/health        — unauthenticated round trip
- *   3. POST /iam/realms/{ncb}/.../token          — acquire a JWT (mTLS + password)
+ *   3. POST /iam/realms/{ncb}/.../token          — acquire a JWT (mTLS only, no password;
+ *                                                  issue #100 — identity comes from the cert)
  *   4. POST /dlt/{ncb}/api/octopus/tms/funding-requests
  *                                                — NRO-signed funding request (2-step)
  *   5. PUT  /dlt/{ncb}/.../funding-requests-drafts/{id}/approve
@@ -34,13 +35,9 @@ const cfg = {
   caPath: process.env.CA_CERT,
   // Explicit, loud opt-out (dev only) — never skip verification silently.
   insecure: /^(1|true|yes)$/i.test(process.env.INSECURE_SKIP_VERIFY ?? ""),
-  username: process.env.PONTES_USERNAME ?? "PFRBSUIFRPPXXX0001",
-  password: process.env.PONTES_PASSWORD ?? "initiator-secret",
   // Approver (four-eyes) — a SECOND enrolled user with its own certificate.
   approverCertPath: process.env.APPROVER_CERT ?? "approver.crt",
   approverKeyPath: process.env.APPROVER_KEY ?? "approver.key",
-  approverUsername: process.env.APPROVER_USERNAME ?? "PFRBSUIFRPPXXX0002",
-  approverPassword: process.env.APPROVER_PASSWORD ?? "approver-secret",
   // Funding parameters
   amount: process.env.AMOUNT ?? "1000000.00",
   creditedAlias: process.env.CREDITED_ALIAS ?? "WFREURBSUIFRPPXXX-01",
@@ -97,16 +94,12 @@ function request(
   });
 }
 
-/** Acquire a JWT for a user over its own mTLS agent. */
+/** Acquire a JWT for a user over its own mTLS agent (identity = the certificate). */
 async function getToken(
   reqAgent: https.Agent,
-  username: string,
-  password: string,
 ): Promise<{ status: number; token?: string; body: string }> {
   const form = new URLSearchParams({
     grant_type: "password",
-    username,
-    password,
     client_id: "esydlt-web-app", // PILOT_READ_WRITE uses the web-app client
     scope: "openid",
   }).toString();
@@ -127,14 +120,10 @@ async function main(): Promise<void> {
   const health = await request("GET", `/dlt/${cfg.ncb}/api/octopus/health`);
   console.log("2) GET .../octopus/health →", health.status, health.body);
 
-  // 3. Token (mTLS + password grant)
-  const { status: tokenStatus, token, body: tokenBody } = await getToken(
-    agent,
-    cfg.username,
-    cfg.password,
-  );
+  // 3. Token (mTLS only — no password, issue #100)
+  const { status: tokenStatus, token, body: tokenBody } = await getToken(agent);
   console.log("3) POST .../token         →", tokenStatus, token ? "(JWT acquired)" : tokenBody);
-  if (!token) throw new Error("No access_token — check USERNAME/PASSWORD and that the user is enrolled");
+  if (!token) throw new Error("No access_token — check the certificate is enrolled (POST /csr)");
 
   // 4. NRO-signed funding request
   const funding = {
@@ -184,7 +173,7 @@ async function main(): Promise<void> {
     return;
   }
   const approverAgent = makeAgent(readFileSync(cfg.approverCertPath), readFileSync(cfg.approverKeyPath));
-  const approverToken = await getToken(approverAgent, cfg.approverUsername, cfg.approverPassword);
+  const approverToken = await getToken(approverAgent);
   if (!approverToken.token) {
     throw new Error(`Approver token failed: ${approverToken.status} ${approverToken.body}`);
   }

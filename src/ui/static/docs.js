@@ -54,8 +54,6 @@
     var client = document.getElementById("a-client").value;
     var body = new URLSearchParams({
       grant_type: "password",
-      username: document.getElementById("a-user").value.trim(),
-      password: document.getElementById("a-pass").value,
       scope: "openid",
       client_id: client
     });

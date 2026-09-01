@@ -6,7 +6,6 @@ import javax.net.ssl.X509TrustManager;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -29,7 +28,8 @@ import java.util.regex.Pattern;
  * Flow:
  *   1. GET  /check/mtls                          - prove the client cert is accepted
  *   2. GET  /dlt/{ncb}/api/octopus/health        - unauthenticated round trip
- *   3. POST /iam/realms/{ncb}/.../token          - acquire a JWT (mTLS + password)
+ *   3. POST /iam/realms/{ncb}/.../token          - acquire a JWT (mTLS only, no password;
+ *                                                  issue #100 - identity comes from the cert)
  *   4. POST /dlt/{ncb}/api/octopus/tms/funding-requests
  *                                                - NRO-signed funding request (2-step)
  *   5. PUT  /dlt/{ncb}/.../funding-requests-drafts/{id}/approve
@@ -61,8 +61,6 @@ public class Main {
         String caPath = System.getenv("CA_CERT");
         // Explicit, loud opt-out (dev only) - never skip verification silently.
         boolean insecure = env("INSECURE_SKIP_VERIFY", "").matches("(?i)1|true|yes");
-        String username = env("PONTES_USERNAME", "PFRBSUIFRPPXXX0001");
-        String password = env("PONTES_PASSWORD", "initiator-secret");
         String amount = env("AMOUNT", "1000000.00");
         String creditedAlias = env("CREDITED_ALIAS", "WFREURBSUIFRPPXXX-01");
         String entityBic = env("ENTITY_BIC", "BSUIFRPPXXX");
@@ -70,8 +68,6 @@ public class Main {
         // Approver (four-eyes) - a SECOND enrolled user with its own PKCS#12.
         String approverP12 = env("APPROVER_P12", "approver.p12");
         String approverP12Pass = env("APPROVER_P12_PASSWORD", p12Pass);
-        String approverUsername = env("APPROVER_USERNAME", "PFRBSUIFRPPXXX0002");
-        String approverPassword = env("APPROVER_PASSWORD", "approver-secret");
 
         // Load the PKCS#12 keystore (certificate + private key) and build the mTLS client.
         KeyStore ks = loadP12(p12Path, p12Pass);
@@ -85,11 +81,11 @@ public class Main {
         HttpResponse<String> health = send(http, "GET", baseUrl + "/dlt/" + ncb + "/api/octopus/health", null, null, null);
         System.out.println("2) GET .../octopus/health -> " + health.statusCode() + " " + health.body());
 
-        // 3. Token (mTLS + password grant)
-        String token = getToken(http, baseUrl, ncb, username, password);
+        // 3. Token (mTLS only - no password, issue #100)
+        String token = getToken(http, baseUrl, ncb);
         System.out.println("3) POST .../token         -> " + (token != null ? "(JWT acquired)" : "FAILED"));
         if (token == null) {
-            throw new RuntimeException("No access_token - check USERNAME/PASSWORD and enrollment");
+            throw new RuntimeException("No access_token - check the certificate is enrolled (POST /csr)");
         }
 
         // 4. NRO-signed funding request
@@ -139,9 +135,9 @@ public class Main {
         }
         KeyStore aks = loadP12(approverP12, approverP12Pass);
         HttpClient approverHttp = newHttpClient(aks, approverP12Pass, caPath);
-        String approverToken = getToken(approverHttp, baseUrl, ncb, approverUsername, approverPassword);
+        String approverToken = getToken(approverHttp, baseUrl, ncb);
         if (approverToken == null) {
-            throw new RuntimeException("Approver token failed for " + approverUsername);
+            throw new RuntimeException("Approver token failed (check APPROVER_P12 is enrolled)");
         }
         HttpResponse<String> approve = send(approverHttp, "PUT",
                 baseUrl + "/dlt/" + ncb + "/api/octopus/tms/funding-requests-drafts/" + fundingId + "/approve",
@@ -210,11 +206,9 @@ public class Main {
         return HttpClient.newBuilder().sslContext(ssl).build();
     }
 
-    /** Acquire a JWT for a user over its own mTLS client; returns null on failure. */
-    static String getToken(HttpClient http, String baseUrl, String ncb, String username, String password) throws Exception {
+    /** Acquire a JWT over the given mTLS client (identity = the certificate); returns null on failure. */
+    static String getToken(HttpClient http, String baseUrl, String ncb) throws Exception {
         String form = "grant_type=password"
-                + "&username=" + enc(username)
-                + "&password=" + enc(password)
                 + "&client_id=esydlt-web-app"
                 + "&scope=openid";
         HttpResponse<String> res = send(http, "POST",
@@ -233,10 +227,6 @@ public class Main {
                 : HttpRequest.BodyPublishers.ofString(body);
         b.method(method, pub);
         return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-    }
-
-    static String enc(String s) {
-        return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 
     static String extract(String json, String key) {

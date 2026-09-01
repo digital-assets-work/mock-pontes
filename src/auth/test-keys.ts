@@ -75,22 +75,19 @@ export function signData(data: string, privateKeyPem: string): string {
  */
 export const MOCK_USERS: Record<
   string,
-  { password: string; uuid: string; profile: string; entityBIC: string }
+  { uuid: string; profile: string; entityBIC: string }
 > = {
   "tech-user-initiator": {
-    password: "initiator-secret",
     uuid: "11111111-1111-1111-1111-111111111111",
     profile: "PILOT_READ_WRITE",
     entityBIC: "CACIFFPPXXX",
   },
   "tech-user-approver": {
-    password: "approver-secret",
     uuid: "22222222-2222-2222-2222-222222222222",
     profile: "PILOT_READ_WRITE",
     entityBIC: "CACIFFPPXXX",
   },
   "tech-user-external": {
-    password: "external-secret",
     uuid: "33333333-3333-3333-3333-333333333333",
     profile: "EXTERNAL_USER",
     entityBIC: "CACIFFPPXXX",

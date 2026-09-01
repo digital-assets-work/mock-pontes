@@ -17,8 +17,6 @@ no third-party dependencies.
 ```bash
 CLIENT_P12=/path/to/user.p12 \
 P12_PASSWORD=yourpassword \
-PONTES_USERNAME=PFRBSUIFRPPXXX0001 \
-PONTES_PASSWORD=initiator-secret \
 mvn -q compile exec:java
 ```
 
@@ -31,7 +29,6 @@ the host:
 docker run --rm -v "$PWD":/app -v /path/to/user.p12:/certs/user.p12 -w /app \
   -e BASE_URL=https://host.docker.internal:3001 \
   -e CLIENT_P12=/certs/user.p12 -e P12_PASSWORD=yourpassword \
-  -e PONTES_USERNAME=PFRBSUIFRPPXXX0001 -e PONTES_PASSWORD=initiator-secret \
   maven:3.9-eclipse-temurin-17 mvn -q compile exec:java
 ```
 
@@ -45,9 +42,7 @@ docker run --rm -v "$PWD":/app -v /path/to/user.p12:/certs/user.p12 -w /app \
 | `P12_PASSWORD` | `changeit` | PKCS#12 export password |
 | `CA_CERT` | *(unset)* | Server CA (PEM). Unset ⇒ verify against the JDK trust store (works against the hosted mock). For a local self-signed mock, fetch it: `curl -sk $BASE_URL/ca.pem -o mock-ca.pem` then set `CA_CERT=mock-ca.pem`. |
 | `INSECURE_SKIP_VERIFY` | *(unset)* | Set to `true` to skip TLS server verification (dev only — explicit opt-out). |
-| `PONTES_USERNAME` / `PONTES_PASSWORD` | `PFRBSUIFRPPXXX0001` / `initiator-secret` | Credentials from enrollment |
 | `APPROVER_P12` / `APPROVER_P12_PASSWORD` | `approver.p12` / *(= `P12_PASSWORD`)* | Second (approver) user's PKCS#12 for four-eyes approval (steps 5–6). When absent, the example stops after step 4. |
-| `APPROVER_USERNAME` / `APPROVER_PASSWORD` | `PFRBSUIFRPPXXX0002` / `approver-secret` | Approver credentials from the second enrollment |
 | `AMOUNT`, `CREDITED_ALIAS`, `ENTITY_BIC`, `MANAGER_BIC` | see `Main.java` | Funding parameters |
 
 ## Against real Pontes

@@ -18,7 +18,9 @@ Each example performs the same steps:
    fingerprint the server saw).
 2. `GET /dlt/{ncb}/api/octopus/health` — a basic round trip.
 3. `POST /iam/realms/{ncb}/protocol/openid-connect/token` — acquires a JWT using
-   the client certificate (mTLS) + username/password.
+   just the client certificate (mTLS); no password is involved (issue #100 —
+   confirmed against the real `utest` environment that A2A has no per-user
+   password, identity comes solely from the enrolled certificate).
 4. `POST /dlt/{ncb}/api/octopus/tms/funding-requests` — a **2-step funding
    request** carrying an **NRO signature**. This is the interesting bit: the
    payload fields `techFundRequestID + amount + creditedCashWalletOwnerID +
@@ -55,7 +57,7 @@ Each example performs the same steps:
 
    # enroll -> issued certificate
    jq -n --arg csr "$(cat user.csr)" \
-     '{username:"PFRBSUIFRPPXXX0001",password:"initiator-secret",
+     '{username:"PFRBSUIFRPPXXX0001",
        profile:"PILOT_READ_WRITE",entityBIC:"BSUIFRPPXXX",csr:$csr}' \
    | curl -sk -X POST https://localhost:3001/iam/realms/bdf/protocol/openid-connect/csr \
        -H 'content-type: application/json' -d @- | jq -r .certificate > user.crt
@@ -75,7 +77,7 @@ Each example performs the same steps:
 
    # enroll the approver (same entityBIC so it can act on the same wallet)
    jq -n --arg csr "$(cat approver.csr)" \
-     '{username:"PFRBSUIFRPPXXX0002",password:"approver-secret",
+     '{username:"PFRBSUIFRPPXXX0002",
        profile:"PILOT_READ_WRITE",entityBIC:"BSUIFRPPXXX",csr:$csr}' \
    | curl -sk -X POST https://localhost:3001/iam/realms/bdf/protocol/openid-connect/csr \
        -H 'content-type: application/json' -d @- | jq -r .certificate > approver.crt
@@ -114,9 +116,9 @@ See each folder's README:
 - Java: `cd java && CLIENT_P12=… P12_PASSWORD=… mvn -q compile exec:java`
   (or the Docker one-liner in [`java/README.md`](java/README.md))
 
-All cert/key/CA paths, `BASE_URL`, `NCB`, `PONTES_USERNAME`/`PONTES_PASSWORD`, and
-the funding parameters are configurable via environment variables (sensible
-defaults match the enrollment snippet above).
+All cert/key/CA paths, `BASE_URL`, `NCB`, and the funding parameters are
+configurable via environment variables (sensible defaults match the enrollment
+snippet above).
 
 ## Against real Pontes
 

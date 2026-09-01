@@ -4,7 +4,8 @@ Minimal mTLS + NRO example client for mock-pontes (Python).
 Flow:
   1. GET  /check/mtls                          - prove the client cert is accepted
   2. GET  /dlt/{ncb}/api/octopus/health        - unauthenticated round trip
-  3. POST /iam/realms/{ncb}/.../token          - acquire a JWT (mTLS + password)
+  3. POST /iam/realms/{ncb}/.../token          - acquire a JWT (mTLS only, no password;
+                                               issue #100 - identity comes from the cert)
   4. POST /dlt/{ncb}/api/octopus/tms/funding-requests
                                                - NRO-signed funding request (2-step)
   5. PUT  /dlt/{ncb}/.../funding-requests-drafts/{id}/approve
@@ -37,14 +38,10 @@ CLIENT_KEY = os.environ.get("CLIENT_KEY", "user.key")
 #   - INSECURE_SKIP_VERIFY   -> explicit, loud opt-out (dev only); never skip silently
 CA_CERT = os.environ.get("CA_CERT")
 INSECURE = os.environ.get("INSECURE_SKIP_VERIFY", "").lower() in ("1", "true", "yes")
-USERNAME = os.environ.get("PONTES_USERNAME", "PFRBSUIFRPPXXX0001")
-PASSWORD = os.environ.get("PONTES_PASSWORD", "initiator-secret")
 
 # Approver (four-eyes) — a SECOND enrolled user with its own certificate.
 APPROVER_CERT = os.environ.get("APPROVER_CERT", "approver.crt")
 APPROVER_KEY = os.environ.get("APPROVER_KEY", "approver.key")
-APPROVER_USERNAME = os.environ.get("APPROVER_USERNAME", "PFRBSUIFRPPXXX0002")
-APPROVER_PASSWORD = os.environ.get("APPROVER_PASSWORD", "approver-secret")
 
 AMOUNT = os.environ.get("AMOUNT", "1000000.00")
 CREDITED_ALIAS = os.environ.get("CREDITED_ALIAS", "WFREURBSUIFRPPXXX-01")
@@ -60,13 +57,11 @@ def new_session(cert, key):
     return session
 
 
-def get_token(session, username, password):
+def get_token(session):
     r = session.post(
         f"{BASE_URL}/iam/realms/{NCB}/protocol/openid-connect/token",
         data={
             "grant_type": "password",
-            "username": username,
-            "password": password,
             "client_id": "esydlt-web-app",  # PILOT_READ_WRITE uses the web-app client
             "scope": "openid",
         },
@@ -91,11 +86,11 @@ def main() -> None:
     r = session.get(f"{BASE_URL}/dlt/{NCB}/api/octopus/health")
     print("2) GET .../octopus/health ->", r.status_code, r.text)
 
-    # 3. Token (mTLS + password grant)
-    r, token = get_token(session, USERNAME, PASSWORD)
+    # 3. Token (mTLS only — no password, issue #100)
+    r, token = get_token(session)
     print("3) POST .../token         ->", r.status_code, "(JWT acquired)" if token else r.text)
     if not token:
-        raise SystemExit("No access_token - check USERNAME/PASSWORD and that the user is enrolled")
+        raise SystemExit("No access_token - check the certificate is enrolled (POST /csr)")
 
     # 4. NRO-signed funding request
     funding = {
@@ -145,7 +140,7 @@ def main() -> None:
         return
 
     approver = new_session(APPROVER_CERT, APPROVER_KEY)
-    ar, atoken = get_token(approver, APPROVER_USERNAME, APPROVER_PASSWORD)
+    ar, atoken = get_token(approver)
     if not atoken:
         raise SystemExit(f"Approver token failed: {ar.status_code} {ar.text}")
     r = approver.put(

@@ -11,7 +11,7 @@ function repo() {
 }
 
 function declare(r: ReturnType<typeof repo>, username = "PUSER0001") {
-  return r.createDeclaredUser({ username, password: "secret", profile: "PILOT_READ_WRITE", entityBIC: "BSUIFRPPXXX" });
+  return r.createDeclaredUser({ username, profile: "PILOT_READ_WRITE", entityBIC: "BSUIFRPPXXX" });
 }
 
 describe("InMemoryAuthUsersRepository (issue #83)", () => {
@@ -28,14 +28,6 @@ describe("InMemoryAuthUsersRepository (issue #83)", () => {
     const r = repo();
     declare(r);
     expect(() => declare(r)).toThrow(/USER_ALREADY_EXISTS/);
-  });
-
-  it("validates credentials (coercing a numeric password to string)", () => {
-    const r = repo();
-    r.createDeclaredUser({ username: "PNUM", password: 12345 as unknown as string, profile: "PILOT_READ_ONLY", entityBIC: "BSUIFRPPXXX" });
-    expect(r.validateCredentials("PNUM", "12345")?.username).toBe("PNUM");
-    expect(r.validateCredentials("PNUM", "wrong")).toBeUndefined();
-    expect(r.validateCredentials("nobody", "x")).toBeUndefined();
   });
 
   it("updates profile/entity metadata without clobbering unset fields", () => {
@@ -90,5 +82,23 @@ describe("InMemoryAuthUsersRepository (issue #83)", () => {
     expect(list.map((u) => u.username)).toEqual(["PUSER0001", "PUSER0002"]);
     expect(list[0]).toMatchObject({ profile: "PILOT_READ_WRITE", entityBIC: "BSUIFRPPXXX", hasCertificate: true });
     expect(r.getAllUsers()).toHaveLength(3);
+  });
+
+  it("fully deletes a user, freeing its username and fingerprint (issue #100)", () => {
+    const r = repo();
+    declare(r, "PUSER0001");
+    r.setUserCertificate("PUSER0001", "certA", "fp-a");
+    expect(r.deleteUser("PUSER0001")).toBe(true);
+    expect(r.getUserByUsername("PUSER0001")).toBeUndefined();
+    expect(r.getUsernameByFingerprint("fp-a")).toBeUndefined();
+    // the username is now free to be declared again, as a brand-new record.
+    const redeclared = declare(r, "PUSER0001");
+    expect(redeclared.username).toBe("PUSER0001");
+    expect(redeclared.certificateFingerprint).toBeUndefined();
+  });
+
+  it("deleting an unknown username is a no-op", () => {
+    const r = repo();
+    expect(r.deleteUser("ghost")).toBe(false);
   });
 });

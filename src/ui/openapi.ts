@@ -96,8 +96,11 @@ export const mockExtras = {
         tags: ["Mock · Enrollment"],
         summary: "MOCK: submit a CSR and receive a signed certificate",
         description:
-          "Mock-only local CA. Declares the user (when new) and returns a signed certificate. " +
-          "Real Pontes has no CSR API — certificates are issued via the TARGET Service Desk.",
+          "Mock-only local CA. Declares a NEW user and returns a signed certificate — no password " +
+          "involved (issue #100: real Pontes A2A auth has no per-user password). Re-enrolling an " +
+          "already-enrolled username is rejected (409); an admin must remove it first via " +
+          "DELETE /admin/enrolled-users/{username}. Real Pontes has no CSR API — certificates are " +
+          "issued via the TARGET Service Desk.",
         parameters: [NCB_PARAM],
         requestBody: {
           required: true,
@@ -110,7 +113,7 @@ export const mockExtras = {
         responses: {
           "200": { description: "Signed certificate (PEM)" },
           "400": { description: "Missing fields or invalid CSR" },
-          "401": { description: "Invalid credentials" },
+          "409": { description: "Username already enrolled — remove it first via DELETE /admin/enrolled-users/{username}" },
         },
       },
     },
@@ -120,11 +123,12 @@ export const mockExtras = {
         summary: "MOCK: OAuth2 token endpoint (password + refresh_token grants)",
         description:
           "Keycloak-shaped token endpoint every client must call. Requires mTLS (the client " +
-          "certificate bound to the user). The `password` grant exchanges username/password " +
-          "(+ `client_id`, and `client_secret` for `EXTERNAL_USER`) for an access token and a " +
-          "refresh token; the `refresh_token` grant (issue #64) exchanges a valid refresh token " +
-          "for a fresh pair. On real Pontes this is served by the ESY DLT IAM (Keycloak); the mock " +
-          "reproduces its request/response shape.",
+          "certificate enrolled via /csr). Issue #100 (confirmed against the real `utest` environment): " +
+          "A2A has no per-user password — the `password` grant resolves identity purely from the " +
+          "presented mTLS certificate (+ `client_id`, and `client_secret` for `EXTERNAL_USER`); " +
+          "`username`/`password` fields are not accepted. The `refresh_token` grant (issue #64) " +
+          "exchanges a valid refresh token for a fresh pair. On real Pontes this is served by the " +
+          "ESY DLT IAM (Keycloak); the mock reproduces its request/response shape.",
         parameters: [NCB_PARAM],
         requestBody: {
           required: true,
@@ -144,7 +148,7 @@ export const mockExtras = {
             },
           },
           "400": { description: "invalid_request (e.g. missing refresh_token)" },
-          "401": { description: "invalid_grant / invalid_client (bad credentials, cert, or client_id/secret)" },
+          "401": { description: "invalid_client (cert not enrolled, or bad client_id/secret) / invalid_grant (bad refresh token)" },
         },
       },
     },
@@ -172,6 +176,29 @@ export const mockExtras = {
               },
             },
           },
+        },
+      },
+    },
+    "/admin/enrolled-users/{username}": {
+      delete: {
+        tags: ["Mock · Enrollment"],
+        summary: "MOCK: fully remove an enrolled user (issue #100)",
+        description:
+          "Admin-only re-enrollment control: fully deletes the user record (username, profile, " +
+          "entityBIC, uuid, certificate — nothing retained), freeing the username for a fresh " +
+          "POST /csr enrollment. Requires the admin token when ADMIN_TOKEN is configured.",
+        parameters: [
+          {
+            name: "username",
+            in: "path",
+            required: true,
+            schema: { type: "string", example: "PFRBSUIFRPPXXX0001" },
+          },
+        ],
+        responses: {
+          "200": { description: "User fully removed" },
+          "401": { description: "Admin token required/invalid" },
+          "404": { description: "No such enrolled user" },
         },
       },
     },
@@ -277,10 +304,9 @@ export const mockExtras = {
     schemas: {
       CsrRequest: {
         type: "object",
-        required: ["username", "password", "csr"],
+        required: ["username", "csr"],
         properties: {
           username: { type: "string", example: "PFRBSUIFRPPXXX0001" },
-          password: { type: "string", example: "initiator-secret" },
           profile: {
             type: "string",
             example: "PILOT_READ_WRITE",
@@ -314,8 +340,6 @@ export const mockExtras = {
             enum: ["password", "refresh_token"],
             example: "password",
           },
-          username: { type: "string", example: "PFRBSUIFRPPXXX0001", description: "password grant" },
-          password: { type: "string", example: "initiator-secret", description: "password grant" },
           client_id: {
             type: "string",
             enum: ["esydlt-web-app", "esydlt-backend-service"],
