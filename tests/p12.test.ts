@@ -1,11 +1,14 @@
 /**
  * PKCS#12 builder (src/ui/p12.ts) — regression test for the BER indefinite-
- * length chunking bug: pkijs auto-splits any encrypted payload over ~1KB into
- * a "constructed" OCTET STRING, which macOS Keychain's strict importer
- * rejects (OSStatus -26276) even with the correct password. Asserts the built
- * PFX is strict, definite-length DER (no constructed OCTET STRING / indefinite
- * length anywhere), and that it's still a valid, decryptable PKCS#12 per the
- * system `openssl`.
+ * length chunking bug: pkijs's high-level PFX builder auto-splits any
+ * encrypted payload over ~1KB into a "constructed" OCTET STRING, which macOS
+ * Keychain's strict importer rejects (OSStatus -26276) even with the correct
+ * password. src/ui/p12.ts now builds the PKCS#12 with node-forge's low-level
+ * ASN.1 primitives instead (which have no indefinite-length concept at all),
+ * mirroring the ECB reference "Certificate Installation Tool". Asserts the
+ * built PFX is strict, definite-length DER (no constructed OCTET STRING /
+ * indefinite length anywhere), and that it's still a valid, decryptable
+ * PKCS#12 per the system `openssl`.
  */
 
 import { describe, it, expect, beforeAll } from "@jest/globals";
@@ -86,6 +89,41 @@ describe("buildP12 (issue: macOS Keychain OSStatus -26276)", () => {
       expect(dump).not.toMatch(/EOC/);
     } finally {
       unlinkSync(tmpP12);
+    }
+  });
+});
+
+describe("buildP12 with a legacy SEC1 'EC PRIVATE KEY' input", () => {
+  it("normalizes it to PKCS#8 and preserves the exact key material", async () => {
+    const dir = join(tmpdir(), `p12-sec1-${Date.now()}`);
+    const keyPath = join(dir, "sec1.key");
+    const csrPath = join(dir, "sec1.csr");
+    const extractedPath = join(dir, "extracted.key");
+    const p12Path = join(dir, "sec1.p12");
+    execSync(`mkdir -p "${dir}"`);
+    try {
+      execSync(`openssl ecparam -genkey -name prime256v1 -noout -out "${keyPath}"`);
+      execSync(`openssl req -new -key "${keyPath}" -out "${csrPath}" -subj "/CN=PFRTESTSEC1USER001"`);
+      const keyPem = execSync(`cat "${keyPath}"`, { encoding: "utf-8" });
+      const csrPem = execSync(`cat "${csrPath}"`, { encoding: "utf-8" });
+
+      const pki = await getRuntimePkiBundle();
+      const certPem = await signCsr(csrPem, pki.clientSigningCaPrivateKeyPem, pki.clientSigningCaCertificatePem, {
+        username: "PFRTESTSEC1USER001",
+        entityBIC: "BSUIFRPPXXX",
+      });
+      const p12 = await buildP12(keyPem, certPem, PASSWORD, "PFRTESTSEC1USER001");
+      writeFileSync(p12Path, p12);
+      execSync(
+        `openssl pkcs12 -in "${p12Path}" -passin pass:${PASSWORD} -passout pass:${PASSWORD} -nocerts -out "${extractedPath}" 2>&1`,
+      );
+      const extractedPriv = execSync(`openssl ec -in "${extractedPath}" -passin pass:${PASSWORD} -noout -text 2>&1`, {
+        encoding: "utf-8",
+      });
+      const originalPriv = execSync(`openssl ec -in "${keyPath}" -noout -text 2>&1`, { encoding: "utf-8" });
+      expect(extractedPriv.match(/priv:[\s\S]+?pub:/)?.[0]).toBe(originalPriv.match(/priv:[\s\S]+?pub:/)?.[0]);
+    } finally {
+      execSync(`rm -rf "${dir}"`);
     }
   });
 });
