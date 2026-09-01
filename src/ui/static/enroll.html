@@ -23,6 +23,10 @@
     <p class="hint">Upload or paste a PKCS#10 CSR, declare the user, and download the signed certificate.
       Inspect either the CSR or the issued certificate (subject, key, and the Pontes <code>privilege</code>
       attribute).</p>
+    <p class="hint">Don't have a CSR yet? Generate a private key + CSR with the official
+      <a href="https://utest.pontes-pilot.target-ssp.eu/certapp/csr" target="_blank" rel="noopener">ECB CertApp tool</a>
+      (runs in your browser, key never leaves it), or from the command line — see step 5 below or the full
+      <a href="https://github.com/digital-assets-work/mock-pontes/blob/main/docs/ENROLL-WITH-ECB-TOOLS.md" target="_blank" rel="noopener">ENROLL-WITH-ECB-TOOLS.md</a> guide.</p>
 
     <div class="card">
       <h2>1 · Certificate Signing Request</h2>
@@ -81,6 +85,22 @@
     <div class="card">
       <h2>5 · Create &amp; install from the command line</h2>
       <p class="hint">Recommended for real keys — the private key never leaves your machine.</p>
+      <label>Generate a private key + CSR (ECDSA P-256, with the Pontes <code>privilege</code> extension)</label>
+      <pre># 1) EC P-256 private key
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out user.key
+
+# 2) CSR with CN = username and the Pontes privilege extension
+cat &gt; csr.cnf &lt;&lt;'EOF'
+[req]
+distinguished_name = dn
+req_extensions = exts
+prompt = no
+[dn]
+CN = PFRBSUIFRPPXXX0001
+[exts]
+1.2.3.4.5.6.7.8.1 = ASN1:UTF8String:{"attrs":{"privilege":"2E","mspid":"BSUIFRPPXXX"}}
+EOF
+openssl req -new -key user.key -out user.csr -config csr.cnf</pre>
       <label>Create the .p12 (you'll be prompted for an export password)</label>
       <pre>openssl pkcs12 -export \
   -inkey &lt;your_private_key&gt;.pem \
@@ -91,7 +111,12 @@
       <pre>security import PFRBSUIFRPPXXX0001.p12 -k ~/Library/Keychains/login.keychain-db
 # verify:
 security find-identity -v ~/Library/Keychains/login.keychain-db | grep PFRBSUIFRPPXXX0001</pre>
-      <label>Install — Firefox (separate certificate store)</label>
+      <p class="hint">⚠️ Known macOS bug (observed on macOS 26.6.2): importing a PKCS#12 with an
+        <b>EC (P-256)</b> private key — the type Pontes requires — can fail in Keychain Access with
+        <code>OSStatus -26276</code> or similar, regardless of the PKCS#12 cipher used (RSA keys are
+        unaffected). This is a bug in Apple's own PKCS#12 importer, not the certificate/key. If you hit
+        this, use Firefox (below) or skip Keychain entirely (CLI mTLS, further below).</p>
+      <label>Install — Firefox (separate certificate store, unaffected by the macOS Keychain bug above)</label>
       <pre>Settings → Privacy &amp; Security → Certificates → View Certificates
   → Your Certificates → Import… → select the .p12</pre>
       <label>Use directly for CLI / app mTLS (no install)</label>

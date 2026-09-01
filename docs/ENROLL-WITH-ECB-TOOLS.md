@@ -180,10 +180,18 @@ openssl pkcs12 -export \
 - **macOS (Keychain):** double-click `user.p12` (or
   `security import user.p12 -k ~/Library/Keychains/login.keychain-db`), enter the
   export password.
+  > ⚠️ **Known macOS bug** (observed on macOS 26.6.2): importing a PKCS#12 with an
+  > **EC (P-256)** private key — the type Pontes requires — can fail with
+  > `OSStatus -26276` (or a crash in the `security` CLI), regardless of which
+  > PKCS#12 cipher was used; an RSA key with the identical cipher choice imports
+  > fine, isolating this to Apple's PKCS#12 importer, not the certificate/key
+  > itself. If you hit this, use Firefox's own certificate store instead (below —
+  > confirmed working), or skip Keychain entirely and use curl/mTLS directly.
 - **Windows:** double-click `user.p12` → **Certificate Import Wizard** → Current
   User store.
 - **Firefox:** Settings → Privacy & Security → Certificates → **View
   Certificates** → *Your Certificates* → **Import…** → select `user.p12`.
+  Uses Firefox's own NSS-based store, independent of the macOS Keychain bug above.
 - **curl (mTLS):** use the PEM pair directly:
   `curl --cert user.crt --key user.key https://…`
 
