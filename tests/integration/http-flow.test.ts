@@ -348,13 +348,35 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(ok.status).toBe(200);
     expect(ok.json.status).toBe("SETTLED");
 
-    // the credited wallet now exists in the wallet list
-    const wallets = await request(server.port, "GET", `${BASE}/ams/wallets`, {
+    // the credited wallet now exists in the wallet list (`scope` is required —
+    // the auto-created wallet is owned by the caller's entity).
+    const wallets = await request(server.port, "GET", `${BASE}/ams/wallets?wallettype=CASH&scope=owned`, {
       headers: { authorization: `Bearer ${u1}` },
     });
     expect(wallets.status).toBe(200);
     const aliases = JSON.stringify(wallets.json);
     expect(aliases).toContain("WDEEURTESTAAAA-01");
+    // conformance: list entries match accountmanagement.WalletBigResume, plus
+    // the mock-only backward-compat fields and the real-but-undeclared ones
+    // (`id`, `managerName`, `ownerName`, `lastUpdated`, `userEntityID`,
+    // `walletLinks`, `mainWalletHistoricStatus`) the spec's own schema omits.
+    assertConforms(wallets.json[0], "accountmanagement.WalletBigResume", [
+      "ownerBIC",
+      "managerNCB",
+      "balance",
+      "availableBalance",
+      "lockedBalance",
+      "totalBalance",
+      "currency",
+      "createdAt",
+      "id",
+      "lastUpdated",
+      "managerName",
+      "ownerName",
+      "userEntityID",
+      "walletLinks",
+      "mainWalletHistoricStatus",
+    ]);
   });
 
   it("rejects a funding create with an invalid amount (400 HL-VAL, #53)", async () => {
@@ -511,6 +533,77 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       body: { walletAlias: "WDUP-77" },
     });
     expect(res.status).toBe(409);
+  });
+
+  it("requires `scope` on the wallet list query (400)", async () => {
+    const res = await request(server.port, "GET", `${BASE}/ams/wallets`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
+    expect(res.json.businessErrors[0].errorDescription).toMatch(/scope is required/);
+  });
+
+  it("400s an unknown `scope` value on the wallet list query", async () => {
+    const res = await request(server.port, "GET", `${BASE}/ams/wallets?scope=bogus`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
+    expect(res.json.businessErrors[0].errorDescription).toMatch(/Unknown scope/);
+  });
+
+  it("400s an unknown `wallettype` value on the wallet list query", async () => {
+    const res = await request(server.port, "GET", `${BASE}/ams/wallets?wallettype=CRYPTO&scope=owned`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
+    expect(res.json.businessErrors[0].errorDescription).toMatch(/Unknown wallettype/);
+  });
+
+  it("accepts `wallettype=cash` case-insensitively and applies no filtering", async () => {
+    const res = await request(server.port, "GET", `${BASE}/ams/wallets?wallettype=cash&scope=owned`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.json)).toBe(true);
+  });
+
+  it("`type=DRAFT` always returns an empty list — the mock never creates draft wallets", async () => {
+    const res = await request(server.port, "GET", `${BASE}/ams/wallets?type=DRAFT&scope=owned`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual([]);
+  });
+
+  it("`scope=managed` returns wallets managed by the caller's entity, not just owned ones", async () => {
+    // Owned by BSUIFRPPXXX (the test JWT's entity) but *managed* by that same
+    // entity too (overriding the default NCB-derived manager).
+    const created = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WMANAGED-109", managerNCB: "BSUIFRPPXXX" },
+    });
+    expect(created.status).toBe(201);
+
+    const managed = await request(server.port, "GET", `${BASE}/ams/wallets?scope=managedcustody`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(managed.status).toBe(200);
+    expect(JSON.stringify(managed.json)).toContain("WMANAGED-109");
+
+    // A plain `owned`-scope wallet (default NCB manager, not the caller) must
+    // NOT show up under `managed` — it isn't managed by the caller's entity.
+    const plain = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WPLAIN-109" },
+    });
+    expect(plain.status).toBe(201);
+    const managedAgain = await request(server.port, "GET", `${BASE}/ams/wallets?scope=managed`, {
+      headers: { authorization: `Bearer ${u1}` },
+    });
+    expect(JSON.stringify(managedAgain.json)).not.toContain("WPLAIN-109");
   });
 
   it("funding auto-creates the credited wallet owned by the caller's entity, not the body (#77)", async () => {
