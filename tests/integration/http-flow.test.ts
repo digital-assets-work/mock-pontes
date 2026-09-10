@@ -316,9 +316,25 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     });
     expect(created.status).toBe(201);
     expect(typeof created.json.id).toBe("string");
-    // conformance: create response matches the official FundingRequestResponse
-    // (known mock deltas: lifecycle status + createdAt timestamp).
-    assertConforms(created.json, "triggermanagement.FundingRequestResponse", ["status", "createdAt"]);
+    // conformance: create response matches the official FundingRequestResponse,
+    // plus the known deltas where the mock intentionally mirrors the real
+    // captured response instead (which is actually FundingRequest-shaped, the
+    // richer draft object, plus a `lastUpdated` not declared in either schema).
+    assertConforms(created.json, "triggermanagement.FundingRequestResponse", [
+      "status",
+      "fourEyesType",
+      "historicStatus",
+      "timestamps",
+      "lastUpdated",
+      "initiatorUserName",
+      "approverUserUUID",
+      "approverUserName",
+      "creationDate",
+      "defundingRequestType",
+      "settledTime",
+      "settledDate",
+      "rootCause",
+    ]);
     const id = created.json.id;
 
     // self-approval by the initiator → 403 (four-eyes, #28). NRO now guards the

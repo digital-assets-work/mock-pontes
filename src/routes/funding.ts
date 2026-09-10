@@ -104,18 +104,48 @@ export function createFundingRouter(store: MockStore) {
       setResponseStatus(event, 201);
       return {
         id: draft.id,
-        techFundRequestID: body.techFundRequestID,
+        // Server-asserted, not trusted from the client body — this is a
+        // two-step (four-eyes) draft, consistent with other draft-creating
+        // endpoints in this mock.
+        fourEyesType: "DRAFT",
         status: draft.status,
-        type: "FUNDING",
+        // No transition has happened yet — null until the draft is approved
+        // or canceled, matching the real captured response.
+        historicStatus: null,
+        timestamps: {},
+        // Echo the client's own draft timestamp (the real UI reuses its local
+        // draft object, computed client-side, as the POST body) rather than
+        // deriving a new one server-side.
+        lastUpdated: typeof body.lastUpdated === "number" ? body.lastUpdated : Date.now(),
+        initiatorUserUUID: draft.initiatorUserUUID,
+        initiatorUserName: "",
+        approverUserUUID: "",
+        approverUserName: "",
+        techFundRequestID: body.techFundRequestID,
+        instructingPartyID: body.instructingPartyID || "",
         amount: draft.amount,
         currency: draft.currency,
+        type: "FUNDING",
         creditedCashWalletAlias: draft.creditedWalletAlias,
         creditedCashWalletManagerID: body.creditedCashWalletManagerID || "",
         creditedCashWalletOwnerID: body.creditedCashWalletOwnerID || "",
         debitedCashWalletAlias: draft.debitedWalletAlias,
         debitedCashWalletManagerID: body.debitedCashWalletManagerID || "ECBFDEFFXXX",
         debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || "ECBFDEFFXXX",
-        createdAt: draft.createdAt,
+        // The real API uses `creationDate` (blank at draft stage) instead of
+        // the mock's former `createdAt`.
+        creationDate: "",
+        // Echoed back verbatim, as sent by the client (NRO signature + signer cert).
+        signature: body.signature || "",
+        signerPEM: body.signerPEM || "",
+        // Only meaningful for the analogous defunding-creation flow; blank here.
+        defundingRequestType: "",
+        settledTime: "",
+        settledDate: "",
+        // Derived from the (not-yet-modeled) T2 Account link of the credited
+        // wallet — blank until T2 Accounts are implemented.
+        t2AccountReference: "",
+        rootCause: "",
       };
     }),
   );
