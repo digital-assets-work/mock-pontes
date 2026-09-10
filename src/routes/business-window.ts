@@ -1,7 +1,7 @@
 import { createRouter, defineEventHandler } from "h3";
 import { track } from "../http/route-registry.js";
 import type { MockStore } from "../state/mock-store.js";
-import { currentWindow, windowDisplayName } from "../state/business-window.js";
+import { businessWindows, currentWindow, windowDisplayName } from "../state/business-window.js";
 
 export function createBusinessWindowRouter(store: MockStore) {
   const router = track(createRouter());
@@ -47,6 +47,13 @@ export function createBusinessWindowRouter(store: MockStore) {
         updateBDStatus: "UPDATE_NOT_ALLOWED",
       };
     }),
+  );
+
+  // GET /dlt/:ncb/api/octopus/grs/business-windows
+  // Response schema: globalregistry.BusinessWindow[] { windowID, nextWindowID, name, startTime, authorizedRoles }
+  router.get(
+    "/dlt/:ncb/api/octopus/grs/business-windows",
+    defineEventHandler(() => businessWindows(store.getBusinessDay())),
   );
 
   return router;

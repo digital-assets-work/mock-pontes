@@ -285,10 +285,16 @@ The market calendar gating when operations may run.
   Open-for-All almost all day (`00:00 / 00:01 / 23:58 / 23:59`).
 - `BusinessWindow` (official read): `windowName` (Start of Day / Open for All /
   End of Day / Closed), `startTime`, `endTime`, `nextWindowName`.
+- `BusinessWindow[]` (official read, `grs/business-windows`): the full daily
+  cycle as an array — `windowID`, `nextWindowID`, `name`, `startTime`,
+  `authorizedRoles`. Window IDs are stable mock UUIDs; `startTime`s are derived
+  from the same stored day boundaries as the single-window endpoints, so the
+  cycle never contradicts them.
 - `BusinessDate`: `businessDate`, `updateBDStatus`
   (`FULL_UPDATE_ALLOWED` / `UPDATE_NOT_ALLOWED` / `CONDITIONAL_UPDATE_ALLOWED`).
 - Mock: `GET .../bridge/current-business-window`, `.../grs/current-business-window`,
-  `.../grs/businessdate` compute the window from the stored day.
+  `.../grs/businessdate`, `.../grs/business-windows` compute the window(s) from
+  the stored day.
   `GET /admin/business-window` shows the day fields **plus** the live window +
   `isOpen`; `POST` (or `PUT`) `/admin/business-window` sets any sub-list of day
   fields (times must stay in increasing order).

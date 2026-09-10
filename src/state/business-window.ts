@@ -56,6 +56,64 @@ export function windowDisplayName(name: BusinessWindowName): string {
   return DISPLAY_NAME[name];
 }
 
+/** Stable mock window IDs — arbitrary but fixed, so clients can correlate a
+ *  window's `nextWindowID` across calls. They do not need to match any real
+ *  ECB-issued IDs. */
+const WINDOW_ID: Record<BusinessWindowName, string> = {
+  START_OF_DAY: "9c1f7b1a-0000-4000-8000-000000000001",
+  OPEN_FOR_ALL: "9c1f7b1a-0000-4000-8000-000000000002",
+  END_OF_DAY: "9c1f7b1a-0000-4000-8000-000000000003",
+  CLOSED: "9c1f7b1a-0000-4000-8000-000000000004",
+};
+
+/** Roles authorized to act in every window except Closed (Operator only then). */
+const ALL_ROLES = [
+  "Operator",
+  "NationalCashTokenSupervisor",
+  "CashTokenSupervisor",
+  "DedicatedCashWalletManager",
+  "DedicatedCashWalletCustodian",
+  "DedicatedCashWalletOwner",
+  "DedicatedCashWalletUser",
+] as const;
+
+const AUTHORIZED_ROLES: Record<BusinessWindowName, readonly string[]> = {
+  START_OF_DAY: ALL_ROLES,
+  OPEN_FOR_ALL: ALL_ROLES,
+  END_OF_DAY: ALL_ROLES,
+  CLOSED: ["Operator"],
+};
+
+export interface BusinessWindowInfo {
+  windowID: string;
+  nextWindowID: string;
+  name: string;
+  startTime: string;
+  authorizedRoles: readonly string[];
+}
+
+/**
+ * The full daily window cycle (globalregistry.BusinessWindow[]), derived from
+ * the stored business day's boundary times — same source of truth as
+ * {@link currentWindow}, so the cycle never contradicts the "current window"
+ * endpoints or the admin panel.
+ */
+export function businessWindows(day: BusinessDay): BusinessWindowInfo[] {
+  const startTimeOf: Record<BusinessWindowName, string> = {
+    START_OF_DAY: day.sodStart,
+    OPEN_FOR_ALL: day.ofaStart,
+    END_OF_DAY: day.ofaEnd,
+    CLOSED: day.eodEnd,
+  };
+  return WINDOW_SEQUENCE.map((name) => ({
+    windowID: WINDOW_ID[name],
+    nextWindowID: WINDOW_ID[nextWindowName(name)],
+    name: windowDisplayName(name),
+    startTime: startTimeOf[name],
+    authorizedRoles: AUTHORIZED_ROLES[name],
+  }));
+}
+
 /** Current Frankfurt-local wall-clock time as a zero-padded `HH:mm` string. */
 export function frankfurtTimeHHmm(now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-GB", {

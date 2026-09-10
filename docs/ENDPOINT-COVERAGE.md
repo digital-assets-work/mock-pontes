@@ -175,7 +175,7 @@ including the JWT `401` on `/dlt` — is normalised.
 |--------|---------------|--------|-----------|----------|-------|
 | GET | `/dlt/{ncb}/api/octopus/grs/current-business-window` | IMPLEMENTED | same | `JWT` `mTLS` | v0.1.0 |
 | GET | `/dlt/{ncb}/api/octopus/grs/businessdate` | IMPLEMENTED | same | `JWT` `mTLS` | v0.1.0 |
-| GET | `/dlt/{ncb}/api/octopus/grs/business-windows` | NOT IMPLEMENTED | — | — | — |
+| GET | `/dlt/{ncb}/api/octopus/grs/business-windows` | IMPLEMENTED | same | `JWT` `mTLS` | unreleased |
 | GET | `/dlt/{ncb}/api/octopus/grs/ncbs` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/octopus/grs/ncbs/{entityid}` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/octopus/grs/closed-days/{year}` | NOT IMPLEMENTED | — | — | — |
