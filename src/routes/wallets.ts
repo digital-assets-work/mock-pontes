@@ -1,16 +1,19 @@
 import {
   createRouter,
   defineEventHandler,
+  getQuery,
   getRouterParam,
   readBody,
   setResponseStatus,
   type H3Event,
 } from "h3";
+import { createHash } from "node:crypto";
 import type { MockStore, Transaction, Wallet } from "../state/mock-store.js";
 import type { DcwCaller } from "../state/dcw.js";
 import { totalOf } from "../state/dcw.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { track } from "../http/route-registry.js";
+import { getGrsEntity } from "../state/grs-entities.js";
 
 /** The acting entity, derived from the verified JWT (issue #56 scoping). */
 function callerOf(event: H3Event): DcwCaller {
@@ -82,25 +85,124 @@ function walletNotFound(alias: string) {
   };
 }
 
+/** `scope` vocabulary accepted by `GET .../ams/wallets`. */
+const WALLET_SCOPES = ["ownedcustody", "owned", "used", "managed", "managedcustody", "poa"] as const;
+type WalletScope = (typeof WALLET_SCOPES)[number];
+
+/**
+ * Resolves whether `wallet` is in-scope for `caller` under the given `scope`
+ * value:
+ *   - `ownedcustody`/`owned`/`used` — direct entity ownership.
+ *   - `managed`/`managedcustody` — the caller's entity is the wallet's NCB manager.
+ *   - `poa` — the caller's entity is a PoA grantee on the wallet.
+ * This is the endpoint's own read-scoping (distinct from the generic
+ * `canRead`/PoA-or-operator DCW guard, which has no "manager" concept).
+ */
+function inScope(scope: WalletScope, wallet: Wallet, caller: DcwCaller): boolean {
+  if (!caller.entityBIC) return false;
+  switch (scope) {
+    case "ownedcustody":
+    case "owned":
+    case "used":
+      return wallet.ownerEntityID === caller.entityBIC;
+    case "managed":
+    case "managedcustody":
+      return wallet.managerNCB === caller.entityBIC;
+    case "poa":
+      return wallet.poaGrantees.includes(caller.entityBIC);
+  }
+}
+
+function badRequest(event: H3Event, message: string): { businessErrors: unknown[] } {
+  setResponseStatus(event, 400);
+  return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: message }] };
+}
+
 function toWalletResponse(wallet: Wallet) {
+  const owner = getGrsEntity(wallet.ownerEntityID);
+  const manager = getGrsEntity(wallet.managerNCB);
+  // The mock only ever creates settled (never draft) wallets synchronously —
+  // there is no four-eyes wallet-creation flow — so the status/timestamps
+  // fields below collapse to a single "already accepted at creation" shape.
+  const acceptedAt = { calendarDate: wallet.createdAt, businessDate: wallet.createdAt.slice(0, 10) };
   return {
     walletAlias: wallet.alias,
     ownerEntityID: wallet.ownerEntityID,
+    // `ownerBIC`/`managerNCB`/`balance`/`availableBalance`/`lockedBalance`/
+    // `totalBalance`/`currency`/`createdAt` are mock-only fields kept for
+    // backward compatibility with earlier mock consumers/tests — they are not
+    // part of the real `accountmanagement.WalletBigResume` shape below.
     ownerBIC: wallet.ownerBIC,
     managerNCB: wallet.managerNCB,
-    // `balance` kept for backward compatibility (= available balance).
     balance: wallet.balance,
     availableBalance: wallet.balance,
     lockedBalance: wallet.lockedBalance,
     totalBalance: totalOf(wallet).toFixed(2),
     currency: wallet.currency,
-    isMainWallet: wallet.isMainWallet,
-    isBlocked: wallet.isBlocked,
-    holdingTable: [
-      { holdingID: `${wallet.alias}-${wallet.currency}-AVAILABLE`, walletAlias: wallet.alias, type: "AVAILABLE", amount: wallet.balance },
-      { holdingID: `${wallet.alias}-${wallet.currency}-LOCKED`, walletAlias: wallet.alias, type: "LOCKED", amount: wallet.lockedBalance },
-    ],
     createdAt: wallet.createdAt,
+
+    // --- accountmanagement.WalletBigResume (real API shape) ---
+    validFrom: wallet.validFrom,
+    validTo: wallet.validTo ?? "",
+    id: "",
+    fourEyesType: "NORMAL",
+    status: "ACCEPTED",
+    historicStatus: ["PENDING_APPROVAL", "ACCEPTED"],
+    timestamps: { ACCEPTED: acceptedAt, PENDING_APPROVAL: acceptedAt },
+    lastUpdated: Date.parse(wallet.createdAt) || 0,
+    initiatorUserUUID: "",
+    initiatorUserName: "",
+    approverUserUUID: "",
+    approverUserName: "",
+    // Opaque, stable per-alias technical id — not a secret, just needs to be
+    // deterministic and mock-synthesized (no real fabflow system backs this).
+    fabflowWalletID: createHash("sha256").update(wallet.alias).digest("base64"),
+    holdingTable: [
+      {
+        holdingID: `${wallet.alias}-${wallet.currency}-AVAILABLE`,
+        walletAlias: wallet.alias,
+        amount: wallet.balance,
+        quantity: wallet.balance,
+        type: wallet.currency,
+        modalityType: "NORMAL",
+      },
+    ],
+    walletLinks: [],
+    managerID: wallet.managerNCB,
+    managerName: manager?.name ?? "",
+    modality: "NORMAL",
+    creationDate: "",
+    ownerName: owner?.name ?? "",
+    type: "CASH",
+    userEntityID: "",
+    t2AccountWalletLinks: [
+      {
+        validFrom: wallet.validFrom,
+        validTo: wallet.validTo ?? "",
+        t2AccountReference: `DCA_ACCOUNT_${wallet.ownerEntityID}`,
+        t2AccountManagerID: wallet.managerNCB,
+        walletAlias: wallet.alias,
+        lastUpdated: 0,
+        status: "ACCEPTED",
+      },
+    ],
+    countryCode: owner?.countryCode ?? "",
+    isBlocked: wallet.isBlocked,
+    // No per-grantee maximumAmount/validity window is tracked today — only
+    // the grantee identity (`poaGrantees`). Best-effort mapping onto the
+    // `CreateInstructOnBehalf` shape, pending a real non-empty sample.
+    POAs: wallet.poaGrantees.map((poaEntityID) => ({
+      walletAlias: wallet.alias,
+      walletOwnerID: wallet.ownerEntityID,
+      walletManagerID: wallet.managerNCB,
+      poaEntityID,
+      validFrom: wallet.validFrom,
+      validTo: wallet.validTo ?? "",
+      maximumAmount: "",
+    })),
+    isMainWallet: wallet.isMainWallet,
+    mainWalletHistoricStatus: [],
+    instructingPartyID: owner?.instructingPartyID ?? "",
   };
 }
 
@@ -109,11 +211,46 @@ export function createWalletsRouter(store: MockStore) {
 
   // GET /dlt/:ncb/api/octopus/ams/wallets — Retrieve Dedicated Cash Wallet list
   // Official AMS query. Replaces the former mock-only `GET /admin/wallets`.
-  // Scoped to the caller's entity (issue #56): only own/PoA/operated wallets.
+  // Bare array response filtered by the real UI's `wallettype`/
+  // `type`/`scope` query parameters rather than the earlier hardcoded
+  // canRead-only scoping — `scope` is now the sole read-rights determinant for
+  // this endpoint (it already covers ownership/PoA, and adds the "managed by
+  // this NCB" case that the generic `canRead` guard doesn't model).
   router.get(
     "/dlt/:ncb/api/octopus/ams/wallets",
     defineEventHandler((event) => {
-      return { wallets: store.getWallets(callerOf(event)).map(toWalletResponse) };
+      const query = getQuery(event);
+      const rawWalletType = typeof query.wallettype === "string" ? query.wallettype : undefined;
+      const rawType = typeof query.type === "string" ? query.type : undefined;
+      const rawScope = typeof query.scope === "string" ? query.scope : undefined;
+
+      // The mock only ever creates cash wallets — `wallettype` never filters
+      // anything, it's accepted/validated only (case-insensitive).
+      if (rawWalletType !== undefined && rawWalletType.toUpperCase() !== "CASH") {
+        return badRequest(event, `Unknown wallettype '${rawWalletType}'. Expected: CASH`);
+      }
+      // Spec's own `type` param (four-eyes status), distinct from `wallettype`.
+      const normalizedType = rawType?.toUpperCase();
+      if (normalizedType !== undefined && normalizedType !== "NORMAL" && normalizedType !== "DRAFT") {
+        return badRequest(event, `Unknown type '${rawType}'. Expected: NORMAL, DRAFT`);
+      }
+      if (rawScope === undefined) {
+        return badRequest(event, "scope is required");
+      }
+      const scope = rawScope.toLowerCase();
+      if (!(WALLET_SCOPES as readonly string[]).includes(scope)) {
+        return badRequest(event, `Unknown scope '${rawScope}'. Expected: ${WALLET_SCOPES.join(", ")}`);
+      }
+
+      // This mock never creates draft-status wallets (no four-eyes wallet
+      // creation flow) — a DRAFT-status query always yields an empty list.
+      if (normalizedType === "DRAFT") return [];
+
+      const caller = callerOf(event);
+      return store
+        .getWallets()
+        .filter((w) => inScope(scope as WalletScope, w, caller))
+        .map(toWalletResponse);
     }),
   );
 
