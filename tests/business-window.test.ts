@@ -22,6 +22,7 @@ import {
   windowDisplayName,
   isBusinessOpen,
   validateBusinessDayUpdate,
+  businessWindows,
 } from "../src/state/business-window.js";
 import {
   businessWindowDecision,
@@ -102,6 +103,40 @@ describe("nextWindowName / windowDisplayName", () => {
   it("renders display names", () => {
     expect(windowDisplayName("OPEN_FOR_ALL")).toBe("Open for All");
     expect(windowDisplayName("END_OF_DAY")).toBe("End of Day");
+  });
+});
+
+describe("businessWindows", () => {
+  it("returns the full daily cycle, derived from the stored day's boundary times", () => {
+    const windows = businessWindows(day());
+    expect(windows.map((w) => w.name)).toEqual(["Start of Day", "Open for All", "End of Day", "Closed"]);
+    expect(windows.map((w) => w.startTime)).toEqual(["07:00", "09:00", "17:00", "18:00"]);
+  });
+  it("chains nextWindowID through the cycle back to Start of Day", () => {
+    const windows = businessWindows(day());
+    for (let i = 0; i < windows.length; i++) {
+      const next = windows[(i + 1) % windows.length];
+      expect(windows[i].nextWindowID).toBe(next.windowID);
+    }
+  });
+  it("gives every window a stable, distinct windowID across calls", () => {
+    expect(businessWindows(day())).toEqual(businessWindows(day()));
+    const ids = businessWindows(day()).map((w) => w.windowID);
+    expect(new Set(ids).size).toBe(4);
+  });
+  it("authorizes all roles except in Closed, which is Operator-only", () => {
+    const windows = businessWindows(day());
+    const closed = windows.find((w) => w.name === "Closed")!;
+    expect(closed.authorizedRoles).toEqual(["Operator"]);
+    for (const w of windows.filter((w) => w.name !== "Closed")) {
+      expect(w.authorizedRoles).toContain("Operator");
+      expect(w.authorizedRoles).toContain("DedicatedCashWalletOwner");
+      expect(w.authorizedRoles.length).toBeGreaterThan(1);
+    }
+  });
+  it("reflects updated boundary times (admin panel and API stay in sync)", () => {
+    const windows = businessWindows(day({ ofaStart: "10:00" }));
+    expect(windows.find((w) => w.name === "Open for All")!.startTime).toBe("10:00");
   });
 });
 
