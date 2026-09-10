@@ -180,8 +180,8 @@ including the JWT `401` on `/dlt` — is normalised.
 | GET | `/dlt/{ncb}/api/octopus/grs/ncbs/{entityid}` | NOT IMPLEMENTED | — | — | — |
 | GET | `/dlt/{ncb}/api/octopus/grs/closed-days/{year}` | NOT IMPLEMENTED | — | — | — |
 | POST | `/dlt/{ncb}/api/octopus/grs/entities` | NOT IMPLEMENTED | — | — | — |
-| GET | `/dlt/{ncb}/api/octopus/grs/entities` | NOT IMPLEMENTED | — | — | — |
-| GET | `/dlt/{ncb}/api/octopus/grs/entities/{entityid}` | NOT IMPLEMENTED | — | — | — |
+| GET | `/dlt/{ncb}/api/octopus/grs/entities` | IMPLEMENTED | same | `JWT` `mTLS` | unreleased |
+| GET | `/dlt/{ncb}/api/octopus/grs/entities/{entityid}` | IMPLEMENTED | same | `JWT` `mTLS` | unreleased |
 | PATCH | `/dlt/{ncb}/api/octopus/grs/entities/{entityid}` | NOT IMPLEMENTED | — | — | — |
 | PUT | `/dlt/{ncb}/api/octopus/grs/entities-drafts/{id}/{status}` | NOT IMPLEMENTED | — | — | — |
 | POST | `/dlt/{ncb}/api/octopus/grs/mdlt-operators` | NOT IMPLEMENTED | — | — | — |

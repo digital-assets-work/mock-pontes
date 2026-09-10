@@ -27,6 +27,7 @@ import { createWalletsRouter } from "./routes/wallets.js";
 import { createTransfersRouter } from "./routes/transfers.js";
 import { createFundingRouter } from "./routes/funding.js";
 import { createBusinessWindowRouter } from "./routes/business-window.js";
+import { createGrsEntitiesRouter } from "./routes/grs-entities.js";
 import { createHealthRouter } from "./routes/health.js";
 import { createBridgePaymentsRouter } from "./routes/bridge-payments.js";
 import { createDirectRtgsRouter } from "./routes/direct-rtgs.js";
@@ -145,6 +146,7 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   app.use(createTransfersRouter(store).handler);
   app.use(createFundingRouter(store).handler);
   app.use(createBusinessWindowRouter(store).handler);
+  app.use(createGrsEntitiesRouter().handler);
   app.use(createBridgePaymentsRouter(store).handler);
   app.use(createDirectRtgsRouter(store).handler);
   app.use(createPfodRouter(store).handler);

@@ -85,7 +85,7 @@ wallets and entities.
 - Official endpoints: `GET .../grs/ncbs`, `.../grs/ncbs/{id}`. **Not implemented**
   (the mock hard-codes the NCB from the realm).
 
-### 2.2 Market Participant Entity ⚪
+### 2.2 Market Participant Entity 🟡
 
 A participant in the ESY DLT (a bank/PSP), identified by BIC.
 
@@ -97,8 +97,12 @@ A participant in the ESY DLT (a bank/PSP), identified by BIC.
 - Blocking is toggled via `PATCH .../grs/entities/{id}` (`isBlocked`).
 - Cardinality: owns **0..\*** DCWs; groups **1..\*** Users.
 - Official endpoints: `grs/entities` (create 2-step, list, get, patch blocking).
-  **Not implemented** — the mock infers the owning entity from the wallet alias
-  / enrolled user's `entityBIC`.
+  **List + get are implemented**, served verbatim from a static HAR-captured
+  fixture (`src/data/grs-entities.json`, 113 records — both settled and
+  in-flight draft entities); lookup by `{entityid}` matches either the settled
+  `entityID` (BIC) or a draft-only `id`. **Create/patch/draft-transition remain
+  not implemented** — the mock still infers the owning entity from the wallet
+  alias / enrolled user's `entityBIC` elsewhere.
 - States: `PENDING_APPROVAL` → `ACTIVE` (approve) / `CANCELED` (cancel); then
   `ACTIVE` ⇄ `BLOCKED` via patch.
 
@@ -459,7 +463,7 @@ stateDiagram-v2
 | Dedicated Cash Wallet | 🟡 | read + **funding-only** credit auto-create (else 422 → one-step endpoint); available/locked, debit rights, Redis |
 | Holding / balance | 🟡 | available + locked balance per wallet |
 | Business Window / Date | � | derived from stored day (Frankfurt time); spec-driven per-endpoint enforcement |
-| Market Participant Entity | ⚪ | — |
+| Market Participant Entity | 🟡 | grs/entities — list + get (static fixture); create/patch not implemented |
 | NCB registry | ⚪ | — |
 | T2 Account | ⚪ | — |
 | Power of Attorney | ⚪ | — |
