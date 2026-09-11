@@ -63,6 +63,27 @@ export interface Draft {
   expiresAt?: string;
   /** Non-standard free-text reason carried from the transfer request (mock only). */
   supplementaryData?: string;
+
+  // --- requestvalidation.OperationRequest pass-through fields ---
+  // Currently populated by TransferWorkflow only; optional so other draft
+  // types (FUNDING/DEFUNDING/DIRECT_RTGS/PFOD/XVP) are unaffected.
+  debitedCashWalletManagerID?: string;
+  creditedCashWalletManagerID?: string;
+  instructingPartyID?: string;
+  onBehalfUser?: string;
+  /** "PAYMENT" | "OPERATION" */
+  cbdcRequestType?: string;
+  operationContext?: string;
+  /** Instructed Settlement Date, YYYY-MM-DD. */
+  ISD?: string;
+  /** Epoch seconds, server-computed from ISD. */
+  ISDTimestamp?: number;
+  fundingRequestID?: string;
+  paymentInstructionID?: string;
+  /** Server-generated id distinct from `id`/`instructionID`. */
+  techCBDCOperationID?: string;
+  historicStatus?: string[];
+  timestamps?: Record<string, { calendarDate: string; businessDate: string }>;
 }
 
 /** Official Pontes business-window names, in daily sequence order. */

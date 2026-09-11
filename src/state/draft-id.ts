@@ -1,11 +1,11 @@
 /**
- * Draft id resolution (issue #32).
+ * Draft id resolution (issue #32, revised for a HAR-capture delta against the official spec).
  *
- * The official request schemas carry a client-supplied instruction id for some
- * operations (RVS transfer `instructionID`, direct-RTGS `id` — the latter is
- * also part of the NRO-signed payload). Where the client provides one we MUST
- * honour it (reconciliation keys off it); otherwise we mint a deterministic
- * daily-sequence id. A duplicate client id is rejected with `409 HL-GER-004`.
+ * The real Pontes backend does not let the caller set its own instruction id:
+ * a client-supplied id is only ever used to detect a duplicate submission — a
+ * non-duplicate value is acknowledged (checked for conflicts) but otherwise
+ * ignored, and a fresh, well-formatted id is always minted server-side. A
+ * duplicate client id is rejected with `409 HL-GER-004`.
  */
 
 import type { MockStore } from "./mock-store.js";
@@ -25,7 +25,8 @@ export function resolveDraftId(
         `Instruction id '${id}' already exists`,
       );
     }
-    return id;
+    // Not a duplicate — the provided value is ignored; Pontes always mints its
+    // own id rather than accepting a caller-chosen one.
   }
   return store.nextId(prefix);
 }
