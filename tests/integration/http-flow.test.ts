@@ -343,10 +343,10 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(self.status).toBe(403);
     expect(self.json.businessErrors[0].errorCode).toBe("HL-GER-003");
 
-    // approval by a distinct user → 200
+    // approval by a distinct user → 200, plain JSON string confirmation (not an object)
     const ok = await nroFundingTransition(id, u2);
     expect(ok.status).toBe(200);
-    expect(ok.json.status).toBe("SETTLED");
+    expect(ok.json).toBe("Funding Request Draft Approved Succesfully");
 
     // the credited wallet now exists in the wallet list (`scope` is required —
     // the auto-created wallet is owned by the caller's entity).

@@ -247,9 +247,16 @@ describe("Transfers — requestvalidation.OperationRequest alignment", () => {
       headers: { authorization: `Bearer ${approverAuth}` },
     });
     expect(approve.status).toBe(200);
-    expect(approve.json.etatsUX).toBe("SETTLED");
-    expect(approve.json.historicStatus).toEqual(["INITIALIZED", "PENDING_APPROVAL", "SETTLED"]);
-    expect(approve.json.timestamps.SETTLED).toBeTruthy();
+    // Spec response is a plain string confirmation, not the enriched draft object.
+    expect(approve.json).toBe("Cash Token Transaction Draft Approved Succesfully");
+
+    const settled = await request(server.port, "GET", `${BASE}/rvs/transactions-drafts/${view.instructionID}`, {
+      headers: { authorization: `Bearer ${approverAuth}` },
+    });
+    expect(settled.status).toBe(200);
+    expect(settled.json.etatsUX).toBe("SETTLED");
+    expect(settled.json.historicStatus).toEqual(["INITIALIZED", "PENDING_APPROVAL", "SETTLED"]);
+    expect(settled.json.timestamps.SETTLED).toBeTruthy();
   });
 
   it("rejects a duplicate client-supplied instructionID (409 HL-GER-004)", async () => {

@@ -94,14 +94,18 @@ export function createDirectRtgsRouter(store: MockStore) {
       const auth = event.context.auth as AuthContext | undefined;
       try {
         if (status === "approve" || status === "approved") {
-          const settled = workflow.approve(id, {
+          workflow.approve(id, {
             caller: callerOf(event),
             approverUserUUID: auth?.userUUID,
           });
-          return rtgsView(settled, { settledAt: new Date().toISOString() });
+          // Spec response is a plain JSON string, not an object.
+          setResponseHeader(event, "content-type", "application/json");
+          return JSON.stringify("Direct RTGS Payment Draft Approved Successfully");
         }
         if (status === "cancel" || status === "canceled" || status === "cancelled") {
-          return rtgsView(workflow.cancel(id));
+          workflow.cancel(id);
+          setResponseHeader(event, "content-type", "application/json");
+          return JSON.stringify("Direct RTGS Payment Draft Cancelled Successfully");
         }
         setResponseStatus(event, 400);
         return {

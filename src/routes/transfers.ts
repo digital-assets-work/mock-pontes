@@ -4,6 +4,7 @@ import {
   getRouterParam,
   readBody,
   setResponseStatus,
+  setResponseHeader,
 } from "h3";
 import { randomUUID } from "node:crypto";
 import type { H3Event } from "h3";
@@ -263,11 +264,15 @@ export function createTransfersRouter(store: MockStore) {
       try {
         if (status === "approve" || status === "approved") {
           const { caller, approverUserUUID } = authCaller(event);
-          const settled = workflow.approve(id, { caller, approverUserUUID });
-          return transferView(store, settled);
+          workflow.approve(id, { caller, approverUserUUID });
+          // Spec response is a plain JSON string, not an object.
+          setResponseHeader(event, "content-type", "application/json");
+          return JSON.stringify("Cash Token Transaction Draft Approved Succesfully");
         }
         if (status === "cancel" || status === "canceled" || status === "cancelled") {
-          return transferView(store, workflow.cancel(id));
+          workflow.cancel(id);
+          setResponseHeader(event, "content-type", "application/json");
+          return JSON.stringify("Cash Token Transaction Draft Cancelled Succesfully");
         }
         setResponseStatus(event, 400);
         return {
