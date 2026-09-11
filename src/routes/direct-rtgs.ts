@@ -29,16 +29,104 @@ function callerOf(event: H3Event): DcwCaller | undefined {
   return entity ? { entityBIC: entity } : undefined;
 }
 
-function rtgsView(d: Draft, extra: Record<string, unknown> = {}): Record<string, unknown> {
+/**
+ * Build the per-status-event map (`common.HistoricStatus`) that
+ * `GetDirectRTGSPaymentInstruction.historicStatus` declares, from the generic
+ * `Draft.historicStatus`/`timestamps` lifecycle trail already populated by
+ * `Workflow.lifecycleAppend()` (workbench issue #113). `rootCause`/
+ * `systemStatus` are not modeled by this mock — `null`, matching the spec's
+ * own example.
+ */
+function historicStatusMap(d: Draft): Record<string, unknown> | undefined {
+  if (!d.historicStatus) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const status of d.historicStatus) {
+    const t = d.timestamps?.[status];
+    out[status] = {
+      businessDate: t?.businessDate ?? null,
+      date: t?.businessDate ?? null,
+      rootCause: null,
+      status,
+      systemStatus: null,
+      timestamp: t?.calendarDate ?? null,
+    };
+  }
+  return out;
+}
+
+/**
+ * `triggermanagement.DirectRTGSPaymentInstructionResponse` — the thin shape
+ * returned by create and by `GET .../payments-drafts/{id}` (workbench #113).
+ * Wallet aliases are intentionally NOT included: the spec doesn't declare them
+ * on this schema (they remain available internally on the `Draft` for the
+ * workflow's own credit/debit logic).
+ */
+function rtgsResponseView(store: MockStore, d: Draft): Record<string, unknown> {
   return {
     id: d.id,
-    status: d.status,
-    type: "DIRECT_RTGS",
     amount: d.amount,
     currency: d.currency,
-    creditedCashWalletAlias: d.creditedWalletAlias,
-    debitedCashWalletAlias: d.debitedWalletAlias,
-    ...extra,
+    correlationId: d.correlationId ?? "",
+    // Real backend uses `creationDate` for the business date of the payment
+    // (not a draft-vs-settled distinction) — mirrors `transferView` (#109).
+    creationDate: store.getBusinessDay().businessDate,
+    // Server-asserted, never trusted from the client — this is always a
+    // two-step draft (mirrors the funding/defunding create response).
+    fourEyesType: "DRAFT",
+    includeSubmit: false,
+    initiatorUserUUID: d.initiatorUserUUID ?? "",
+    instructingPartyID: d.instructingPartyID ?? "",
+    isCanceled: d.status === "CANCELED",
+    payerBank: d.payerBank ?? "",
+    receiverBank: d.receiverBank ?? "",
+    signature: d.signature ?? "",
+    signerPEM: d.signerPEM ?? "",
+    source: "Payment",
+    // Same UUID as `id` per the spec's own example.
+    techPaymentId: d.id,
+    type: "Direct RTGS Payment",
+  };
+}
+
+/**
+ * `triggermanagement.GetDirectRTGSPaymentInstruction` — the richer shape
+ * returned by `GET .../payments/{id}` (non-drafts path, workbench #113).
+ * Fields with no equivalent concept in this mock (`approvalTimeOut`,
+ * `isManualDefunding`, `marketDLTOperatorBuyer/Seller`, `rootCause`,
+ * `supplementaryData`) are blank/false, matching the established
+ * not-yet-modeled convention used elsewhere (e.g. `t2AccountReference`).
+ */
+function rtgsGetView(store: MockStore, d: Draft): Record<string, unknown> {
+  return {
+    amount: d.amount,
+    approvalTimeOut: "",
+    approverUserName: d.approverUserName ?? "",
+    approverUserUUID: d.approverUserUUID ?? "",
+    correlationId: d.correlationId ?? "",
+    creationDate: store.getBusinessDay().businessDate,
+    currency: d.currency,
+    historicStatus: historicStatusMap(d),
+    id: d.id,
+    includeSubmit: false,
+    initiatorUserName: d.initiatorUserName ?? "",
+    initiatorUserUUID: d.initiatorUserUUID ?? "",
+    instructingPartyID: d.instructingPartyID ?? "",
+    isCanceled: d.status === "CANCELED",
+    isManualDefunding: false,
+    lastUpdatedBusinessDate: store.getBusinessDay().businessDate,
+    lastUpdatedTime: d.updatedAt,
+    marketDLTOperatorBuyer: "",
+    marketDLTOperatorSeller: "",
+    payerBank: d.payerBank ?? "",
+    receiverBank: d.receiverBank ?? "",
+    rootCause: "",
+    signature: d.signature ?? "",
+    signerPEM: d.signerPEM ?? "",
+    source: "Payment",
+    status: d.status,
+    supplementaryData: d.supplementaryData ?? "",
+    techPaymentId: d.id,
+    type: "Direct RTGS Payment",
   };
 }
 
@@ -51,7 +139,7 @@ export function createDirectRtgsRouter(store: MockStore) {
   const router = track(createRouter());
   const workflow = new DirectRtgsWorkflow(store);
 
-  function buildInit(body: any, id: string, initiatorUserUUID?: string) {
+  function buildInit(body: any, id: string, initiatorUserUUID?: string, initiatorUserName?: string) {
     // Both wallets must already exist (issue #93): the workflow rejects an
     // unknown credit/debit wallet (422 HL-WAL-002/003) rather than auto-creating
     // it — the error points at POST .../ams/wallets/one-step.
@@ -63,6 +151,13 @@ export function createDirectRtgsRouter(store: MockStore) {
       debitedWalletAlias: body.debitedCashWalletAlias || "",
       // Initiator is the authenticated caller (four-eyes), never the body (#28).
       initiatorUserUUID,
+      initiatorUserName,
+      correlationId: body.correlationId,
+      payerBank: body.payerBank,
+      receiverBank: body.receiverBank,
+      instructingPartyID: body.instructingPartyID,
+      signature: body.signature,
+      signerPEM: body.signerPEM,
     };
   }
 
@@ -79,9 +174,21 @@ export function createDirectRtgsRouter(store: MockStore) {
       } catch (e) {
         return sendRejection(event, e);
       }
-      const draft = workflow.create(buildInit(body, id, (event.context.auth as AuthContext | undefined)?.userUUID));
+      const auth = event.context.auth as AuthContext | undefined;
+      const now = new Date().toISOString();
+      const businessDate = store.getBusinessDay().businessDate;
+      const draft = workflow.create({
+        ...buildInit(body, id, auth?.userUUID, auth?.username),
+        // Lifecycle trail (workbench #113), same seed as TransferWorkflow (#109)
+        // — `Workflow.lifecycleAppend()` extends it generically on approve/cancel.
+        historicStatus: ["INITIALIZED", "PENDING_APPROVAL"],
+        timestamps: {
+          INITIALIZED: { calendarDate: now, businessDate },
+          PENDING_APPROVAL: { calendarDate: now, businessDate },
+        },
+      });
       setResponseStatus(event, 201);
-      return rtgsView(draft, { createdAt: draft.createdAt });
+      return rtgsResponseView(store, draft);
     }),
   );
 
@@ -97,6 +204,7 @@ export function createDirectRtgsRouter(store: MockStore) {
           workflow.approve(id, {
             caller: callerOf(event),
             approverUserUUID: auth?.userUUID,
+            approverUserName: auth?.username,
           });
           // Spec response is a plain JSON string, not an object.
           setResponseHeader(event, "content-type", "application/json");
@@ -119,22 +227,35 @@ export function createDirectRtgsRouter(store: MockStore) {
     }),
   );
 
-  // GET /dlt/:ncb/api/octopus/tms/direct-rtgs/payments(-drafts)/:id — Read by id
-  const readByIdHandler = defineEventHandler((event: H3Event) => {
-    const id = getRouterParam(event, "id")!;
-    const draft = store.getDraft(id, callerOf(event));
-    if (!draft || draft.type !== "DIRECT_RTGS") {
-      setResponseStatus(event, 404);
-      return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Direct RTGS payment ${id} not found` }] };
-    }
-    return rtgsView(draft, {
-      createdAt: draft.createdAt,
-      initiatorUserUUID: draft.initiatorUserUUID,
-      approverUserUUID: draft.approverUserUUID,
-    });
-  });
-  router.get("/dlt/:ncb/api/octopus/tms/direct-rtgs/payments-drafts/:id", readByIdHandler);
-  router.get("/dlt/:ncb/api/octopus/tms/direct-rtgs/payments/:id", readByIdHandler);
+  // GET /dlt/:ncb/api/octopus/tms/direct-rtgs/payments-drafts/:id — Read a
+  // single draft, thin `DirectRTGSPaymentInstructionResponse` shape.
+  router.get(
+    "/dlt/:ncb/api/octopus/tms/direct-rtgs/payments-drafts/:id",
+    defineEventHandler((event: H3Event) => {
+      const id = getRouterParam(event, "id")!;
+      const draft = store.getDraft(id, callerOf(event));
+      if (!draft || draft.type !== "DIRECT_RTGS") {
+        setResponseStatus(event, 404);
+        return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Direct RTGS payment ${id} not found` }] };
+      }
+      return rtgsResponseView(store, draft);
+    }),
+  );
+
+  // GET /dlt/:ncb/api/octopus/tms/direct-rtgs/payments/:id — Read a single
+  // payment, richer `GetDirectRTGSPaymentInstruction` shape (workbench #113).
+  router.get(
+    "/dlt/:ncb/api/octopus/tms/direct-rtgs/payments/:id",
+    defineEventHandler((event: H3Event) => {
+      const id = getRouterParam(event, "id")!;
+      const draft = store.getDraft(id, callerOf(event));
+      if (!draft || draft.type !== "DIRECT_RTGS") {
+        setResponseStatus(event, 404);
+        return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Direct RTGS payment ${id} not found` }] };
+      }
+      return rtgsGetView(store, draft);
+    }),
+  );
 
   // POST /dlt/:ncb/api/bridge/direct-rtgs/payments — 1-step variant (immediate, NRO)
   router.post(
@@ -142,8 +263,9 @@ export function createDirectRtgsRouter(store: MockStore) {
     defineEventHandler(async (event) => {
       const body = await readBody(event);
       const id = body.id || body.paymentID || randomUUID();
+      const auth = event.context.auth as AuthContext | undefined;
       try {
-        workflow.execute(buildInit(body, id, (event.context.auth as AuthContext | undefined)?.userUUID), { caller: callerOf(event) });
+        workflow.execute(buildInit(body, id, auth?.userUUID, auth?.username), { caller: callerOf(event) });
       } catch (e) {
         return sendRejection(event, e);
       }

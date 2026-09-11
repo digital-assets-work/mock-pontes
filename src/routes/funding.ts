@@ -8,7 +8,7 @@ import {
   createError,
 } from "h3";
 import type { H3Event } from "h3";
-import type { MockStore } from "../state/mock-store.js";
+import type { MockStore, Draft } from "../state/mock-store.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { FundingWorkflow, DefundingWorkflow } from "../workflows/funding.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
@@ -42,6 +42,11 @@ function approverUUID(event: H3Event): string | undefined {
   return (event.context.auth as AuthContext | undefined)?.userUUID;
 }
 
+/** Username of the acting user (workbench issue #113), from the JWT. */
+function actingUsername(event: H3Event): string | undefined {
+  return (event.context.auth as AuthContext | undefined)?.username;
+}
+
 /** Acting entity from the verified JWT, for DCW authorisation (issue #56). */
 function callerOf(event: H3Event): { entityBIC: string } | undefined {
   const entity = (event.context.auth as AuthContext | undefined)?.entityBIC;
@@ -63,6 +68,55 @@ function ensureWallet(store: MockStore, alias: string, ownerEntity: string, mana
     currency,
   });
   console.log(`[mock-pontes] Auto-created wallet ${alias} for entity ${ownerEntity}`);
+}
+
+/**
+ * Build the funding/defunding single-read view (workbench #113). `rich`
+ * selects the fuller `triggermanagement.FundingRequest` shape returned by
+ * `GET .../funding-defunding-requests/{id}`; when false it returns the
+ * thinner `*RequestResponse` shape instead (also used by create), returned by
+ * `GET .../funding-defunding-requests-drafts/{id}`. Reused for both FUNDING
+ * and DEFUNDING since the two schemas declare identical field names, differing
+ * only in `type`/`defundingRequestType`.
+ */
+function fundingReadView(store: MockStore, d: Draft, opts: { rich: boolean }): Record<string, unknown> {
+  const isDefunding = d.type === "DEFUNDING";
+  const base: Record<string, unknown> = {
+    id: d.id,
+    amount: d.amount,
+    currency: d.currency,
+    type: d.type,
+    creditedCashWalletAlias: d.creditedWalletAlias,
+    creditedCashWalletManagerID: d.creditedCashWalletManagerID ?? "",
+    creditedCashWalletOwnerID: d.creditedCashWalletOwnerID ?? "",
+    debitedCashWalletAlias: d.debitedWalletAlias,
+    debitedCashWalletManagerID: d.debitedCashWalletManagerID ?? "",
+    debitedCashWalletOwnerID: d.debitedCashWalletOwnerID ?? "",
+    initiatorUserUUID: d.initiatorUserUUID ?? "",
+    instructingPartyID: d.instructingPartyID ?? "",
+    signature: d.signature ?? "",
+    signerPEM: d.signerPEM ?? "",
+    // Derived from the (not-yet-modeled) T2 Account link of the credited
+    // wallet — blank until T2 Accounts are implemented.
+    t2AccountReference: "",
+    techFundRequestID: d.techFundRequestID ?? "",
+  };
+  if (isDefunding) base.defundingRequestType = "D";
+  if (!opts.rich) return base;
+  return {
+    ...base,
+    fourEyesType: "DRAFT",
+    status: d.status,
+    historicStatus: d.historicStatus ?? null,
+    timestamps: d.timestamps ?? {},
+    initiatorUserName: d.initiatorUserName ?? "",
+    approverUserUUID: d.approverUserUUID ?? "",
+    approverUserName: d.approverUserName ?? "",
+    creationDate: store.getBusinessDay().businessDate,
+    settledTime: d.status === "SETTLED" ? d.updatedAt ?? "" : "",
+    settledDate: d.status === "SETTLED" ? store.getBusinessDay().businessDate : "",
+    rootCause: "",
+  };
 }
 
 export function createFundingRouter(store: MockStore) {
@@ -99,6 +153,8 @@ export function createFundingRouter(store: MockStore) {
         );
       }
 
+      const now = new Date().toISOString();
+      const businessDate = store.getBusinessDay().businessDate;
       const draft = funding.create(
         {
           id,
@@ -108,6 +164,24 @@ export function createFundingRouter(store: MockStore) {
           debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
           // Initiator is the authenticated caller (four-eyes), never the body (#28).
           initiatorUserUUID: approverUUID(event),
+          initiatorUserName: actingUsername(event),
+          techFundRequestID: body.techFundRequestID,
+          instructingPartyID: body.instructingPartyID,
+          signature: body.signature,
+          signerPEM: body.signerPEM,
+          creditedCashWalletManagerID: body.creditedCashWalletManagerID,
+          creditedCashWalletOwnerID: body.creditedCashWalletOwnerID,
+          debitedCashWalletManagerID: body.debitedCashWalletManagerID || "ECBFDEFFXXX",
+          debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || "ECBFDEFFXXX",
+          // Lifecycle trail (workbench #113), same seed as TransferWorkflow (#109)
+          // — kept on the `Draft` for the richer single-GET view even though the
+          // create response itself still reports `historicStatus: null` (below),
+          // matching the real captured create response.
+          historicStatus: ["INITIALIZED", "PENDING_APPROVAL"],
+          timestamps: {
+            INITIALIZED: { calendarDate: now, businessDate },
+            PENDING_APPROVAL: { calendarDate: now, businessDate },
+          },
         },
         { caller },
       );
@@ -172,7 +246,7 @@ export function createFundingRouter(store: MockStore) {
       const status = (getRouterParam(event, "status") || "").toLowerCase();
       try {
         if (status === "approve" || status === "approved") {
-          funding.approve(id, { approverUserUUID: approverUUID(event) });
+          funding.approve(id, { approverUserUUID: approverUUID(event), approverUserName: actingUsername(event) });
           // Spec response is a plain JSON string, not an object.
           return stringResponse(event, "Funding Request Draft Approved Succesfully");
         }
@@ -200,6 +274,8 @@ export function createFundingRouter(store: MockStore) {
       // Defunding debits the source (debit side) — per issue #23 it is NOT
       // auto-created; the workflow raises a condition error if it doesn't exist.
 
+      const now = new Date().toISOString();
+      const businessDate = store.getBusinessDay().businessDate;
       const draft = defunding.create({
         id,
         amount: body.amount || "0.00",
@@ -208,17 +284,60 @@ export function createFundingRouter(store: MockStore) {
         debitedWalletAlias: body.debitedCashWalletAlias || "",
         // Initiator is the authenticated caller (four-eyes), never the body (#28).
         initiatorUserUUID: approverUUID(event),
+        initiatorUserName: actingUsername(event),
+        techFundRequestID: body.techFundRequestID,
+        instructingPartyID: body.instructingPartyID,
+        signature: body.signature,
+        signerPEM: body.signerPEM,
+        creditedCashWalletManagerID: "ECBFDEFFXXX",
+        creditedCashWalletOwnerID: "ECBFDEFFXXX",
+        debitedCashWalletManagerID: body.debitedCashWalletManagerID,
+        debitedCashWalletOwnerID: body.debitedCashWalletOwnerID,
+        // Lifecycle trail (workbench #113) — see the matching comment on the
+        // FUNDING create handler above; same rationale applies here.
+        historicStatus: ["INITIALIZED", "PENDING_APPROVAL"],
+        timestamps: {
+          INITIALIZED: { calendarDate: now, businessDate },
+          PENDING_APPROVAL: { calendarDate: now, businessDate },
+        },
       });
 
       setResponseStatus(event, 201);
       return {
         id: draft.id,
+        // Mirrors the FUNDING create response shape (workbench #113) — the two
+        // workflows are structural twins, so defunding's create response is
+        // built the same way, with roles reversed.
+        fourEyesType: "DRAFT",
         status: draft.status,
-        type: "DEFUNDING",
+        historicStatus: null,
+        timestamps: {},
+        lastUpdated: typeof body.lastUpdated === "number" ? body.lastUpdated : Date.now(),
+        initiatorUserUUID: draft.initiatorUserUUID,
+        initiatorUserName: "",
+        approverUserUUID: "",
+        approverUserName: "",
+        techFundRequestID: body.techFundRequestID || "",
+        instructingPartyID: body.instructingPartyID || "",
         amount: draft.amount,
         currency: draft.currency,
+        type: "DEFUNDING",
+        creditedCashWalletAlias: draft.creditedWalletAlias,
+        creditedCashWalletManagerID: "ECBFDEFFXXX",
+        creditedCashWalletOwnerID: "ECBFDEFFXXX",
         debitedCashWalletAlias: draft.debitedWalletAlias,
-        createdAt: draft.createdAt,
+        debitedCashWalletManagerID: body.debitedCashWalletManagerID || "",
+        debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || "",
+        creationDate: "",
+        signature: body.signature || "",
+        signerPEM: body.signerPEM || "",
+        // Only meaningful for this defunding-creation flow (the only value
+        // the spec declares for this field).
+        defundingRequestType: "D",
+        settledTime: "",
+        settledDate: "",
+        t2AccountReference: "",
+        rootCause: "",
       };
     }),
   );
@@ -238,6 +357,7 @@ export function createFundingRouter(store: MockStore) {
           defunding.approve(id, {
             caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
             approverUserUUID: auth?.userUUID,
+            approverUserName: auth?.username,
           });
           // Spec response is a plain JSON string, not an object.
           return stringResponse(event, "Defunding Request Draft Approved Successfully");
@@ -257,31 +377,39 @@ export function createFundingRouter(store: MockStore) {
   );
 
   // GET /dlt/:ncb/api/octopus/tms/funding-defunding-requests-drafts/:id — Read a
-  // funding OR defunding draft by id. Also served without the `-drafts` suffix.
-  const readByIdHandler = defineEventHandler((event: H3Event) => {
-    const id = getRouterParam(event, "id")!;
-    const draft = store.getDraft(id, callerOf(event));
-    if (!draft || (draft.type !== "FUNDING" && draft.type !== "DEFUNDING")) {
-      throw createError({
-        statusCode: 404,
-        data: { businessErrors: [{ errorDescription: `Request ${id} not found` }] },
-      });
-    }
-    return {
-      id: draft.id,
-      status: draft.status,
-      type: draft.type,
-      amount: draft.amount,
-      currency: draft.currency,
-      creditedCashWalletAlias: draft.creditedWalletAlias,
-      debitedCashWalletAlias: draft.debitedWalletAlias,
-      initiatorUserUUID: draft.initiatorUserUUID,
-      approverUserUUID: draft.approverUserUUID,
-      createdAt: draft.createdAt,
-    };
-  });
-  router.get("/dlt/:ncb/api/octopus/tms/funding-defunding-requests-drafts/:id", readByIdHandler);
-  router.get("/dlt/:ncb/api/octopus/tms/funding-defunding-requests/:id", readByIdHandler);
+  // funding OR defunding draft by id, thin `*RequestResponse` shape.
+  router.get(
+    "/dlt/:ncb/api/octopus/tms/funding-defunding-requests-drafts/:id",
+    defineEventHandler((event: H3Event) => {
+      const id = getRouterParam(event, "id")!;
+      const draft = store.getDraft(id, callerOf(event));
+      if (!draft || (draft.type !== "FUNDING" && draft.type !== "DEFUNDING")) {
+        throw createError({
+          statusCode: 404,
+          data: { businessErrors: [{ errorDescription: `Request ${id} not found` }] },
+        });
+      }
+      return fundingReadView(store, draft, { rich: false });
+    }),
+  );
+
+  // GET /dlt/:ncb/api/octopus/tms/funding-defunding-requests/:id — Read a
+  // funding OR defunding request by id, richer `FundingRequest` shape
+  // (workbench #113; reused for both types per the official spec).
+  router.get(
+    "/dlt/:ncb/api/octopus/tms/funding-defunding-requests/:id",
+    defineEventHandler((event: H3Event) => {
+      const id = getRouterParam(event, "id")!;
+      const draft = store.getDraft(id, callerOf(event));
+      if (!draft || (draft.type !== "FUNDING" && draft.type !== "DEFUNDING")) {
+        throw createError({
+          statusCode: 404,
+          data: { businessErrors: [{ errorDescription: `Request ${id} not found` }] },
+        });
+      }
+      return fundingReadView(store, draft, { rich: true });
+    }),
+  );
 
   // PUT /dlt/:ncb/api/octopus/tms/funding-requests-drafts/:id/cancel — handled by
   // the generic {status} route above (kept as a comment for endpoint discoverability).
