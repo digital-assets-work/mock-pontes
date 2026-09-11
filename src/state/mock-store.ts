@@ -37,6 +37,13 @@ export interface Transaction {
   settledAt?: string;
   /** Non-standard free-text reason carried from the transfer request (mock only). */
   supplementaryData?: string;
+
+  // --- octopus.Settlement pass-through fields (workbench issue #114) ---
+  // Threaded from the originating Draft (`Workflow.recordTransaction()`);
+  // harmlessly undefined for XvP settlements, which don't carry them.
+  instructingPartyID?: string;
+  fundingRequestID?: string;
+  operationContext?: string;
 }
 
 export interface Draft {

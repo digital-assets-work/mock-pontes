@@ -14,6 +14,7 @@ import { totalOf } from "../state/dcw.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { track } from "../http/route-registry.js";
 import { getGrsEntity } from "../state/grs-entities.js";
+import { networkId } from "./transfers.js";
 
 /** The acting entity, derived from the verified JWT (issue #56 scoping). */
 function callerOf(event: H3Event): DcwCaller {
@@ -59,6 +60,10 @@ function toSettlement(tx: Transaction, walias: string, store: MockStore) {
     type: "CASH",
     requestType: "OPERATION",
     operationType: OPERATION_TYPE_BY_TX_TYPE[tx.type],
+    // `moveType` ("SI"|"LT" per the spec's own example) has no equivalent
+    // concept in this mock — fixed to the spec's example value, mirroring the
+    // `settlementType` convention below (workbench issue #114).
+    moveType: "LT",
     amount: tx.amount,
     currency: tx.currency,
     moveDirection: walias === tx.creditedWalletAlias ? "CDIT" : "DBIT",
@@ -68,6 +73,20 @@ function toSettlement(tx: Transaction, walias: string, store: MockStore) {
     moveDestination: tx.creditedWalletAlias,
     moveDestinationOwner: credited.owner,
     moveDestinationManager: credited.manager,
+    // Single-network mock — same id `transferView()`/`imsTransactionView()`
+    // echo on the RVS/IMS side (workbench issue #114).
+    creditedNetwork: networkId(),
+    debitedNetwork: networkId(),
+    fundingRequestID: tx.fundingRequestID ?? "",
+    instructingID: tx.instructingPartyID ?? "",
+    operationContext: tx.operationContext ?? "",
+    // Not modeled distinctly from the move-destination owner/manager above —
+    // blank until a dedicated "receiving party" concept exists.
+    receivingParty: "",
+    receivingPartyManager: "",
+    // No settlement-type modeling beyond a fixed constant, matching the
+    // `transferView()` precedent in `transfers.ts`.
+    settlementType: "CLRG",
     settlementDate: settledAt.slice(0, 10),
     settlementTime: settledAt,
     supplementaryData: tx.supplementaryData,

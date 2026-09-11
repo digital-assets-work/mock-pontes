@@ -39,8 +39,12 @@ function badRequest(event: H3Event, message: string): { businessErrors: unknown[
   return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: message }] };
 }
 
-/** Network id echoed on every transfer view — single-network mock. */
-function networkId(): string {
+/**
+ * Network id echoed on every transfer/settlement view — single-network mock.
+ * Exported (workbench issue #114) so `wallets.ts`'s Settlement view can reuse
+ * the same id rather than duplicating the env-var lookup.
+ */
+export function networkId(): string {
   return process.env.PONTES_MOCK_NETWORK_ID || "mock-pontes";
 }
 
@@ -110,6 +114,68 @@ const IMS_TYPE_BY_DRAFT_TYPE: Record<Exclude<Draft["type"], "XVP">, string> = {
   DIRECT_RTGS: "PAYMENT",
   PFOD: "PAYMENT",
 };
+
+/**
+ * Build the `requestvalidation.OperationDraftRequestDTO`-shaped list-row view
+ * returned by `GET .../ims/transactions` (workbench issue #114). Distinct
+ * from `transferView()` above: this schema uses a different field vocabulary
+ * for a few overlapping concepts (`instructionLTID` not `instructionID`,
+ * `requestType` not `cbdcRequestType`, `onBehalfOwner` not `onBehalfUser`) and
+ * adds owner/country-code/approver/settlement fields with no equivalent
+ * concept yet modeled in this mock — those are blank/null, matching the
+ * established not-yet-modeled convention used elsewhere (e.g.
+ * `t2AccountReference` in `funding.ts`).
+ */
+function imsTransactionView(store: MockStore, d: Draft & { type: Exclude<Draft["type"], "XVP"> }): Record<string, unknown> {
+  const businessDate = store.getBusinessDay().businessDate;
+  const settled = d.status === "SETTLED";
+  return {
+    instructionLTID: d.id,
+    type: IMS_TYPE_BY_DRAFT_TYPE[d.type],
+    etatsUX: d.status,
+    etatsUXRootCause: null,
+    amountTransferred: d.amount,
+    currency: d.currency,
+    creditedCashWalletAlias: d.creditedWalletAlias,
+    creditedCashWalletManagerID: d.creditedCashWalletManagerID,
+    creditedCashWalletOwnerID: d.creditedCashWalletOwnerID ?? "",
+    creditedCountryCode: "",
+    creditedNetworkID: networkId(),
+    debitedCashWalletAlias: d.debitedWalletAlias,
+    debitedCashWalletManagerID: d.debitedCashWalletManagerID,
+    debitedCountryCode: "",
+    debitedNetworkID: networkId(),
+    debitedT2AccountID: "",
+    creationDate: d.createdAt,
+    fundingRequestID: d.fundingRequestID,
+    historicStatus: d.historicStatus ?? null,
+    initiatorUserName: d.initiatorUserName ?? "",
+    initiatorUserUUID: d.initiatorUserUUID ?? "",
+    instructingPartyID: d.instructingPartyID,
+    onBehalfOwner: d.onBehalfUser,
+    operationContext: d.operationContext,
+    requestType: d.cbdcRequestType,
+    senderID: d.debitedCashWalletManagerID,
+    settlementDate: settled ? businessDate : "",
+    settlementTime: settled ? d.updatedAt ?? "" : "",
+    settlementType: "CLRG",
+    supplementaryData: d.supplementaryData,
+    timestamps: d.timestamps ?? {},
+    approverUserName: d.approverUserName ?? "",
+    approverUserUUID: d.approverUserUUID ?? "",
+    // Mock-only extras, kept for backward compatibility with existing
+    // consumers of this endpoint (harmless superset per #109/#113's precedent).
+    paymentInstructionID: d.paymentInstructionID,
+    techCBDCOperationID: d.techCBDCOperationID,
+    ISD: d.ISD,
+    ISDTimestamp: d.ISDTimestamp,
+    // Non-spec aliases of `onBehalfOwner`/`requestType` above, kept alongside
+    // per #114's "rename or add alongside" guidance — existing consumers of
+    // this endpoint (and this repo's own tests) already read these names.
+    onBehalfUser: d.onBehalfUser,
+    cbdcRequestType: d.cbdcRequestType,
+  };
+}
 
 export function createTransfersRouter(store: MockStore) {
   const router = track(createRouter());
@@ -209,32 +275,7 @@ export function createTransfersRouter(store: MockStore) {
       return store
         .getDrafts(caller)
         .filter((d): d is Draft & { type: Exclude<Draft["type"], "XVP"> } => d.type !== "XVP")
-        .map((d) => ({
-          instructionLTID: d.id,
-          type: IMS_TYPE_BY_DRAFT_TYPE[d.type],
-          etatsUX: d.status,
-          amountTransferred: d.amount,
-          currency: d.currency,
-          creditedCashWalletAlias: d.creditedWalletAlias,
-          debitedCashWalletAlias: d.debitedWalletAlias,
-          creationDate: d.createdAt,
-          supplementaryData: d.supplementaryData,
-          // Enriched OperationRequest fields — only ever
-          // populated on TRANSFER drafts; harmlessly undefined otherwise.
-          creditedCashWalletManagerID: d.creditedCashWalletManagerID,
-          debitedCashWalletManagerID: d.debitedCashWalletManagerID,
-          instructingPartyID: d.instructingPartyID,
-          onBehalfUser: d.onBehalfUser,
-          cbdcRequestType: d.cbdcRequestType,
-          operationContext: d.operationContext,
-          ISD: d.ISD,
-          ISDTimestamp: d.ISDTimestamp,
-          fundingRequestID: d.fundingRequestID,
-          paymentInstructionID: d.paymentInstructionID,
-          techCBDCOperationID: d.techCBDCOperationID,
-          historicStatus: d.historicStatus,
-          timestamps: d.timestamps,
-        }));
+        .map((d) => imsTransactionView(store, d));
     }),
   );
 
