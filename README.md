@@ -54,7 +54,7 @@ verifies normally with no flags):
 curl -sk https://localhost:3001/ca.pem -o mock-ca.pem   # one-time -k just to fetch the public CA
 
 curl -s --cacert mock-ca.pem https://localhost:3001/dlt/bdf/api/octopus/health
-# {"octopus":"UP","server":"UP","mock":true}
+# [{"octopus":"UP","server":"UP","mock":true}]
 
 curl -s --cacert mock-ca.pem https://localhost:3001/check/ip
 # {"status":"OK","check":"ip","ip":"...","mock":true}
