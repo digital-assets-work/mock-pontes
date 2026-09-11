@@ -1,9 +1,11 @@
 /**
- * Tests for profile/client_id enforcement in mock-pontes.
+ * Tests for profile/client_id mapping in mock-pontes.
  *
  * Covers:
- * - Token endpoint rejects wrong client_id for profile
- * - EXTERNAL_USER requires client_secret
+ * - `validateClientIdForProfile()`'s Table U mapping (documents the spec —
+ *   as of issue #118 the token endpoint no longer calls this to reject
+ *   issuance; see tests/jwt-claim-shape.test.ts and
+ *   tests/jwt-audience-allowlist.test.ts for the current behavior)
  * - Route-level authorization rejects wrong profile
  */
 

@@ -13,8 +13,12 @@
  * exposing a stack.
  *
  * The OAuth `{error, error_description}` shape is kept ONLY on the IAM token
- * endpoint (where the real IAM uses it); every other error — including the JWT
- * middleware's `401` on `/dlt` — is normalised.
+ * endpoint (where the real IAM uses it); every other error is normalised,
+ * with one further exception (issue #118): the JWT middleware's audience-
+ * allowlist `401` on `/dlt` keeps the real Pontes `{status, message, code}`
+ * "session is not valid" shape verbatim (see `isSessionErrorShape` below) —
+ * everything else on `/dlt`, including this same middleware's other 401s,
+ * is still normalised as usual.
  */
 
 export interface BusinessError {
@@ -120,6 +124,26 @@ export function isErrorResponseShape(body: unknown): boolean {
   );
 }
 
+/**
+ * The JWT middleware's audience-allowlist rejection (issue #118) deliberately
+ * returns the exact `{status, message, code}` shape captured from the real
+ * Pontes environment's own `401 session is not valid` response — not the
+ * mock's own businessErrors envelope, and not the OAuth `{error,
+ * error_description}` shape either. This is a third, intentional exception
+ * (alongside the token endpoint's OAuth shape below), so it must be
+ * recognised here to avoid being coerced into the mock's own convention.
+ */
+function isSessionErrorShape(body: Record<string, unknown>): boolean {
+  return (
+    typeof body.status === "number" &&
+    typeof body.message === "string" &&
+    typeof body.code === "string" &&
+    !("title" in body) &&
+    !("businessErrors" in body) &&
+    !("error" in body)
+  );
+}
+
 /** The IAM token endpoint keeps the OAuth error shape (the real IAM uses it). */
 const TOKEN_ENDPOINT =
   /\/iam\/realms\/[^/]+\/protocol\/openid-connect\/token/;
@@ -138,6 +162,8 @@ export function normalizeReturnedErrorBody(
   if (isErrorResponseShape(body)) return null;
 
   const b = body as Record<string, unknown>;
+
+  if (isSessionErrorShape(b)) return null; // keep the real-Pontes session-error shape (#118)
 
   if ("error" in b || "error_description" in b) {
     if (TOKEN_ENDPOINT.test(path)) return null; // keep OAuth on the IAM token endpoint

@@ -39,6 +39,7 @@ import { buildServedSpec } from "./openapi.js";
 import { inspectPem } from "./inspect.js";
 import { buildP12 } from "./p12.js";
 import { adminTokenConfigured } from "../auth/admin-token.js";
+import { resolveAudienceAllowlist } from "../auth/jwt-middleware.js";
 import { stringify as stringifyYaml } from "yaml";
 // Official ECB Pontes OpenAPI v1.0 (EII API), vendored as JSON.
 // Source: https://www.ecb.europa.eu/paym/target/target-professional-use-documents-links/pontes/shared/pdf/ecb.pontes26_05_15_OpenAPI_Document_v1.0_Pontes_Pilot.en.zip
@@ -359,6 +360,12 @@ export function createUiRouter(options: UiRouterOptions = {}) {
           redis: Boolean(process.env.REDIS_URL),
           publicHost: isPublicHost(event),
           adminTokenRequired: adminTokenConfigured(),
+        },
+        // Client ids accepted by the JWT audience allow-list (issue #118) —
+        // /ui/docs' "try it out" client_id picker is fed from this instead
+        // of a hardcoded list, so it always reflects PONTES_JWT_AUDIENCE_ALLOWLIST.
+        auth: {
+          audienceAllowlist: resolveAudienceAllowlist(),
         },
       };
     }),

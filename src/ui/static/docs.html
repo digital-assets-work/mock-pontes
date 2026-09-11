@@ -35,10 +35,12 @@
       <div class="row">
         <div><label>NCB / ORG</label><input id="a-ncb" value="bdf"></div>
         <div><label>Client ID</label>
-          <select id="a-client">
-            <option>esydlt-web-app</option>
-            <option>esydlt-backend-service</option>
-          </select>
+          <!-- Populated from /ui/config.json's auth.audienceAllowlist (issue #118) — the
+               mock's token endpoint accepts any client_id, so a "Custom…" option + free-text
+               input lets you test client_ids outside the configured allow-list too, e.g. to
+               reproduce the real utest 401 for esydlt-web-app. -->
+          <select id="a-client"></select>
+          <input id="a-client-custom" type="text" placeholder="custom client_id" style="display:none">
         </div>
       </div>
       <button id="a-btn" type="button">Get token &amp; authorize</button>

@@ -43,6 +43,40 @@
   document.getElementById("tab-mock").addEventListener("click", function () { show(true); });
   document.getElementById("tab-official").addEventListener("click", function () { show(false); });
 
+  // Client ID picker (issue #118): populated from /ui/config.json's
+  // auth.audienceAllowlist rather than a hardcoded list, plus a "Custom…"
+  // option (the mock now accepts any client_id) so real/unlisted values can
+  // be tried too — e.g. esydlt-web-app, which the audience allow-list check
+  // rejects by default.
+  var clientSelect = document.getElementById("a-client");
+  var clientCustom = document.getElementById("a-client-custom");
+  fetch("/ui/config.json")
+    .then(function (r) { return r.json(); })
+    .then(function (cfg) {
+      var ids = (cfg.auth && cfg.auth.audienceAllowlist) || ["esydlt-web-app-u2a", "esydlt-backend-service"];
+      ids.forEach(function (id) {
+        var opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = id;
+        clientSelect.appendChild(opt);
+      });
+      var customOpt = document.createElement("option");
+      customOpt.value = "__custom__";
+      customOpt.textContent = "Custom…";
+      clientSelect.appendChild(customOpt);
+    })
+    .catch(function () {
+      ["esydlt-web-app-u2a", "esydlt-backend-service"].forEach(function (id) {
+        var opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = id;
+        clientSelect.appendChild(opt);
+      });
+    });
+  clientSelect.addEventListener("change", function () {
+    clientCustom.style.display = clientSelect.value === "__custom__" ? "" : "none";
+  });
+
   function b64url(s) {
     s = s.replace(/-/g, "+").replace(/_/g, "/");
     while (s.length % 4) s += "=";
@@ -51,9 +85,11 @@
 
   document.getElementById("a-btn").addEventListener("click", function () {
     var ncb = document.getElementById("a-ncb").value.trim() || "bdf";
-    var client = document.getElementById("a-client").value;
+    var client = clientSelect.value === "__custom__" ? clientCustom.value.trim() : clientSelect.value;
     var body = new URLSearchParams({
       grant_type: "password",
+      // scope is ignored server-side (issue #118) — the mock always issues
+      // its fixed real-environment scope string regardless of this value.
       scope: "openid",
       client_id: client
     });

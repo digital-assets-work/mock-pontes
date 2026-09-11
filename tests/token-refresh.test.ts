@@ -45,6 +45,9 @@ function token(pki: Awaited<ReturnType<typeof getRuntimePkiBundle>>, typ: string
       user_profile: "PILOT_READ_WRITE",
       entity_bic: "BSUIFRPPXXX",
       realm: "bdf",
+      // aud (issue #118): must intersect jwt-middleware's default audience
+      // allow-list or the token is rejected before the refresh-type check.
+      aud: "esydlt-backend-service",
     },
     pki.jwtSigningPrivateKeyPem,
     { algorithm: "ES256", keyid: SIGNING_KEY_ID },

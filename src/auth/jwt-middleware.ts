@@ -13,6 +13,7 @@ import {
   type H3Event,
 } from "h3";
 import jwt from "jsonwebtoken";
+import { CLIENT_ID_BACKEND_SERVICE, CLIENT_ID_WEB_APP_U2A } from "./profile-enforcement.js";
 
 export interface AuthContext {
   userUUID: string;
@@ -20,6 +21,28 @@ export interface AuthContext {
   profile: string;
   entityBIC: string;
   realm: string;
+}
+
+/**
+ * Default JWT audience allow-list (issue #118) — direct reproduction against
+ * the real `utest` pilot showed tokens whose `aud` doesn't contain one of
+ * these two client ids get rejected with `401 session is not valid`
+ * (notably including tokens requested with `client_id=esydlt-web-app`,
+ * which is Table U's documented client for several profiles — see the issue
+ * for the full discrepancy writeup). Configurable via
+ * `PONTES_JWT_AUDIENCE_ALLOWLIST` (comma-separated).
+ */
+const DEFAULT_JWT_AUDIENCE_ALLOWLIST = [CLIENT_ID_WEB_APP_U2A, CLIENT_ID_BACKEND_SERVICE];
+
+/** Parse `PONTES_JWT_AUDIENCE_ALLOWLIST` (comma-separated), falling back to the default list. */
+export function resolveAudienceAllowlist(): string[] {
+  const raw = process.env.PONTES_JWT_AUDIENCE_ALLOWLIST;
+  if (!raw) return DEFAULT_JWT_AUDIENCE_ALLOWLIST;
+  const parsed = raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return parsed.length > 0 ? parsed : DEFAULT_JWT_AUDIENCE_ALLOWLIST;
 }
 
 function shouldApplyAuth(path: string, protectedPrefixes: readonly string[]): boolean {
@@ -65,6 +88,19 @@ export function createJwtMiddleware(
           error: "invalid_token",
           error_description: "Refresh tokens cannot be used as access tokens",
         };
+      }
+
+      // Audience allow-list (issue #118): reproduces the real `utest`
+      // behavior of rejecting tokens whose `aud` isn't one of a small set of
+      // accepted client ids — returned in the exact shape captured from the
+      // real environment, not the mock's own businessErrors envelope (see
+      // error-response.ts's dedicated pass-through for this shape).
+      const aud = decoded.aud;
+      const audList = Array.isArray(aud) ? aud : aud ? [aud] : [];
+      const allowlist = resolveAudienceAllowlist();
+      if (!audList.some((a) => allowlist.includes(a))) {
+        setResponseStatus(event, 401);
+        return { status: 401, message: "session is not valid", code: "unauthorized" };
       }
 
       // Attach auth context for downstream handlers
