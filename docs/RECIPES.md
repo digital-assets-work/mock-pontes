@@ -100,6 +100,11 @@ Gotchas that produce opaque errors:
   *string*** — `"Cash Token Payment Settled Succesfully"` (with quotes), per the
   official spec (`200` = `application/json`, `type: string`). It is **not**
   `text/plain` and **not** a JSON object; read it with `.json()`.
+- **Every 2-step draft-transition PUT (`.../-drafts/{id}/{status}`) also returns
+  a plain JSON string**, not the `{id,status}` object the mock used to return —
+  this applies uniformly to RVS transfers, TMS funding, TMS defunding, TMS
+  direct-RTGS, and the PFoD leg-creation POSTs (`initpfoddeli`/`initpfodrece`).
+  Parse all of them with `.json()`, same as the 1-step bridge payment above.
 - The ECB spelling **"Succesfully"** in confirmation strings is intentional wire
   fidelity — match it, don't "fix" it.
 
