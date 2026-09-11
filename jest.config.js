@@ -19,8 +19,11 @@ export default {
   collectCoverageFrom: ["src/**/*.ts"],
   // "json-summary" feeds scripts/render-coverage-branch.mjs (issue #117),
   // which publishes a per-file breakdown to the `coverage` branch; "lcov"
-  // is needed both for lcov.info and its own lcov-report/ HTML output.
-  coverageReporters: ["text", "lcov", "json-summary"],
+  // is needed both for lcov.info and its own lcov-report/ HTML output;
+  // "json" (coverage-final.json, the raw Istanbul per-statement/branch/
+  // function map) feeds the vendored scripts/coverage-md.mjs, which
+  // renders the per-file annotated-source markdown pages.
+  coverageReporters: ["text", "lcov", "json-summary", "json"],
   // Lock in the HTTP integration coverage (issue #39) so route/auth regressions
   // are caught. Thresholds sit just below the measured values; raise them as
   // more flows are covered. Only enforced under `--coverage` (npm run test:coverage).
