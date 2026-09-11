@@ -1,0 +1,116 @@
+name: Publish coverage report
+
+# Publishes a per-file coverage breakdown to a dedicated, permanently
+# browsable orphan `coverage` branch on every push to `main` (i.e. every
+# PR merge), so results don't only live in an ephemeral job log (issue #117,
+# adapted from saturngroup/framework-monorepo's own
+# publish-coverage.yml/render-coverage-branch.mjs).
+#
+# `ci.yml` only triggers on `pull_request`/`push` to `main` and doesn't
+# expose its coverage output as a reusable artifact, so this workflow
+# duplicates the npm ci/test-with-coverage steps as its own self-contained
+# job rather than depending on `ci.yml` via `needs`/`workflow_run`.
+#
+# Retention model (two-tier): bulk content (README.md, per-file/, raw
+# coverage-summary.json/lcov.info/html/) is fully overwritten each run --
+# `coverage` is reset to a fresh orphan branch and force-pushed as a single
+# parentless commit every time, so the branch's git history/object size
+# stays bounded to roughly one run's worth of content instead of growing
+# unbounded across hundreds of pushes. Only HISTORY.md (a small per-run
+# text row) is read from `origin/coverage`'s current tip before the reset
+# and carried forward, so it alone accumulates.
+#
+# The branch also doubles as a GitHub Pages site (source: branch
+# `coverage`, path `/`) for the interactive HTML report -- Pages has no
+# plan restriction here since this repo is public (unlike the reference
+# repo, which is private and would've needed a paid plan). That's a
+# one-time repository-settings change, not something this workflow itself
+# configures.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Not cancel-in-progress: a cancelled run would skip appending its
+  # HISTORY.md row entirely (see the retention-model comment above), so
+  # runs for the same ref queue up instead of clobbering each other.
+  group: publish-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-coverage:
+    name: Publish coverage report to the coverage branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      - name: Publish coverage summary to the job's step summary
+        # Headline numbers visible on the Actions run's own "Summary" tab
+        # immediately, no need to open the coverage branch/Pages site.
+        run: node ./scripts/coverage-step-summary.mjs
+
+      - name: Fetch the coverage branch's prior HISTORY.md
+        # Reads (not checks out) HISTORY.md's current content straight from
+        # the remote tip via `git show`, before the branch gets reset below
+        # -- if `coverage` doesn't exist yet (first-ever run), this is a
+        # no-op and render-coverage-branch.mjs falls back to a fresh header.
+        run: |
+          git fetch origin coverage 2>/dev/null || true
+          git show origin/coverage:HISTORY.md > /tmp/coverage-prev-history.md 2>/dev/null || true
+
+      - name: Render coverage branch content
+        run: node ./scripts/render-coverage-branch.mjs --prev-history /tmp/coverage-prev-history.md
+
+      - name: Render per-file annotated markdown
+        # coverage-md.mjs is vendored (see the file's own header) and only
+        # writes a per-file page for files below 100% line coverage
+        # (its own --below default) into the same staging dir that
+        # render-coverage-branch.mjs's README.md links into.
+        run: node ./scripts/coverage-md.mjs coverage/coverage-final.json --split coverage-branch-staging/per-file
+
+      - name: Publish to the coverage branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # A fresh orphan branch every run (regardless of whether
+          # `coverage` already exists remotely) is what keeps this
+          # branch's git history bounded -- see the retention-model
+          # comment at the top of this file.
+          #
+          # `git clean` only excludes `coverage-branch-staging` (the
+          # curated content to publish) -- everything else untracked
+          # (node_modules, the raw `coverage/` output, etc.) must
+          # actually be deleted here, not merely excluded from cleaning,
+          # since this orphan branch has no `.gitignore` of its own and
+          # the unconditional `git add -A` below would otherwise sweep it
+          # all in.
+          git checkout --orphan coverage-incoming
+          git rm -rf --quiet . > /dev/null 2>&1 || true
+          git clean -fdx --quiet -e coverage-branch-staging
+
+          cp -r coverage-branch-staging/. .
+          rm -rf coverage-branch-staging
+
+          git add -A
+          git commit --quiet -m "Coverage report for ${GITHUB_SHA:0:7}"
+          git push --force origin coverage-incoming:coverage
