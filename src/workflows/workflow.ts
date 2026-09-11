@@ -78,6 +78,24 @@ export interface WorkflowInit {
   debitedWalletAlias: string;
   initiatorUserUUID?: string;
   supplementaryData?: string;
+
+  // --- requestvalidation.OperationRequest pass-through fields ---
+  // Copied verbatim onto the built `Draft` by `buildRecord()`. Only
+  // `TransferWorkflow` populates these today; every other workflow leaves them
+  // undefined.
+  debitedCashWalletManagerID?: string;
+  creditedCashWalletManagerID?: string;
+  instructingPartyID?: string;
+  onBehalfUser?: string;
+  cbdcRequestType?: string;
+  operationContext?: string;
+  ISD?: string;
+  ISDTimestamp?: number;
+  fundingRequestID?: string;
+  paymentInstructionID?: string;
+  techCBDCOperationID?: string;
+  historicStatus?: string[];
+  timestamps?: Record<string, { calendarDate: string; businessDate: string }>;
 }
 
 /** Per-request context threaded through a transition (identity for checks). */
@@ -180,7 +198,11 @@ export abstract class Workflow {
     this.assertDebitWalletExists(record);
     this.assertCreditWalletExists(record);
     this.apply(record, actor.caller);
-    this.store.updateDraft(id, { status: "SETTLED", approverUserUUID: actor.approverUserUUID });
+    this.store.updateDraft(id, {
+      status: "SETTLED",
+      approverUserUUID: actor.approverUserUUID,
+      ...this.lifecycleAppend(record, "SETTLED"),
+    });
     this.recordTransaction(record);
     return this.store.getDraft(id)!;
   }
@@ -189,7 +211,7 @@ export abstract class Workflow {
   cancel(id: string): Draft {
     const record = this.loadPending(id, "cancel");
     this.conditions("cancel", record);
-    this.store.updateDraft(id, { status: "CANCELED" });
+    this.store.updateDraft(id, { status: "CANCELED", ...this.lifecycleAppend(record, "CANCELED") });
     return this.store.getDraft(id)!;
   }
 
@@ -220,6 +242,34 @@ export abstract class Workflow {
       updatedAt: now,
       initiatorUserUUID: init.initiatorUserUUID,
       supplementaryData: init.supplementaryData,
+      debitedCashWalletManagerID: init.debitedCashWalletManagerID,
+      creditedCashWalletManagerID: init.creditedCashWalletManagerID,
+      instructingPartyID: init.instructingPartyID,
+      onBehalfUser: init.onBehalfUser,
+      cbdcRequestType: init.cbdcRequestType,
+      operationContext: init.operationContext,
+      ISD: init.ISD,
+      ISDTimestamp: init.ISDTimestamp,
+      fundingRequestID: init.fundingRequestID,
+      paymentInstructionID: init.paymentInstructionID,
+      techCBDCOperationID: init.techCBDCOperationID,
+      historicStatus: init.historicStatus,
+      timestamps: init.timestamps,
+    };
+  }
+
+  /**
+   * Append `newStatus` to a draft's `historicStatus`/`timestamps` lifecycle
+   * trail — a no-op for draft types that don't carry these optional fields
+   * (only `TransferWorkflow` populates them today).
+   */
+  private lifecycleAppend(record: Draft, newStatus: string): Partial<Draft> {
+    if (!record.historicStatus) return {};
+    const businessDate = this.store.getBusinessDay().businessDate;
+    const calendarDate = new Date().toISOString();
+    return {
+      historicStatus: [...record.historicStatus, newStatus],
+      timestamps: { ...record.timestamps, [newStatus]: { calendarDate, businessDate } },
     };
   }
 

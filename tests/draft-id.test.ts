@@ -1,9 +1,10 @@
 /**
- * Draft id resolution tests (issue #32).
+ * Draft id resolution tests (issue #32, revised for a HAR-capture delta against the official spec).
  *
  * Covers:
  *  - deterministic daily-sequence minting (monotonic within a day, per prefix),
- *  - honouring a client-supplied instruction id (round-trips unchanged), and
+ *  - ignoring a non-duplicate client-supplied instruction id (a fresh
+ *    sequence id is always minted server-side), and
  *  - duplicate client id → 409 HL-GER-004.
  */
 
@@ -54,12 +55,11 @@ describe("MemoryStore.nextId — daily sequence (issue #32)", () => {
   });
 });
 
-describe("resolveDraftId — honour client id (issue #32)", () => {
-  it("returns the client-supplied id unchanged when provided", () => {
+describe("resolveDraftId — client id is duplicate-check only", () => {
+  it("ignores a non-duplicate client-supplied id and mints a fresh sequence id", () => {
     const store = new MemoryStore();
-    expect(resolveDraftId(store, "TR", "TR260101000009-BDF")).toBe(
-      "TR260101000009-BDF",
-    );
+    const day = new Date().toISOString().slice(2, 10).replace(/-/g, "");
+    expect(resolveDraftId(store, "TR", "TR260101000009-BDF")).toBe(`TR${day}000001`);
   });
 
   it("mints a sequence id when the client id is absent/blank", () => {

@@ -5,6 +5,7 @@ import {
   readBody,
   setResponseStatus,
 } from "h3";
+import { randomUUID } from "node:crypto";
 import type { H3Event } from "h3";
 import type { MockStore, Draft } from "../state/mock-store.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
@@ -32,16 +33,68 @@ function sendRejection(event: H3Event, e: unknown): { businessErrors: unknown } 
   throw e;
 }
 
-function transferView(d: Draft, extra: Record<string, unknown> = {}): Record<string, unknown> {
+function badRequest(event: H3Event, message: string): { businessErrors: unknown[] } {
+  setResponseStatus(event, 400);
+  return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: message }] };
+}
+
+/** Network id echoed on every transfer view — single-network mock. */
+function networkId(): string {
+  return process.env.PONTES_MOCK_NETWORK_ID || "mock-pontes";
+}
+
+/**
+ * Build the `requestvalidation.OperationRequest`-shaped response (a HAR-capture
+ * delta against the official spec). Fields sourced from the persisted
+ * `Draft` are echoed as stored; a handful are always computed at view time
+ * rather than persisted (`creationDate`, `senderID`, network ids, and the
+ * fixed constants the real backend always returns for this mock's scope).
+ *
+ * `etatsUXOverride` lets the create handler present the transient
+ * "INITIALIZED" state for the very first response while the persisted
+ * `draft.status` is already "PENDING_APPROVAL" — confirmed by the real HAR
+ * capture, which shows both states sharing the same initial timestamp.
+ */
+function transferView(
+  store: MockStore,
+  d: Draft,
+  opts: { etatsUXOverride?: string } = {},
+): Record<string, unknown> {
   return {
-    id: d.id,
-    status: d.status,
+    instructionID: d.id,
     type: "TRANSFER",
+    etatsUX: opts.etatsUXOverride ?? d.status,
     amountTransferred: d.amount,
     currency: d.currency,
     creditedCashWalletAlias: d.creditedWalletAlias,
     debitedCashWalletAlias: d.debitedWalletAlias,
-    ...extra,
+    creditedCashWalletManagerID: d.creditedCashWalletManagerID,
+    debitedCashWalletManagerID: d.debitedCashWalletManagerID,
+    creditedNetworkID: networkId(),
+    debitedNetworkID: networkId(),
+    senderID: d.debitedCashWalletManagerID,
+    instructingPartyID: d.instructingPartyID,
+    onBehalfUser: d.onBehalfUser,
+    cbdcRequestType: d.cbdcRequestType,
+    operationContext: d.operationContext,
+    ISD: d.ISD,
+    ISDTimestamp: d.ISDTimestamp,
+    fundingRequestID: d.fundingRequestID,
+    paymentInstructionID: d.paymentInstructionID,
+    techCBDCOperationID: d.techCBDCOperationID,
+    historicStatus: d.historicStatus,
+    timestamps: d.timestamps,
+    creationDate: store.getBusinessDay().businessDate,
+    initiatorUserUUID: d.initiatorUserUUID,
+    approverUserUUID: d.approverUserUUID,
+    isValidated: true,
+    validationErrorsReport: "",
+    cbdcTipsiTxID: "",
+    toBeRouted: false,
+    settlementType: "CLRG",
+    poaID: "",
+    bizMsgID: "",
+    supplementaryData: d.supplementaryData,
   };
 }
 
@@ -66,9 +119,28 @@ export function createTransfersRouter(store: MockStore) {
     "/dlt/:ncb/api/octopus/rvs/transactions-requests",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
+      const { caller } = authCaller(event);
 
-      // Honour a client-supplied instruction id (official OperationRequest
-      // `instructionID`); mint a daily-sequence id when absent. Duplicate → 409.
+      // Field validation ahead of the workflow (a HAR-capture delta against the official spec): these
+      // are request-shape checks, distinct from the wallet-manager business
+      // rules enforced by TransferWorkflow.conditions().
+      if (!body.currency || body.currency !== "EUR") {
+        return badRequest(event, "currency is required and must be 'EUR'");
+      }
+      if (!caller?.entityBIC || body.instructingPartyID !== caller.entityBIC) {
+        return badRequest(event, "instructingPartyID must match the authenticated caller");
+      }
+      if (body.cbdcRequestType !== "PAYMENT" && body.cbdcRequestType !== "OPERATION") {
+        return badRequest(event, "cbdcRequestType must be 'PAYMENT' or 'OPERATION'");
+      }
+      const businessDate = store.getBusinessDay().businessDate;
+      if (body.ISD && body.ISD !== businessDate) {
+        return badRequest(event, `ISD must be the current business date (${businessDate})`);
+      }
+
+      // Honour a client-supplied instruction id only to detect a duplicate
+      //: a non-duplicate value is ignored and a fresh
+      // daily-sequence id is minted instead. Duplicate → 409.
       let id: string;
       try {
         id = resolveDraftId(store, "TR", body.instructionID);
@@ -76,25 +148,48 @@ export function createTransfersRouter(store: MockStore) {
         return sendRejection(event, e);
       }
 
+      const now = new Date().toISOString();
       // Both wallets must already exist (issue #93): the workflow rejects an
       // unknown credit/debit wallet (422 HL-WAL-002/003) rather than
       // auto-creating it — the error points at POST .../ams/wallets/one-step.
-      const draft = workflow.create({
-        id,
-        amount: body.amountTransferred || "0.00",
-        currency: "EUR",
-        creditedWalletAlias: body.creditedCashWalletAlias || "",
-        debitedWalletAlias: body.debitedCashWalletAlias || "",
-        // Initiator is the authenticated caller (four-eyes), never the body (#28).
-        initiatorUserUUID: (event.context.auth as AuthContext | undefined)?.userUUID,
-        supplementaryData: body.supplementaryData,
-      });
+      // Manager-mismatch/cbdcRequestType-consistency checks run inside
+      // TransferWorkflow.conditions() (HL-WAL-004/005/006).
+      let draft: Draft;
+      try {
+        draft = workflow.create({
+          id,
+          amount: body.amountTransferred || "0.00",
+          currency: "EUR",
+          creditedWalletAlias: body.creditedCashWalletAlias || "",
+          debitedWalletAlias: body.debitedCashWalletAlias || "",
+          // Initiator is the authenticated caller (four-eyes), never the body (#28).
+          initiatorUserUUID: (event.context.auth as AuthContext | undefined)?.userUUID,
+          supplementaryData: body.supplementaryData,
+          debitedCashWalletManagerID: body.debitedCashWalletManagerID,
+          creditedCashWalletManagerID: body.creditedCashWalletManagerID,
+          instructingPartyID: body.instructingPartyID,
+          onBehalfUser: body.onBehalfUser,
+          cbdcRequestType: body.cbdcRequestType,
+          operationContext: body.operationContext,
+          ISD: body.ISD || undefined,
+          fundingRequestID: body.fundingRequestID,
+          paymentInstructionID: body.paymentInstructionID,
+          techCBDCOperationID: randomUUID(),
+          historicStatus: ["INITIALIZED", "PENDING_APPROVAL"],
+          timestamps: {
+            INITIALIZED: { calendarDate: now, businessDate },
+            PENDING_APPROVAL: { calendarDate: now, businessDate },
+          },
+        });
+      } catch (e) {
+        return sendRejection(event, e);
+      }
 
       setResponseStatus(event, 201);
-      return transferView(draft, {
-        createdAt: draft.createdAt,
-        supplementaryData: draft.supplementaryData,
-      });
+      // The persisted status is already PENDING_APPROVAL, but the very first
+      // response presents the transient INITIALIZED state (confirmed by the
+      // real HAR capture).
+      return transferView(store, draft, { etatsUXOverride: "INITIALIZED" });
     }),
   );
 
@@ -123,6 +218,21 @@ export function createTransfersRouter(store: MockStore) {
           debitedCashWalletAlias: d.debitedWalletAlias,
           creationDate: d.createdAt,
           supplementaryData: d.supplementaryData,
+          // Enriched OperationRequest fields — only ever
+          // populated on TRANSFER drafts; harmlessly undefined otherwise.
+          creditedCashWalletManagerID: d.creditedCashWalletManagerID,
+          debitedCashWalletManagerID: d.debitedCashWalletManagerID,
+          instructingPartyID: d.instructingPartyID,
+          onBehalfUser: d.onBehalfUser,
+          cbdcRequestType: d.cbdcRequestType,
+          operationContext: d.operationContext,
+          ISD: d.ISD,
+          ISDTimestamp: d.ISDTimestamp,
+          fundingRequestID: d.fundingRequestID,
+          paymentInstructionID: d.paymentInstructionID,
+          techCBDCOperationID: d.techCBDCOperationID,
+          historicStatus: d.historicStatus,
+          timestamps: d.timestamps,
         }));
     }),
   );
@@ -138,12 +248,7 @@ export function createTransfersRouter(store: MockStore) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-GER-001", errorDescription: `Draft ${id} not found` }] };
       }
-      return transferView(draft, {
-        createdAt: draft.createdAt,
-        initiatorUserUUID: draft.initiatorUserUUID,
-        approverUserUUID: draft.approverUserUUID,
-        supplementaryData: draft.supplementaryData,
-      });
+      return transferView(store, draft);
     }),
   );
 
@@ -159,10 +264,10 @@ export function createTransfersRouter(store: MockStore) {
         if (status === "approve" || status === "approved") {
           const { caller, approverUserUUID } = authCaller(event);
           const settled = workflow.approve(id, { caller, approverUserUUID });
-          return transferView(settled, { settledAt: new Date().toISOString() });
+          return transferView(store, settled);
         }
         if (status === "cancel" || status === "canceled" || status === "cancelled") {
-          return transferView(workflow.cancel(id));
+          return transferView(store, workflow.cancel(id));
         }
         setResponseStatus(event, 400);
         return {
@@ -178,3 +283,4 @@ export function createTransfersRouter(store: MockStore) {
 
   return router;
 }
+

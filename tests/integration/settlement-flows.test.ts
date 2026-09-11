@@ -96,8 +96,10 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     u2 = await mintJwt("user-2");
     ext = await mintJwt("user-ext", "EXTERNAL_USER");
     // Seed a funded source and an existing target, both owned by the caller's entity.
-    store.ensureWallet("S-SRC", { ownerEntityID: ENTITY, managerNCB: "BDF", availableBalance: "1000.00" });
-    store.ensureWallet("S-DST", { ownerEntityID: ENTITY, managerNCB: "BDF", availableBalance: "0.00" });
+    // managerNCB matches the transfer bodies' *CashWalletManagerID (BDFEFRPPXXX) so the
+    // new manager-consistency checks (HL-WAL-004/005/006) pass.
+    store.ensureWallet("S-SRC", { ownerEntityID: ENTITY, managerNCB: "BDFEFRPPXXX", availableBalance: "1000.00" });
+    store.ensureWallet("S-DST", { ownerEntityID: ENTITY, managerNCB: "BDFEFRPPXXX", availableBalance: "0.00" });
   }, 30_000);
 
   afterAll(async () => { await server.close(); });
@@ -117,13 +119,13 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
         creditedCashWalletOwnerID: ENTITY,
         debitedCashWalletAlias: "S-SRC",
         debitedCashWalletManagerID: "BDFEFRPPXXX",
-        instructingPartyID: "BDFEFRPPXXX",
+        instructingPartyID: ENTITY,
       },
     });
     expect(create.status).toBe(201);
     // Nothing moves until approval (2-step).
     expect(avail("S-SRC")).toBe(1000);
-    const approve = await request(server.port, "PUT", `/dlt/${NCB}/api/octopus/rvs/transactions-drafts/${create.json.id}/approve`, {
+    const approve = await request(server.port, "PUT", `/dlt/${NCB}/api/octopus/rvs/transactions-drafts/${create.json.instructionID}/approve`, {
       headers: { authorization: `Bearer ${u2}` },
     });
     expect(approve.status).toBe(200);
@@ -140,11 +142,11 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
         instructionID: "TR-83-2", type: "TRANSFER", cbdcRequestType: "OPERATION",
         amountTransferred: "100.00", currency: "EUR",
         creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX", creditedCashWalletOwnerID: ENTITY,
-        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "BDFEFRPPXXX", instructingPartyID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "BDFEFRPPXXX", instructingPartyID: ENTITY,
       },
     });
     expect(create.status).toBe(201);
-    const self = await request(server.port, "PUT", `/dlt/${NCB}/api/octopus/rvs/transactions-drafts/${create.json.id}/approve`, {
+    const self = await request(server.port, "PUT", `/dlt/${NCB}/api/octopus/rvs/transactions-drafts/${create.json.instructionID}/approve`, {
       headers: { authorization: `Bearer ${u1}` },
     });
     expect(self.status).toBe(403);
@@ -216,11 +218,11 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
         instructionID: "TR-83-3", type: "TRANSFER", cbdcRequestType: "OPERATION",
         amountTransferred: "9999999.00", currency: "EUR",
         creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX", creditedCashWalletOwnerID: ENTITY,
-        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "BDFEFRPPXXX", instructingPartyID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "BDFEFRPPXXX", instructingPartyID: ENTITY,
       },
     });
     expect(create.status).toBe(201);
-    const approve = await request(server.port, "PUT", `/dlt/${NCB}/api/octopus/rvs/transactions-drafts/${create.json.id}/approve`, {
+    const approve = await request(server.port, "PUT", `/dlt/${NCB}/api/octopus/rvs/transactions-drafts/${create.json.instructionID}/approve`, {
       headers: { authorization: `Bearer ${u2}` },
     });
     expect(approve.status).toBe(422);
