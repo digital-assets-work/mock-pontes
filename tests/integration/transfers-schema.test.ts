@@ -242,6 +242,22 @@ describe("Transfers — requestvalidation.OperationRequest alignment", () => {
     expect(row).toBeTruthy();
     expect(row.creditedCashWalletManagerID).toBe("BDFEFRPPXXX");
     expect(row.cbdcRequestType).toBe("OPERATION");
+    // workbench issue #114 — spec-declared aliases of the two mock-only
+    // fields above, plus the other previously-missing OperationDraftRequestDTO
+    // fields, must now be present with the expected values.
+    expect(row.requestType).toBe("OPERATION");
+    expect(row.onBehalfOwner).toBe(view.onBehalfUser);
+    expect(row.senderID).toBe("BDFEFRPPXXX");
+    expect(row.debitedNetworkID).toBe("mock-pontes");
+    expect(row.creditedNetworkID).toBe("mock-pontes");
+    expect(row.settlementType).toBe("CLRG");
+    expect(row.instructingPartyID).toBe(ENTITY);
+    assertConforms(row, "requestvalidation.OperationDraftRequestDTO", [
+      "onBehalfUser",
+      "cbdcRequestType",
+      "paymentInstructionID",
+      "techCBDCOperationID",
+    ]);
 
     const approve = await request(server.port, "PUT", `${BASE}/rvs/transactions-drafts/${view.instructionID}/approve`, {
       headers: { authorization: `Bearer ${approverAuth}` },
@@ -257,6 +273,28 @@ describe("Transfers — requestvalidation.OperationRequest alignment", () => {
     expect(settled.json.etatsUX).toBe("SETTLED");
     expect(settled.json.historicStatus).toEqual(["INITIALIZED", "PENDING_APPROVAL", "SETTLED"]);
     expect(settled.json.timestamps.SETTLED).toBeTruthy();
+
+    // workbench issue #114 — the settlement recorded on the credited wallet's
+    // transaction list must also conform to octopus.Settlement (previously
+    // thin), and carry the instructingPartyID/operationContext pass-through
+    // fields from the settling Draft.
+    const walletTx = await request(server.port, "GET", `${BASE}/ams/wallets/T-DST-SAME/transactions`, {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    expect(walletTx.status).toBe(200);
+    // The recorded Transaction id is server-minted independently of the
+    // draft's instructionID (see `TransferWorkflow.transactionId()`) — this
+    // is the only settlement into T-DST-SAME in this suite, so a single-item
+    // find is unambiguous.
+    const settlement = walletTx.json.find((t: any) => t.moveDestination === "T-DST-SAME");
+    expect(settlement).toBeTruthy();
+    expect(settlement.operationType).toBe("Transfer");
+    expect(settlement.moveType).toBe("LT");
+    expect(settlement.instructingID).toBe(ENTITY);
+    expect(settlement.creditedNetwork).toBe("mock-pontes");
+    expect(settlement.debitedNetwork).toBe("mock-pontes");
+    expect(settlement.settlementType).toBe("CLRG");
+    assertConforms(settlement, "octopus.Settlement", []);
   });
 
   it("rejects a duplicate client-supplied instructionID (409 HL-GER-004)", async () => {

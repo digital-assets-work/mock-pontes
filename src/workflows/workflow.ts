@@ -355,6 +355,10 @@ export abstract class Workflow {
       createdAt: record.createdAt,
       settledAt: new Date().toISOString(),
       supplementaryData: record.supplementaryData,
+      // octopus.Settlement pass-through fields (workbench issue #114).
+      instructingPartyID: record.instructingPartyID,
+      fundingRequestID: record.fundingRequestID,
+      operationContext: record.operationContext,
     });
   }
 
