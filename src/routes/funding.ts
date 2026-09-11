@@ -4,6 +4,7 @@ import {
   getRouterParam,
   readBody,
   setResponseStatus,
+  setResponseHeader,
   createError,
 } from "h3";
 import type { H3Event } from "h3";
@@ -24,6 +25,16 @@ function rejectAsError(e: unknown): never {
     });
   }
   throw e;
+}
+
+/**
+ * Send a spec-shaped plain JSON string confirmation (application/json,
+ * type: string) rather than an object, per the official spec for the
+ * draft-transition endpoints below.
+ */
+function stringResponse(event: H3Event, message: string): string {
+  setResponseHeader(event, "content-type", "application/json");
+  return JSON.stringify(message);
 }
 
 /** UUID of the approving user (for the four-eyes check). */
@@ -162,11 +173,12 @@ export function createFundingRouter(store: MockStore) {
       try {
         if (status === "approve" || status === "approved") {
           funding.approve(id, { approverUserUUID: approverUUID(event) });
-          return { id, status: "SETTLED" };
+          // Spec response is a plain JSON string, not an object.
+          return stringResponse(event, "Funding Request Draft Approved Succesfully");
         }
         if (status === "cancel" || status === "canceled" || status === "cancelled") {
           funding.cancel(id);
-          return { id, status: "CANCELED" };
+          return stringResponse(event, "Funding Request Draft Cancelled Succesfully");
         }
         throw createError({
           statusCode: 400,
@@ -227,11 +239,12 @@ export function createFundingRouter(store: MockStore) {
             caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
             approverUserUUID: auth?.userUUID,
           });
-          return { id, status: "SETTLED" };
+          // Spec response is a plain JSON string, not an object.
+          return stringResponse(event, "Defunding Request Draft Approved Successfully");
         }
         if (status === "cancel" || status === "canceled" || status === "cancelled") {
           defunding.cancel(id);
-          return { id, status: "CANCELED" };
+          return stringResponse(event, "Defunding Request Draft Cancelled Successfully");
         }
         throw createError({
           statusCode: 400,

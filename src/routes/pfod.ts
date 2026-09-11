@@ -3,6 +3,7 @@ import {
   defineEventHandler,
   readBody,
   setResponseStatus,
+  setResponseHeader,
 } from "h3";
 import type { H3Event } from "h3";
 import type { MockStore, Draft } from "../state/mock-store.js";
@@ -34,12 +35,21 @@ export function createPfodRouter(store: MockStore) {
   const router = track(createRouter());
   const workflow = new PfodWorkflow(store);
 
+  /**
+   * Send a spec-shaped plain JSON string confirmation (application/json,
+   * type: string) rather than an object, per the official spec for the
+   * documented leg-creation success cases below.
+   */
+  function stringResponse(event: H3Event, message: string): string {
+    setResponseHeader(event, "content-type", "application/json");
+    return JSON.stringify(message);
+  }
+
   function reject(event: H3Event, e: unknown): { businessErrors: unknown } {
     if (isWorkflowRejection(e)) {
       setResponseStatus(event, e.statusCode);
       return { businessErrors: e.businessErrors };
-    }
-    throw e;
+    }    throw e;
   }
 
   /** Persist a leg as a PENDING_MATCH draft. */
@@ -126,7 +136,17 @@ export function createPfodRouter(store: MockStore) {
       }
       storeLeg(deliverId(tradeID), tradeID, amount, currency, sellerCashTokenWalletRef, "", (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);
-      return tryMatch(event, tradeID);
+      const result = tryMatch(event, tradeID);
+      // Spec's only documented success case for this endpoint is the leg
+      // being accepted while awaiting its counterpart (201, plain JSON
+      // string). Other outcomes (immediate match/settle if the RECE leg
+      // already arrived, expiry, amount/currency mismatch) are mock-only
+      // extensions beyond the documented flow — preserve their existing
+      // object shape for testability.
+      if (result.status === "PENDING_MATCH" && !("businessErrors" in result)) {
+        return stringResponse(event, "PFoD DELI leg created successfully and awaiting corresponding RECE leg");
+      }
+      return result;
     }),
   );
 
@@ -148,7 +168,18 @@ export function createPfodRouter(store: MockStore) {
       }
       storeLeg(receiveId(tradeID), tradeID, amount, currency, "", buyerCashTokenWalletRef, (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);
-      return tryMatch(event, tradeID);
+      const result = tryMatch(event, tradeID);
+      // Spec's only documented success case for this endpoint is the match
+      // completing once the DELI leg is already present (200, plain JSON
+      // string) — the audit found this path always sent 201 instead. Other
+      // outcomes (still awaiting the DELI leg, expiry, mismatch) are
+      // mock-only extensions beyond the documented flow — preserve their
+      // existing object shape (and 201) for testability.
+      if (result.status === "SETTLED") {
+        setResponseStatus(event, 200);
+        return stringResponse(event, "PFoD RECE leg created an settled successfully");
+      }
+      return result;
     }),
   );
 
