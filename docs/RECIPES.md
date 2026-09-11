@@ -31,11 +31,19 @@ Acquire a JWT (mTLS only — identity comes from the enrolled client certificate
 no password is involved; confirmed against the real `utest` environment):
 
 ```bash
-# PILOT_READ_WRITE (funding / defunding / transfer): client_id=esydlt-web-app, no secret
+# PILOT_READ_WRITE (funding / defunding / transfer): client_id=esydlt-web-app-u2a, no secret
 TOKEN=$(curl -s $CACERT --cert user.crt --key user.key \
   -X POST "$BASE/iam/realms/$NCB/protocol/openid-connect/token" \
-  -d grant_type=password -d client_id=esydlt-web-app -d scope=openid | jq -r .access_token)
+  -d grant_type=password -d client_id=esydlt-web-app-u2a -d scope=openid | jq -r .access_token)
 ```
+
+> **Use `esydlt-web-app-u2a`, not `esydlt-web-app`, to get a working token**
+> (issue #118). The token endpoint accepts any `client_id`, but `/dlt` routes
+> only accept tokens whose `aud` is in `PONTES_JWT_AUDIENCE_ALLOWLIST`
+> (default `esydlt-web-app-u2a,esydlt-backend-service`) — a token requested
+> with `client_id=esydlt-web-app` is issued fine but then rejected `401` on
+> every `/dlt` call, exactly reproducing what the real `utest` pilot does.
+> See §1 below for the full explanation.
 
 For an **EXTERNAL_USER** (1-step bridge) use the backend-service client **and its
 matching secret** (see the table below):
@@ -56,9 +64,24 @@ EXT_TOKEN=$(curl -s $CACERT --cert ext.crt --key ext.key \
 
 ## 1. Profile → client_id → client_secret → permitted operations
 
-Mirrors real Pontes (SDD §6.3.3, Table U). Enforcement is strict — the wrong
-`client_id`/secret for a profile is rejected `401 invalid_client`, and using a
-profile on an operation it isn't allowed for is `403 HL-AUTH-001`.
+Mirrors real Pontes (SDD §6.3.3, Table U) for **route-level** authorization —
+using a profile on an operation it isn't allowed for is still `403
+HL-AUTH-001`. The profile itself comes from the enrolled user record
+(declared at `/ui/enroll` time), not from the token request's `client_id`.
+
+> **Known deviation from the spec (issue #118, not spec-mandated):** token
+> **issuance** no longer rejects a mismatched `client_id`/`client_secret` for
+> a profile — real `utest` captures show the live IAM accepts any
+> `client_id` at this step too. The mock mints `aud=[client_id, "account"]`
+> and `azp=client_id` from whatever was requested, and instead gates access
+> to `/dlt` routes via a separate audience allow-list
+> (`PONTES_JWT_AUDIENCE_ALLOWLIST`, default
+> `esydlt-web-app-u2a,esydlt-backend-service`) — a token requested with
+> `client_id=esydlt-web-app` is issued fine but then rejected `401 {"status":
+> 401,"message":"session is not valid","code":"unauthorized"}` on those
+> routes, reproducing real `utest`'s behavior despite Table U listing
+> `esydlt-web-app` for several profiles below. See the `PONTES_JWT_AUDIENCE_ALLOWLIST`
+> entry in the README's configuration table for details.
 
 | Profile | `client_id` | `client_secret` | Permitted write operations |
 |---------|-------------|-----------------|-----------------------------|
@@ -70,7 +93,8 @@ profile on an operation it isn't allowed for is `403 HL-AUTH-001`.
 
 The `client_secret` for `EXTERNAL_USER` really does equal the client id
 (`esydlt-backend-service`) — that is the documented Table U value, not a
-placeholder.
+placeholder. It also remains accepted (though, per the deviation above, no
+longer required) at issuance time.
 
 ---
 
@@ -159,7 +183,7 @@ JSON
 # Four-eyes: a SECOND enrolled user approves (self-approval → 403 HL-GER-003).
 APPROVER_TOKEN=$(curl -s $CACERT --cert approver.crt --key approver.key \
   -X POST "$BASE/iam/realms/$NCB/protocol/openid-connect/token" \
-  -d grant_type=password -d client_id=esydlt-web-app -d scope=openid | jq -r .access_token)
+  -d grant_type=password -d client_id=esydlt-web-app-u2a -d scope=openid | jq -r .access_token)
 
 curl -s $CACERT --cert approver.crt --key approver.key \
   -H "authorization: Bearer $APPROVER_TOKEN" \

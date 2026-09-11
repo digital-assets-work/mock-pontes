@@ -111,7 +111,9 @@ async function mintJwt(userUUID: string, profile = "PILOT_READ_WRITE"): Promise<
   const pki = await getRuntimePkiBundle();
   // No preferred_username → the mTLS-consistency middleware is a no-op.
   return jwt.sign(
-    { user_uuid: userUUID, user_profile: profile, entity_bic: "BSUIFRPPXXX", realm: "bdf" },
+    // aud (issue #118): must intersect jwt-middleware's default audience
+    // allow-list or the token is now rejected before reaching the handler.
+    { user_uuid: userUUID, user_profile: profile, entity_bic: "BSUIFRPPXXX", realm: "bdf", aud: "esydlt-backend-service" },
     pki.jwtSigningPrivateKeyPem,
     { algorithm: "ES256", expiresIn: "5m" },
   );

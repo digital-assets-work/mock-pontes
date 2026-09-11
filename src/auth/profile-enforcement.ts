@@ -1,18 +1,35 @@
 /**
- * Centralized profile ↔ client_id enforcement for mock-pontes.
+ * Centralized profile ↔ client_id mapping for mock-pontes.
  *
- * Mirrors real Pontes (SDD §6.3.3, Table U):
+ * Documents Table U (SDD §6.3.3), the *specified* mapping:
  *   EXTERNAL_USER        → client_id=esydlt-backend-service, client_secret=esydlt-backend-service
  *   PILOT_READ_WRITE     → client_id=esydlt-web-app (no secret)
  *   PILOT_READ_ONLY      → client_id=esydlt-web-app (no secret)
  *   REFERENTIAL_READ_ONLY  → client_id=esydlt-web-app (no secret)
  *   REFERENTIAL_READ_WRITE → client_id=esydlt-web-app (no secret)
  *
- * Enforcement is always strict (no lenient toggle).
+ * `validateClientIdForProfile()` below still implements this strict mapping
+ * and stays directly unit-tested, but as of issue #118 it is no longer
+ * called from the token endpoint's issuance path: direct reproduction
+ * against the real `utest` pilot showed the real IAM does not reject/require
+ * a specific client_id at token issuance (any client_id — and no
+ * client_secret — is accepted there), it only affects which claims end up in
+ * the returned JWT (see `signTokens()` in enrollment-routes.ts) and, in
+ * turn, whether downstream endpoints accept the token's `aud` (see the
+ * audience allow-list in jwt-middleware.ts). This function remains available
+ * for anyone who wants to assert the documented Table U mapping directly.
  */
 
 export const CLIENT_ID_BACKEND_SERVICE = "esydlt-backend-service";
 export const CLIENT_ID_WEB_APP = "esydlt-web-app";
+/**
+ * The browser/U2A PKCE client id (issue #118) — distinct from
+ * `esydlt-web-app` (used for A2A password-grant requests). Not part of
+ * Table U's A2A client_id validation this module performs, but part of the
+ * default JWT audience allow-list in jwt-middleware.ts, since real-world
+ * captures show it as an accepted `aud` value.
+ */
+export const CLIENT_ID_WEB_APP_U2A = "esydlt-web-app-u2a";
 
 /** Profiles that require the backend-service client_id + secret */
 const BACKEND_SERVICE_PROFILES = new Set(["EXTERNAL_USER"]);

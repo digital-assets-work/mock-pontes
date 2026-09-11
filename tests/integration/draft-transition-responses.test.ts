@@ -67,7 +67,9 @@ function request(port: number, method: string, path: string, opts: { headers?: R
 async function mintJwt(userUUID: string, profile = "PILOT_READ_WRITE"): Promise<string> {
   const pki = await getRuntimePkiBundle();
   return jwt.sign(
-    { user_uuid: userUUID, user_profile: profile, entity_bic: ENTITY, realm: NCB },
+    // aud (issue #118): must intersect jwt-middleware's default audience
+    // allow-list or the token is now rejected before reaching the handler.
+    { user_uuid: userUUID, user_profile: profile, entity_bic: ENTITY, realm: NCB, aud: "esydlt-backend-service" },
     pki.jwtSigningPrivateKeyPem,
     { algorithm: "ES256", expiresIn: "5m" },
   );

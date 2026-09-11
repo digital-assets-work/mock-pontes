@@ -12,7 +12,7 @@ import jwt from "jsonwebtoken";
 import { buildJwks, buildOpenIdConfiguration, SIGNING_KEY_ID } from "./oidc.js";
 import { signCsr, validateCsr } from "./csr-handler.js";
 import type { InMemoryAuthUsersRepository } from "./users-repository.js";
-import { validateClientIdForProfile, isKnownProfile, KNOWN_PROFILES } from "./profile-enforcement.js";
+import { isKnownProfile, KNOWN_PROFILES } from "./profile-enforcement.js";
 import { track } from "../http/route-registry.js";
 import {
   adminTokenConfigured,
@@ -26,7 +26,23 @@ const ACCESS_TOKEN_TTL_SEC = 300;
 /** Refresh token lifetime — 10 days (issue #64). */
 const REFRESH_TOKEN_TTL_SEC = 10 * 24 * 60 * 60;
 
-interface TokenSubject {
+/**
+ * Fixed `scope` claim (issue #118) — captured verbatim from a real `utest`
+ * token. The mock now always issues this value and ignores whatever `scope`
+ * the caller requested, matching the observed real-environment behavior
+ * (Keycloak's own client-scope configuration decides this, not the request).
+ */
+const FIXED_JWT_SCOPE =
+  "externalEntityID blockAccessOrg networkID audience email profile company openid";
+
+/**
+ * Static `resource_access.account.roles` seen on every captured real token
+ * (issue #118) — Keycloak's own built-in "account" client, unrelated to any
+ * Pontes-specific profile/role.
+ */
+const ACCOUNT_CLIENT_ROLES = ["manage-account", "manage-account-links", "view-profile"];
+
+export interface TokenSubject {
   uuid: string;
   username: string;
   profile: string;
@@ -41,8 +57,16 @@ interface TokenSubject {
  * ES256 JWTs signed with the runtime PKI JWT key; the refresh token carries
  * `typ: "Refresh"` and a 10-day expiry and is only accepted at the token
  * endpoint's refresh grant (the JWT middleware rejects it as a bearer token).
+ *
+ * `aud`/`azp`/`resource_access` (issue #118) mirror the shape captured from
+ * real `utest` tokens: `azp` is the requested client_id verbatim, `aud` is
+ * `[clientId, "account"]`, and `resource_access.<clientId>.roles` carries the
+ * subject's profile (wrapped in a one-element array — the mock's user model
+ * has a single profile per identity, not multiple simultaneous roles).
+ * Downstream, jwt-middleware.ts's audience allow-list is what actually
+ * reproduces the real environment's per-client_id accept/reject behavior.
  */
-function signTokens(subject: TokenSubject, privateKeyPem: string): {
+export function signTokens(subject: TokenSubject, privateKeyPem: string): {
   accessToken: string;
   refreshToken: string;
 } {
@@ -50,13 +74,18 @@ function signTokens(subject: TokenSubject, privateKeyPem: string): {
   const common = {
     sub: subject.uuid,
     iss: `mock-pontes/iam/realms/${subject.ncb}`,
-    aud: subject.clientId,
+    aud: [subject.clientId, "account"],
+    azp: subject.clientId,
     scope: subject.scope,
     preferred_username: subject.username,
     user_uuid: subject.uuid,
     user_profile: subject.profile,
     entity_bic: subject.entityBIC,
     realm: subject.ncb,
+    resource_access: {
+      [subject.clientId]: { roles: [subject.profile] },
+      account: { roles: ACCOUNT_CLIENT_ROLES },
+    },
   };
   const accessToken = jwt.sign(
     { ...common, iat: now, exp: now + ACCESS_TOKEN_TTL_SEC, typ: "Bearer" },
@@ -128,22 +157,22 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
       const rawBody = await readRawBody(event, "utf-8");
       const params = rawBody ? new URLSearchParams(rawBody) : null;
 
+      // `client_secret` is parsed but intentionally unused (issue #118): the
+      // real IAM doesn't require one at issuance, and the mock accepts any
+      // client_id regardless — see the comment above the password grant.
       let clientId: string;
-      let clientSecret: string | null;
       let scope: string;
       let grantType: string;
       let refreshToken: string | null;
 
       if (params) {
         clientId = params.get("client_id") || "esydlt-web-app";
-        clientSecret = params.get("client_secret") || null;
         scope = params.get("scope") || "openid";
         grantType = params.get("grant_type") || "password";
         refreshToken = params.get("refresh_token");
       } else {
         const body = await readBody(event);
         clientId = body.client_id || "esydlt-web-app";
-        clientSecret = body.client_secret || null;
         scope = body.scope || "openid";
         grantType = body.grant_type || "password";
         refreshToken = body.refresh_token || null;
@@ -185,6 +214,9 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
             error_description: "User must always use the same certificate",
           };
         }
+        // `aud` is now an array ([clientId, "account"]) — `azp` is the
+        // single original requesting client_id, carry that forward instead
+        // (issue #118).
         const refreshScope = String(claims.scope || scope);
         const { accessToken, refreshToken: newRefresh } = signTokens(
           {
@@ -193,7 +225,7 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
             profile: String(claims.user_profile || ""),
             entityBIC: claims.entity_bic ? String(claims.entity_bic) : undefined,
             ncb,
-            clientId: String(claims.aud || clientId),
+            clientId: String(claims.azp || clientId),
             scope: refreshScope,
           },
           options.runtimePki.jwtSigningPrivateKeyPem,
@@ -213,18 +245,17 @@ export function createEnrollmentAuthRouter(options: EnrollmentRouterOptions) {
       }
       const user = options.authUsersRepository.getUserByUsername(username)!;
 
-      // Profile/client_id enforcement (Table U) — always strict.
-      const validation = validateClientIdForProfile(user.profile, clientId, clientSecret);
-      if (!validation.valid) {
-        console.warn(
-          `[mock-pontes] enrollment-token:invalid_client username=${username} profile=${user.profile} client_id=${clientId} reason=${validation.error}`,
-        );
-        setResponseStatus(event, 401);
-        return {
-          error: "invalid_client",
-          error_description: validation.error,
-        };
-      }
+      // Client_id is no longer validated against the user's profile at
+      // issuance (issue #118): direct reproduction against `utest` showed
+      // the real IAM accepts *any* client_id (and no client_secret) here —
+      // it only changes the resulting JWT's `azp`/`aud`/`resource_access`
+      // (see signTokens() above), and it's jwt-middleware.ts's audience
+      // allow-list that actually gates access downstream. The documented
+      // Table U mapping/enforcement (`profile-enforcement.ts`) is kept
+      // available and unit-tested, just no longer called here.
+      // The caller's requested `scope` is ignored — the mock always issues
+      // the fixed scope captured from real tokens (see FIXED_JWT_SCOPE).
+      scope = FIXED_JWT_SCOPE;
 
       const { accessToken, refreshToken: issuedRefresh } = signTokens(
         {
