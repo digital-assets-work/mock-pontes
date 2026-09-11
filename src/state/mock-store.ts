@@ -65,8 +65,8 @@ export interface Draft {
   supplementaryData?: string;
 
   // --- requestvalidation.OperationRequest pass-through fields ---
-  // Currently populated by TransferWorkflow only; optional so other draft
-  // types (FUNDING/DEFUNDING/DIRECT_RTGS/PFOD/XVP) are unaffected.
+  // Originally populated by TransferWorkflow only; FUNDING/DEFUNDING/DIRECT_RTGS
+  // now also populate the subset that applies to them (workbench issue #113).
   debitedCashWalletManagerID?: string;
   creditedCashWalletManagerID?: string;
   instructingPartyID?: string;
@@ -84,6 +84,27 @@ export interface Draft {
   techCBDCOperationID?: string;
   historicStatus?: string[];
   timestamps?: Record<string, { calendarDate: string; businessDate: string }>;
+
+  // --- FUNDING/DEFUNDING/DIRECT_RTGS response-enrichment pass-through fields ---
+  // (workbench issue #113 — align the thin create/read views with their
+  // declared spec schemas: triggermanagement.{FundingRequestResponse,
+  // DefundingRequestResponse, FundingRequest, DirectRTGSPaymentInstructionResponse,
+  // GetDirectRTGSPaymentInstruction}.)
+  /** NRO signature over the request, echoed verbatim. */
+  signature?: string;
+  /** NRO signer certificate (PEM), echoed verbatim. */
+  signerPEM?: string;
+  creditedCashWalletOwnerID?: string;
+  debitedCashWalletOwnerID?: string;
+  /** Client-supplied trigger id (funding/defunding only; distinct from `id`). */
+  techFundRequestID?: string;
+  /** Direct RTGS only. */
+  correlationId?: string;
+  payerBank?: string;
+  receiverBank?: string;
+  /** Username (not just UUID) of the initiator/approver, from the JWT. */
+  initiatorUserName?: string;
+  approverUserName?: string;
 }
 
 /** Official Pontes business-window names, in daily sequence order. */

@@ -96,6 +96,18 @@ export interface WorkflowInit {
   techCBDCOperationID?: string;
   historicStatus?: string[];
   timestamps?: Record<string, { calendarDate: string; businessDate: string }>;
+
+  // --- FUNDING/DEFUNDING/DIRECT_RTGS response-enrichment pass-through fields
+  // (workbench issue #113) — copied verbatim onto the built `Draft`.
+  signature?: string;
+  signerPEM?: string;
+  creditedCashWalletOwnerID?: string;
+  debitedCashWalletOwnerID?: string;
+  techFundRequestID?: string;
+  correlationId?: string;
+  payerBank?: string;
+  receiverBank?: string;
+  initiatorUserName?: string;
 }
 
 /** Per-request context threaded through a transition (identity for checks). */
@@ -104,6 +116,8 @@ export interface WorkflowActor {
   caller?: DcwCaller;
   /** UUID of the user performing an approval (four-eyes check). */
   approverUserUUID?: string;
+  /** Username of the approving user (workbench issue #113), from the JWT. */
+  approverUserName?: string;
 }
 
 const VERB: Record<WorkflowPhase, string> = {
@@ -201,6 +215,7 @@ export abstract class Workflow {
     this.store.updateDraft(id, {
       status: "SETTLED",
       approverUserUUID: actor.approverUserUUID,
+      approverUserName: actor.approverUserName,
       ...this.lifecycleAppend(record, "SETTLED"),
     });
     this.recordTransaction(record);
@@ -255,6 +270,15 @@ export abstract class Workflow {
       techCBDCOperationID: init.techCBDCOperationID,
       historicStatus: init.historicStatus,
       timestamps: init.timestamps,
+      signature: init.signature,
+      signerPEM: init.signerPEM,
+      creditedCashWalletOwnerID: init.creditedCashWalletOwnerID,
+      debitedCashWalletOwnerID: init.debitedCashWalletOwnerID,
+      techFundRequestID: init.techFundRequestID,
+      correlationId: init.correlationId,
+      payerBank: init.payerBank,
+      receiverBank: init.receiverBank,
+      initiatorUserName: init.initiatorUserName,
     };
   }
 
