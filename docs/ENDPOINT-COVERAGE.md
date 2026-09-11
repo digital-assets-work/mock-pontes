@@ -376,8 +376,14 @@ official funding/defunding/transaction/wallet endpoints instead.
   having an infinite balance: funding approvals credit the target wallet without
   debiting/checking the issuance wallet. Funding is therefore the supported way
   to seed cash into the mock (there is no admin `fund` shortcut).
-- **Business window is not enforced.** The mock serves current-business-window /
-  businessdate values but does not reject transactions outside an open window.
+- **Business window is enforced (spec-driven).** `src/http/business-window-guard.ts`
+  rejects (`403 HL-BW-001`) any official operation called outside the window its
+  spec declares (derived from the stored business day in Frankfurt time), unless
+  `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN=true` disables it entirely. See the
+  README's `PONTES_MOCK_BUSINESS_WINDOW_ALWAYS_OPEN` entry for details. *(This
+  bullet previously said the opposite — corrected during the workbench #111
+  documentation review; the guard middleware landed shortly after this doc's
+  original 2026-07-26 audit date.)*
 - **IMS list returns drafts.** `GET .../ims/transactions` returns in-flight mock
   drafts rather than the full settled-transaction extract model of the real API.
 - **`supplementaryData` (undocumented, "reason of payment").** The **2-step**
