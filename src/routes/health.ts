@@ -29,11 +29,19 @@ export function createHealthRouter(authUsersRepository: InMemoryAuthUsersReposit
   router.get(
     "/dlt/:ncb/api/octopus/health",
     defineEventHandler(() => {
-      return {
-        octopus: "UP",
-        server: "UP",
-        mock: true,
-      };
+      // Declared schema is `common.Health[]` (workbench issue #115) — this
+      // mock models a single NCB node, so the array always has exactly one
+      // element. `mock: true` stays on that element: `common.Health` has no
+      // `additionalProperties: false` restriction, so it's a harmless
+      // superset, consistent with the same marker on /check/ip and
+      // /check/mtls below.
+      return [
+        {
+          octopus: "UP",
+          server: "UP",
+          mock: true,
+        },
+      ];
     }),
   );
 
