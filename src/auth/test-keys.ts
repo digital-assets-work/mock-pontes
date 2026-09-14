@@ -14,7 +14,12 @@ export interface TestKeyMaterial {
   privateKeyPem: string;
   publicKeyPem: string;
   certificatePem: string;
-  /** Base64-encoded DER certificate (for signerPEM field) */
+  /**
+   * Base64-encoded, full PEM-armored certificate (for the `signerPEM` field).
+   * This matches real Pontes UTEST's confirmed expectation — base64 of the
+   * armored PEM text (headers + newlines included), not base64(bare DER)
+   * (issue #121).
+   */
   certificateBase64: string;
 }
 
@@ -46,17 +51,15 @@ async function generateTestKeys(): Promise<TestKeyMaterial> {
   const publicKeyPem = x509.PemConverter.encode(spki, "PUBLIC KEY");
   const certificatePem = cert.toString("pem");
 
-  // Extract DER from PEM and base64 encode
-  const pemBody = certificatePem
-    .replace(/-----BEGIN CERTIFICATE-----/g, "")
-    .replace(/-----END CERTIFICATE-----/g, "")
-    .replace(/\s/g, "");
+  // Base64 of the full armored PEM text — the real Pontes UTEST signerPEM
+  // format (issue #121), not base64(bare DER).
+  const certificateBase64 = Buffer.from(certificatePem, "utf-8").toString("base64");
 
   return {
     privateKeyPem,
     publicKeyPem,
     certificatePem,
-    certificateBase64: pemBody,
+    certificateBase64,
   };
 }
 

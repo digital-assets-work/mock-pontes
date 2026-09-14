@@ -24,6 +24,11 @@ describe("Test Keys", () => {
     expect(keys.publicKeyPem).toContain("-----BEGIN PUBLIC KEY-----");
     expect(keys.certificatePem).toContain("-----BEGIN CERTIFICATE-----");
     expect(keys.certificateBase64.length).toBeGreaterThan(100);
+    // certificateBase64 must be base64(full armored PEM text) — the real
+    // Pontes UTEST signerPEM format (issue #121), not base64(bare DER).
+    expect(Buffer.from(keys.certificateBase64, "base64").toString("utf-8")).toBe(
+      keys.certificatePem,
+    );
   });
 
   it("should return the same cached keys on repeated calls", async () => {

@@ -191,14 +191,29 @@ export function verifySignature(
 
 /**
  * Decode the signerPEM field back to a PEM certificate.
- * The signerPEM is the base64-encoded DER certificate without PEM headers.
+ *
+ * Real Pontes UTEST expects `signerPEM` = base64(full armored PEM text, headers
+ * + newlines included) — confirmed live against UTEST (issue #121). Two other
+ * shapes are also accepted, for backward compatibility:
+ *   1. a literal PEM string (not base64-encoded at all), and
+ *   2. DEPRECATED/legacy: base64(bare DER) with no PEM armor — this was the
+ *      mock's original (incorrect) assumption; still tolerated for any caller
+ *      built against it, but not what the real platform expects.
  */
-function decodeCertPem(signerPEM: string): string {
-  // If it already has PEM headers, return as-is
+export function decodeCertPem(signerPEM: string): string {
+  // Shape 1: already a literal PEM string.
   if (signerPEM.includes("-----BEGIN CERTIFICATE-----")) {
     return signerPEM;
   }
-  // Wrap base64 DER in PEM headers
+
+  // Shape 2 (real Pontes UTEST format): base64(full armored PEM text). Decode
+  // and check whether the decoded text itself carries the PEM armor.
+  const decoded = Buffer.from(signerPEM, "base64").toString("utf-8");
+  if (decoded.includes("-----BEGIN CERTIFICATE-----")) {
+    return decoded;
+  }
+
+  // Shape 3 (deprecated/legacy): base64(bare DER), no PEM armor — wrap it.
   const lines = signerPEM.match(/.{1,64}/g) || [signerPEM];
   return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
 }
@@ -361,11 +376,7 @@ export function createNroCertCheckMiddleware(matchers: readonly NroRouteMatcher[
       };
     }
 
-    let signerPem = body.signerPEM;
-    if (!signerPem.includes("-----BEGIN CERTIFICATE-----")) {
-      const lines = signerPem.match(/.{1,64}/g) || [signerPem];
-      signerPem = `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
-    }
+    const signerPem = decodeCertPem(body.signerPEM);
 
     let nroCert: X509Certificate;
     try {
