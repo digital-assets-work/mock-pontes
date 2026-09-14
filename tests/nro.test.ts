@@ -126,8 +126,10 @@ describe("decodeCertPem: signerPEM format compatibility (issue #121)", () => {
   /**
    * Real Pontes UTEST rejects `signerPEM = base64(bare DER)` (the mock's
    * original assumption) and expects `signerPEM = base64(full armored PEM
-   * text)` instead — confirmed live against UTEST. `decodeCertPem()` must
-   * accept both, plus a literal (non-base64) PEM string.
+   * text)` instead — confirmed live against UTEST. `decodeCertPem()` accepts
+   * that real format plus a literal (non-base64) PEM string, and deliberately
+   * does NOT accept `base64(bare DER)`, to keep the mock's behavior as close
+   * as possible to the real platform.
    */
   async function makeCertPem(): Promise<string> {
     const alg = { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" } as const;
@@ -154,18 +156,17 @@ describe("decodeCertPem: signerPEM format compatibility (issue #121)", () => {
     expect(decodeCertPem(signerPEM)).toBe(certPem);
   });
 
-  it("decodes base64(bare DER) — deprecated/legacy shape, still tolerated", async () => {
+  it("does NOT accept base64(bare DER) — matches real Pontes UTEST's rejection", async () => {
     const certPem = await makeCertPem();
     const bareDerBase64 = certPem
       .replace(/-----BEGIN CERTIFICATE-----/g, "")
       .replace(/-----END CERTIFICATE-----/g, "")
       .replace(/\s/g, "");
-    // Re-wrapping bare-DER base64 must reconstruct an equivalent PEM (same
-    // base64 body, standard 64-char line wrapping — X509Certificate parses
-    // either wrapping identically).
+    // base64-decoding bare-DER base64 yields raw binary bytes reinterpreted as
+    // UTF-8 text — never valid PEM armor, so it is left as unusable garbage
+    // rather than being wrapped into a (spurious) valid-looking certificate.
     const decoded = decodeCertPem(bareDerBase64);
-    expect(decoded).toContain("-----BEGIN CERTIFICATE-----");
-    expect(decoded.replace(/\s|-----(BEGIN|END) CERTIFICATE-----/g, "")).toBe(bareDerBase64);
+    expect(decoded).not.toContain("-----BEGIN CERTIFICATE-----");
   });
 
   it("end-to-end: verifySignature succeeds when signerPEM is base64(full armored PEM)", async () => {
@@ -187,5 +188,29 @@ describe("decodeCertPem: signerPEM format compatibility (issue #121)", () => {
     const sig = createSign("SHA256").update(data).sign(privPem, "base64");
 
     expect(verifySignature(data, sig, decodeCertPem(signerPEM))).toBe(true);
+  });
+
+  it("end-to-end: verifySignature FAILS when signerPEM is base64(bare DER) — matches real Pontes UTEST rejection", async () => {
+    const alg = { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" } as const;
+    const keys = await webcrypto.subtle.generateKey(alg, true, ["sign", "verify"]);
+    const cert = await x509.X509CertificateGenerator.createSelfSigned({
+      serialNumber: "03",
+      name: "CN=decode-cert-pem-e2e-bare-der",
+      notBefore: new Date(),
+      notAfter: new Date(Date.now() + 3600_000),
+      signingAlgorithm: alg,
+      keys,
+    });
+    const certPem = cert.toString("pem");
+    const pkcs8 = Buffer.from(await webcrypto.subtle.exportKey("pkcs8", keys.privateKey)).toString("base64");
+    const privPem = `-----BEGIN PRIVATE KEY-----\n${pkcs8.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----`;
+
+    const bareDerBase64 = certPem
+      .replace(/-----BEGIN CERTIFICATE-----/g, "")
+      .replace(/-----END CERTIFICATE-----/g, "")
+      .replace(/\s/g, "");
+    const sig = createSign("SHA256").update(data).sign(privPem, "base64");
+
+    expect(verifySignature(data, sig, decodeCertPem(bareDerBase64))).toBe(false);
   });
 });

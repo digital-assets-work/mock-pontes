@@ -193,12 +193,14 @@ export function verifySignature(
  * Decode the signerPEM field back to a PEM certificate.
  *
  * Real Pontes UTEST expects `signerPEM` = base64(full armored PEM text, headers
- * + newlines included) — confirmed live against UTEST (issue #121). Two other
- * shapes are also accepted, for backward compatibility:
- *   1. a literal PEM string (not base64-encoded at all), and
- *   2. DEPRECATED/legacy: base64(bare DER) with no PEM armor — this was the
- *      mock's original (incorrect) assumption; still tolerated for any caller
- *      built against it, but not what the real platform expects.
+ * + newlines included) — confirmed live against UTEST (issue #121). A literal
+ * (non-base64) PEM string is also accepted, for convenience.
+ *
+ * `base64(bare DER)` — the mock's original (incorrect) assumption — is
+ * intentionally NOT accepted: real Pontes UTEST rejects that shape outright
+ * (`400 ERR-FR-SIGN-001 "This is not a certificate in the expected format."`),
+ * so the mock deliberately mirrors that rejection instead of being more
+ * lenient than the real platform.
  */
 export function decodeCertPem(signerPEM: string): string {
   // Shape 1: already a literal PEM string.
@@ -206,16 +208,11 @@ export function decodeCertPem(signerPEM: string): string {
     return signerPEM;
   }
 
-  // Shape 2 (real Pontes UTEST format): base64(full armored PEM text). Decode
-  // and check whether the decoded text itself carries the PEM armor.
-  const decoded = Buffer.from(signerPEM, "base64").toString("utf-8");
-  if (decoded.includes("-----BEGIN CERTIFICATE-----")) {
-    return decoded;
-  }
-
-  // Shape 3 (deprecated/legacy): base64(bare DER), no PEM armor — wrap it.
-  const lines = signerPEM.match(/.{1,64}/g) || [signerPEM];
-  return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
+  // Shape 2 (the only base64 shape Pontes accepts): base64(full armored PEM
+  // text). Anything else (e.g. base64(bare DER)) decodes to non-PEM text here
+  // and is left as-is, so it fails PEM/X.509 parsing downstream exactly like
+  // the real platform would reject it.
+  return Buffer.from(signerPEM, "base64").toString("utf-8");
 }
 
 export function createNroMiddleware(matchers: readonly NroRouteMatcher[]) {
