@@ -191,16 +191,28 @@ export function verifySignature(
 
 /**
  * Decode the signerPEM field back to a PEM certificate.
- * The signerPEM is the base64-encoded DER certificate without PEM headers.
+ *
+ * Real Pontes UTEST expects `signerPEM` = base64(full armored PEM text, headers
+ * + newlines included) — confirmed live against UTEST (issue #121). A literal
+ * (non-base64) PEM string is also accepted, for convenience.
+ *
+ * `base64(bare DER)` — the mock's original (incorrect) assumption — is
+ * intentionally NOT accepted: real Pontes UTEST rejects that shape outright
+ * (`400 ERR-FR-SIGN-001 "This is not a certificate in the expected format."`),
+ * so the mock deliberately mirrors that rejection instead of being more
+ * lenient than the real platform.
  */
-function decodeCertPem(signerPEM: string): string {
-  // If it already has PEM headers, return as-is
+export function decodeCertPem(signerPEM: string): string {
+  // Shape 1: already a literal PEM string.
   if (signerPEM.includes("-----BEGIN CERTIFICATE-----")) {
     return signerPEM;
   }
-  // Wrap base64 DER in PEM headers
-  const lines = signerPEM.match(/.{1,64}/g) || [signerPEM];
-  return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
+
+  // Shape 2 (the only base64 shape Pontes accepts): base64(full armored PEM
+  // text). Anything else (e.g. base64(bare DER)) decodes to non-PEM text here
+  // and is left as-is, so it fails PEM/X.509 parsing downstream exactly like
+  // the real platform would reject it.
+  return Buffer.from(signerPEM, "base64").toString("utf-8");
 }
 
 export function createNroMiddleware(matchers: readonly NroRouteMatcher[]) {
@@ -361,11 +373,7 @@ export function createNroCertCheckMiddleware(matchers: readonly NroRouteMatcher[
       };
     }
 
-    let signerPem = body.signerPEM;
-    if (!signerPem.includes("-----BEGIN CERTIFICATE-----")) {
-      const lines = signerPem.match(/.{1,64}/g) || [signerPem];
-      signerPem = `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
-    }
+    const signerPem = decodeCertPem(body.signerPEM);
 
     let nroCert: X509Certificate;
     try {
