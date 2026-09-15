@@ -20,6 +20,7 @@ self-approval is rejected with 403 HL-GER-003. Steps 5-6 run only when a second
 """
 
 import base64
+import hashlib
 import os
 import time
 
@@ -93,6 +94,7 @@ def main() -> None:
         raise SystemExit("No access_token - check the certificate is enrolled (POST /csr)")
 
     # 4. NRO-signed funding request
+    ISSUER_TRIGGER_BIC = "ECBFDEFFTOK"  # fixed constant, never a real business field
     funding = {
         "techFundRequestID": os.environ.get("TECH_FUND_REQUEST_ID", f"FUND-{int(time.time() * 1000)}"),
         "type": "FUNDING",
@@ -101,19 +103,28 @@ def main() -> None:
         "creditedCashWalletAlias": CREDITED_ALIAS,
         "creditedCashWalletManagerID": MANAGER_BIC,
         "creditedCashWalletOwnerID": ENTITY_BIC,
-        "debitedCashWalletAlias": "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-        "debitedCashWalletManagerID": "ECBFDEFFXXX",
-        "debitedCashWalletOwnerID": "ECBFDEFFXXX",
+        "debitedCashWalletAlias": "WEUEURECBFDEFFTPP-TOKEN_ISSUANCE_WALLET",
+        "debitedCashWalletManagerID": "ECBFDEFFTPP",
+        "debitedCashWalletOwnerID": "ECBFDEFFTPP",
     }
 
-    # NRO canonical signing string (Pontes v1.0):
-    #   techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID
-    signing_data = (
+    # NRO canonical signing string for FUNDING/DEFUNDING (confirmed against real
+    # Pontes UTEST, workbench issue #124) - DIFFERENT from the direct RTGS / XvP
+    # single-hash convention:
+    #   1. amount is normalized to exactly 2 decimal places;
+    #   2. the credited-side owner BIC slot is replaced by the fixed
+    #      ISSUER_TRIGGER_BIC constant (debited-side slot for DEFUNDING instead);
+    #   3. the concatenation is SHA-256'd once to a lowercase hex string, and
+    #      THAT hex string (not the raw digest bytes) is what gets signed -
+    #      i.e. a genuine double hash.
+    amount_2dp = f'{float(funding["amount"]):.2f}'
+    signing_string = (
         funding["techFundRequestID"]
-        + funding["amount"]
+        + amount_2dp
         + funding["creditedCashWalletOwnerID"]
-        + funding["debitedCashWalletOwnerID"]
+        + ISSUER_TRIGGER_BIC
     )
+    signing_data = hashlib.sha256(signing_string.encode("utf-8")).hexdigest()
 
     with open(CLIENT_KEY, "rb") as fh:
         private_key = serialization.load_pem_private_key(fh.read(), password=None)

@@ -38,6 +38,8 @@ import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
 import { createInMemoryAuthUsersRepository } from "../../src/auth/users-repository.js";
 import officialSpec from "../../src/ui/spec/pontes-official-v1.0.json";
+import { buildSigningData } from "../../src/auth/nro-middleware.js";
+import { ISSUANCE_WALLET_ALIAS, ISSUANCE_WALLET_BIC } from "../../src/state/issuance-wallet.js";
 
 x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 
@@ -212,31 +214,34 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       creditedCashWalletAlias: "WDEEURTESTAAAA-01",
       creditedCashWalletManagerID: "MARKDEFFXXX",
       creditedCashWalletOwnerID: "BSUIFRPPXXX",
-      debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-      debitedCashWalletManagerID: "ECBFDEFFXXX",
-      debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      debitedCashWalletAlias: ISSUANCE_WALLET_ALIAS,
+      debitedCashWalletManagerID: ISSUANCE_WALLET_BIC,
+      debitedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
       ...overrides,
     };
-    const signature = nro.sign(
-      b.techFundRequestID + b.amount + b.creditedCashWalletOwnerID + b.debitedCashWalletOwnerID,
-    );
+    // Real-Pontes-confirmed formula (issue #124: 2dp amount + issuerTriggerBIC
+    // substitution + double hash), via the production buildSigningData() so
+    // the test doesn't duplicate the formula. Falls back to a garbage preimage
+    // when the override under test makes buildSigningData() return null (e.g.
+    // a non-numeric amount) -- such requests are expected to be rejected by
+    // request validation before the NRO check is ever reached.
+    const signature = nro.sign(buildSigningData(b) ?? "invalid-signing-data");
     return { ...b, signature, signerPEM: nro.certPem };
   }
 
-  // Approve/cancel a funding draft with a valid NRO signature — the draft
+  // Approve/cancel a funding draft with a valid NRO signature -- the draft
   // transitions are NRO-signed per the spec (#102). The transition handler
   // ignores the body, so any self-consistent signed funding payload satisfies
   // the check.
   function nroFundingTransition(id: string, user: string, status = "approve") {
     const f = {
+      type: "FUNDING",
       techFundRequestID: "FUND-APPROVE",
       amount: "1.00",
       creditedCashWalletOwnerID: "BSUIFRPPXXX",
-      debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      debitedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
     };
-    const signature = nro.sign(
-      f.techFundRequestID + f.amount + f.creditedCashWalletOwnerID + f.debitedCashWalletOwnerID,
-    );
+    const signature = nro.sign(buildSigningData(f)!);
     return request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${id}/${status}`, {
       headers: {
         authorization: `Bearer ${user}`,
@@ -847,13 +852,11 @@ describe("HTTP integration — NRO signer↔mTLS fail-closed (#30)", () => {
       creditedCashWalletAlias: "WDEEURTESTAAAA-02",
       creditedCashWalletManagerID: "MARKDEFFXXX",
       creditedCashWalletOwnerID: "TESTAAAA",
-      debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-      debitedCashWalletManagerID: "ECBFDEFFXXX",
-      debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      debitedCashWalletAlias: ISSUANCE_WALLET_ALIAS,
+      debitedCashWalletManagerID: ISSUANCE_WALLET_BIC,
+      debitedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
     };
-    const signature = nro.sign(
-      b.techFundRequestID + b.amount + b.creditedCashWalletOwnerID + b.debitedCashWalletOwnerID,
-    );
+    const signature = nro.sign(buildSigningData(b)!);
     const res = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
       headers: { authorization: `Bearer ${token}` },
       body: { ...b, signature, signerPEM: nro.certPem },

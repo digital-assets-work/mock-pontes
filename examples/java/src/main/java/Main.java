@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.Signature;
@@ -19,6 +20,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Enumeration;
+import java.util.HexFormat;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -90,11 +92,22 @@ public class Main {
 
         // 4. NRO-signed funding request
         String techId = env("TECH_FUND_REQUEST_ID", "FUND-" + System.currentTimeMillis());
-        String debitedOwner = "ECBFDEFFXXX";
+        String issuerTriggerBic = "ECBFDEFFTOK"; // fixed constant, never a real business field
+        String debitedOwner = "ECBFDEFFTPP";
 
-        // NRO canonical signing string (Pontes v1.0):
-        //   techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID
-        String signingData = techId + amount + entityBic + debitedOwner;
+        // NRO canonical signing string for FUNDING/DEFUNDING (confirmed against real
+        // Pontes UTEST, workbench issue #124) - DIFFERENT from the direct RTGS / XvP
+        // single-hash convention:
+        //   1. amount is normalized to exactly 2 decimal places;
+        //   2. the credited-side owner BIC slot is replaced by the fixed
+        //      issuerTriggerBic constant (debited-side slot for DEFUNDING instead);
+        //   3. the concatenation is SHA-256'd once to a lowercase hex string, and
+        //      THAT hex string (not the raw digest bytes) is what gets signed -
+        //      i.e. a genuine double hash.
+        String amount2dp = String.format("%.2f", Double.parseDouble(amount));
+        String signingString = techId + amount2dp + entityBic + issuerTriggerBic;
+        byte[] hash1 = MessageDigest.getInstance("SHA-256").digest(signingString.getBytes(StandardCharsets.UTF_8));
+        String signingData = HexFormat.of().formatHex(hash1);
 
         PrivateKey privateKey = firstPrivateKey(ks, p12Pass);
         X509Certificate cert = firstCertificate(ks);
@@ -114,7 +127,7 @@ public class Main {
                 + "\"creditedCashWalletAlias\":\"" + creditedAlias + "\","
                 + "\"creditedCashWalletManagerID\":\"" + managerBic + "\","
                 + "\"creditedCashWalletOwnerID\":\"" + entityBic + "\","
-                + "\"debitedCashWalletAlias\":\"WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET\","
+                + "\"debitedCashWalletAlias\":\"WEUEURECBFDEFFTPP-TOKEN_ISSUANCE_WALLET\","
                 + "\"debitedCashWalletManagerID\":\"" + debitedOwner + "\","
                 + "\"debitedCashWalletOwnerID\":\"" + debitedOwner + "\","
                 + "\"signature\":\"" + signature + "\","

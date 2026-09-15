@@ -134,16 +134,32 @@ Gotchas that produce opaque errors:
 
 ### NRO signing string (funding / defunding)
 
-```
-signingString = techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID
-```
+Confirmed against real Pontes UTEST (workbench issue #124) -- this is a
+DIFFERENT, more involved convention than direct RTGS payment / XvP (those
+remain a single hash over the plain concatenated fields, unaffected by this
+section):
+
+1. `amount` is normalized to exactly **2 decimal places** for signing,
+   regardless of how it's formatted in the request body.
+2. One of the two wallet-owner BIC slots is replaced by a fixed **issuer
+   trigger** constant, `ECBFDEFFTOK` -- **not** a real business field, it must
+   NOT appear anywhere in the request body:
+   - FUNDING:   `techFundRequestID + amount(2dp) + creditedCashWalletOwnerID + ECBFDEFFTOK`
+   - DEFUNDING: `techFundRequestID + amount(2dp) + ECBFDEFFTOK + debitedCashWalletOwnerID`
+3. The concatenated string above is SHA-256'd once to a **lowercase hex
+   string**, and *that hex string* -- not the raw digest bytes -- is what gets
+   signed (ECDSA P-256 / SHA-256). This is a genuine DOUBLE hash.
 
 ECDSA **P-256 / SHA-256**, signature **base64(DER)**, and `signerPEM` **must equal
 the mTLS client certificate you present**. With OpenSSL:
 
 ```bash
-SIGNING_STRING="${TECH_ID}${AMOUNT}${CREDIT_OWNER}${DEBIT_OWNER}"
-SIGNATURE=$(printf '%s' "$SIGNING_STRING" | openssl dgst -sha256 -sign user.key | base64 | tr -d '\n')
+AMOUNT_2DP=$(printf '%.2f' "$AMOUNT")
+ISSUER_TRIGGER_BIC=ECBFDEFFTOK
+# FUNDING order shown; swap the last two fields for DEFUNDING.
+SIGNING_STRING="${TECH_ID}${AMOUNT_2DP}${CREDIT_OWNER}${ISSUER_TRIGGER_BIC}"
+HASH1_HEX=$(printf '%s' "$SIGNING_STRING" | openssl dgst -sha256 -hex | sed 's/^.* //')
+SIGNATURE=$(printf '%s' "$HASH1_HEX" | openssl dgst -sha256 -sign user.key | base64 | tr -d '\n')
 SIGNER_PEM=$(cat user.crt)
 ```
 
@@ -156,9 +172,10 @@ auto-creates its *credited* wallet.
 
 ```bash
 TECH_ID="FUND-$(date +%s)"; AMOUNT="1000.00"
-CREDIT_OWNER=BSUIFRPPXXX; DEBIT_OWNER=ECBFDEFFXXX
-SIGNATURE=$(printf '%s' "${TECH_ID}${AMOUNT}${CREDIT_OWNER}${DEBIT_OWNER}" \
-  | openssl dgst -sha256 -sign user.key | base64 | tr -d '\n')
+CREDIT_OWNER=BSUIFRPPXXX; ISSUER_TRIGGER_BIC=ECBFDEFFTOK
+SIGNING_STRING="${TECH_ID}${AMOUNT}${CREDIT_OWNER}${ISSUER_TRIGGER_BIC}"
+HASH1_HEX=$(printf '%s' "$SIGNING_STRING" | openssl dgst -sha256 -hex | sed 's/^.* //')
+SIGNATURE=$(printf '%s' "$HASH1_HEX" | openssl dgst -sha256 -sign user.key | base64 | tr -d '\n')
 
 FRQ=$(curl -s $CACERT --cert user.crt --key user.key \
   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
@@ -171,16 +188,16 @@ FRQ=$(curl -s $CACERT --cert user.crt --key user.key \
   "creditedCashWalletAlias": "WFREURBSUIFRPPXXX-01",
   "creditedCashWalletManagerID": "BDFEFRPPXXX",
   "creditedCashWalletOwnerID": "$CREDIT_OWNER",
-  "debitedCashWalletAlias": "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-  "debitedCashWalletManagerID": "ECBFDEFFXXX",
-  "debitedCashWalletOwnerID": "$DEBIT_OWNER",
+  "debitedCashWalletAlias": "WEUEURECBFDEFFTPP-TOKEN_ISSUANCE_WALLET",
+  "debitedCashWalletManagerID": "ECBFDEFFTPP",
+  "debitedCashWalletOwnerID": "ECBFDEFFTPP",
   "signature": "$SIGNATURE",
   "signerPEM": "$(cat user.crt | sed ':a;N;$!ba;s/\n/\\n/g')"
 }
 JSON
 )
 
-# Four-eyes: a SECOND enrolled user approves (self-approval → 403 HL-GER-003).
+# Four-eyes: a SECOND enrolled user approves (self-approval -> 403 HL-GER-003).
 APPROVER_TOKEN=$(curl -s $CACERT --cert approver.crt --key approver.key \
   -X POST "$BASE/iam/realms/$NCB/protocol/openid-connect/token" \
   -d grant_type=password -d client_id=esydlt-web-app-u2a -d scope=openid | jq -r .access_token)
@@ -198,14 +215,17 @@ curl -s $CACERT --cert user.crt --key user.key -H "authorization: Bearer $TOKEN"
 
 ## 4. Defunding (2-step, NRO-signed)
 
-Same shape as funding but `type=DEFUNDING` — and note the business id is still
-`techFundRequestID`. Both wallets must already exist.
+Same shape as funding but `type=DEFUNDING` -- and note the business id is still
+`techFundRequestID`. Both wallets must already exist. The signing-string field
+order is reversed relative to funding (`ECBFDEFFTOK` comes BEFORE the real
+owner, see #2 above).
 
 ```bash
 TECH_ID="DEFUND-$(date +%s)"; AMOUNT="250.00"
-CREDIT_OWNER=ECBFDEFFXXX; DEBIT_OWNER=BSUIFRPPXXX
-SIGNATURE=$(printf '%s' "${TECH_ID}${AMOUNT}${CREDIT_OWNER}${DEBIT_OWNER}" \
-  | openssl dgst -sha256 -sign user.key | base64 | tr -d '\n')
+DEBIT_OWNER=BSUIFRPPXXX; ISSUER_TRIGGER_BIC=ECBFDEFFTOK
+SIGNING_STRING="${TECH_ID}${AMOUNT}${ISSUER_TRIGGER_BIC}${DEBIT_OWNER}"
+HASH1_HEX=$(printf '%s' "$SIGNING_STRING" | openssl dgst -sha256 -hex | sed 's/^.* //')
+SIGNATURE=$(printf '%s' "$HASH1_HEX" | openssl dgst -sha256 -sign user.key | base64 | tr -d '\n')
 
 curl -s $CACERT --cert user.crt --key user.key \
   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
@@ -215,9 +235,9 @@ curl -s $CACERT --cert user.crt --key user.key \
   "techFundRequestID": "$TECH_ID",
   "amount": "$AMOUNT",
   "currency": "EUR",
-  "creditedCashWalletAlias": "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-  "creditedCashWalletManagerID": "ECBFDEFFXXX",
-  "creditedCashWalletOwnerID": "$CREDIT_OWNER",
+  "creditedCashWalletAlias": "WEUEURECBFDEFFTPP-TOKEN_ISSUANCE_WALLET",
+  "creditedCashWalletManagerID": "ECBFDEFFTPP",
+  "creditedCashWalletOwnerID": "ECBFDEFFTPP",
   "debitedCashWalletAlias": "WFREURBSUIFRPPXXX-01",
   "debitedCashWalletManagerID": "BDFEFRPPXXX",
   "debitedCashWalletOwnerID": "$DEBIT_OWNER",
@@ -225,10 +245,9 @@ curl -s $CACERT --cert user.crt --key user.key \
   "signerPEM": "$(cat user.crt | sed ':a;N;$!ba;s/\n/\\n/g')"
 }
 JSON
-# → PENDING_APPROVAL; approve exactly as in §3 via .../defunding-requests-drafts/{id}/approve
+# -> PENDING_APPROVAL; approve exactly as in #3 via .../defunding-requests-drafts/{id}/approve
 ```
 
----
 
 ## 5. Transfer (2-step, **not** NRO-signed)
 

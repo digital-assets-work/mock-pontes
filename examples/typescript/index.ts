@@ -22,7 +22,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { createSign } from "node:crypto";
+import { createHash, createSign } from "node:crypto";
 import https from "node:https";
 
 const cfg = {
@@ -126,6 +126,7 @@ async function main(): Promise<void> {
   if (!token) throw new Error("No access_token — check the certificate is enrolled (POST /csr)");
 
   // 4. NRO-signed funding request
+  const ISSUER_TRIGGER_BIC = "ECBFDEFFTOK"; // fixed constant, never a real business field
   const funding = {
     techFundRequestID: process.env.TECH_FUND_REQUEST_ID ?? `FUND-${Date.now()}`,
     type: "FUNDING",
@@ -134,18 +135,24 @@ async function main(): Promise<void> {
     creditedCashWalletAlias: cfg.creditedAlias,
     creditedCashWalletManagerID: cfg.managerBic,
     creditedCashWalletOwnerID: cfg.entityBic,
-    debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-    debitedCashWalletManagerID: "ECBFDEFFXXX",
-    debitedCashWalletOwnerID: "ECBFDEFFXXX",
+    debitedCashWalletAlias: "WEUEURECBFDEFFTPP-TOKEN_ISSUANCE_WALLET",
+    debitedCashWalletManagerID: "ECBFDEFFTPP",
+    debitedCashWalletOwnerID: "ECBFDEFFTPP",
   };
 
-  // NRO canonical signing string (Pontes v1.0):
-  //   techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID
-  const signingData =
-    funding.techFundRequestID +
-    funding.amount +
-    funding.creditedCashWalletOwnerID +
-    funding.debitedCashWalletOwnerID;
+  // NRO canonical signing string for FUNDING/DEFUNDING (confirmed against real
+  // Pontes UTEST, workbench issue #124) — DIFFERENT from the direct RTGS / XvP
+  // single-hash convention:
+  //   1. amount is normalized to exactly 2 decimal places;
+  //   2. the credited-side owner BIC slot is replaced by the fixed
+  //      ISSUER_TRIGGER_BIC constant (debited-side slot for DEFUNDING instead);
+  //   3. the concatenation is SHA-256'd once to a lowercase hex string, and
+  //      THAT hex string (not the raw digest bytes) is what gets signed —
+  //      i.e. a genuine double hash.
+  const amount2dp = Number(funding.amount).toFixed(2);
+  const signingString =
+    funding.techFundRequestID + amount2dp + funding.creditedCashWalletOwnerID + ISSUER_TRIGGER_BIC;
+  const signingData = createHash("sha256").update(signingString).digest("hex");
 
   const signer = createSign("SHA256");
   signer.update(signingData);

@@ -8,6 +8,12 @@
  * in lock-step with the contract instead of a hand-maintained list.
  *
  * Verifies an ECDSA P-256 + SHA-256 signature against the provided certificate.
+ *
+ * FUNDING/DEFUNDING use a distinct signing-string/digest convention from
+ * Direct RTGS payment and XvP — a 2-decimal-place amount, one BIC slot
+ * substituted with a fixed constant, and a double SHA-256 hash — confirmed
+ * live against real Pontes UTEST (workbench issue #124). See
+ * {@link buildSigningData}'s doc comment for the full breakdown.
  */
 
 import {
@@ -17,8 +23,24 @@ import {
   setResponseStatus,
   type H3Event,
 } from "h3";
-import { createVerify, X509Certificate } from "node:crypto";
+import { createHash, createVerify, X509Certificate } from "node:crypto";
 import officialSpec from "../ui/spec/pontes-official-v1.0.json";
+
+/**
+ * Real Pontes UTEST substitutes a fixed "issuer trigger" BIC constant for one
+ * of the two wallet-owner slots when building the FUNDING/DEFUNDING NRO
+ * signing string (confirmed live — workbench issue #124). This constant is
+ * NOT a real business field: it never appears in the request body, only in
+ * the signing string. Configurable since UTEST vs a future PROD environment
+ * may use a different value.
+ */
+export const ISSUER_TRIGGER_BIC = process.env.PONTES_NRO_ISSUER_TRIGGER_BIC || "ECBFDEFFTOK";
+
+/** Normalize an amount to exactly 2 decimal places for NRO signing; null if not numeric. */
+function amountFor2dpSigning(amount: unknown): string | null {
+  const n = typeof amount === "number" ? amount : Number(amount);
+  return Number.isFinite(n) ? n.toFixed(2) : null;
+}
 
 /** An NRO-enforced route: the HTTP method plus a matcher for the request path. */
 export interface NroRouteMatcher {
@@ -119,20 +141,52 @@ function requiresNRO(
 }
 
 /**
- * Build the canonical signing data from request fields, per Pontes v1.0 spec.
- * Field order: ID first, then amount, then BICs.
+ * Build the canonical signing preimage from request fields — the exact bytes
+ * `verifySignature()` hashes-and-verifies (once, per its SHA256withECDSA
+ * primitive below).
+ *
+ * FUNDING / DEFUNDING — confirmed LIVE against real Pontes UTEST (workbench
+ * issue #124), reversing the earlier issue #29 pinning (which had been based
+ * on the documented OpenAPI/Service-Description prose, itself confirmed wrong
+ * here):
+ *   1. `amount` is forced to exactly 2 decimal places for signing, regardless
+ *      of how it's formatted in the request body (e.g. body `"1000"` signs as
+ *      `"1000.00"`).
+ *   2. One of the two wallet-owner BIC slots is replaced by a fixed
+ *      "issuer trigger" constant (`ISSUER_TRIGGER_BIC`) — NOT a real business
+ *      field, it never appears in the request body:
+ *        FUNDING:   techFundRequestID + amount(2dp) + creditedCashWalletOwnerID + ISSUER_TRIGGER_BIC
+ *        DEFUNDING: techFundRequestID + amount(2dp) + ISSUER_TRIGGER_BIC + debitedCashWalletOwnerID
+ *   3. The concatenated string above is itself SHA-256'd to a LOWERCASE HEX
+ *      STRING, and that hex string — not the raw digest bytes, not the
+ *      original concatenated string — is the actual preimage fed onward to
+ *      `verifySignature()`'s own (single) hash-and-verify step. This is a
+ *      genuine double hash; this function performs the first pass and returns
+ *      the hex digest.
+ *
+ * Direct RTGS payment / XvP below are UNCHANGED (single hash, real business
+ * fields only, no substitution) — issue #124's live evidence covers
+ * funding/defunding only; those two are untested against real Pontes for this
+ * behavior.
  */
 export function buildSigningData(body: Record<string, any>): string | null {
-  // Funding / Defunding: techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID
   if (body.techFundRequestID != null) {
-    const parts = [
-      body.techFundRequestID,
-      body.amount,
-      body.creditedCashWalletOwnerID,
-      body.debitedCashWalletOwnerID,
-    ];
-    if (parts.some((p) => p == null)) return null;
-    return parts.join("");
+    const { amount, creditedCashWalletOwnerID, debitedCashWalletOwnerID, type } = body;
+    if (
+      amount == null ||
+      creditedCashWalletOwnerID == null ||
+      debitedCashWalletOwnerID == null ||
+      type == null
+    ) {
+      return null;
+    }
+    const amount2dp = amountFor2dpSigning(amount);
+    if (amount2dp == null) return null;
+    const parts =
+      type === "DEFUNDING"
+        ? [body.techFundRequestID, amount2dp, ISSUER_TRIGGER_BIC, debitedCashWalletOwnerID]
+        : [body.techFundRequestID, amount2dp, creditedCashWalletOwnerID, ISSUER_TRIGGER_BIC];
+    return createHash("sha256").update(parts.join(""), "utf8").digest("hex");
   }
 
   // Direct RTGS Payment: id + amount + payerBank + receiverBank
@@ -154,25 +208,26 @@ export function buildSigningData(body: Record<string, any>): string | null {
 }
 
 /**
- * Verify an ECDSA P-256 + SHA-256 signature over the plain concatenated signing
- * string (NRO).
+ * Verify an ECDSA P-256 + SHA-256 signature over `data` — the exact preimage
+ * returned by `buildSigningData()`.
  *
- * DIGEST CONVENTION — SINGLE HASH (`SHA256withECDSA`):
- * The Pontes v1.0 signing string is hashed with SHA-256 exactly **once** and
- * then signed with ECDSA P-256. This is the standard `SHA256withECDSA`
- * primitive: the concatenated field string is fed *directly* to the signer,
- * which applies SHA-256 internally. It is **not** a double hash — do NOT
- * pre-compute a SHA-256 digest and then sign that digest.
+ * DIGEST CONVENTION — this function itself always hashes exactly **once**
+ * (the standard `SHA256withECDSA` primitive: `data` is fed *directly* to the
+ * signer/verifier, which applies SHA-256 internally):
  *
- * The Service Description prose (§4.3) reads "compute SHA-256 hash … then sign
- * with SHA256withECDSA", which can be misread as two separate hashing rounds.
- * The authoritative reading is fixed by (a) the verification pseudocode (§4.4
- * step 5) — `verify(signature, critical_payload_fields)` runs over the RAW
- * concatenated fields, not a pre-hash — and (b) the reference signing snippet
- * `sign.update(concatenatedString)`. Both confirm a single hash.
+ *   Reference producer:  createSign("SHA256").update(data).sign(privKeyPem)
+ *   Matching verifier:    createVerify("SHA256").update(data).verify(cert, sig)
  *
- *   Reference producer:  createSign("SHA256").update(concat).sign(privKeyPem)
- *   Matching verifier:    createVerify("SHA256").update(concat).verify(cert, sig)
+ * For Direct RTGS payment / XvP, `data` is the plain concatenated field
+ * string, so this is a true single hash overall — confirmed by the Service
+ * Description's verification pseudocode (§4.4 step 5, runs over the RAW
+ * concatenated fields) and reference signing snippet, despite prose in §4.3
+ * that can be misread as two hashing rounds.
+ *
+ * For FUNDING/DEFUNDING, `buildSigningData()` already returns a SHA-256 hex
+ * digest of the concatenated fields as `data` (see its own doc comment) — so
+ * calling this function on it produces the genuine DOUBLE hash real Pontes
+ * UTEST expects for those two operation types (issue #124).
  */
 export function verifySignature(
   data: string,

@@ -22,6 +22,8 @@ import { buildApp } from "../../src/app.js";
 import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
 import { createInMemoryAuthUsersRepository } from "../../src/auth/users-repository.js";
+import { buildSigningData } from "../../src/auth/nro-middleware.js";
+import { ISSUANCE_WALLET_ALIAS, ISSUANCE_WALLET_BIC } from "../../src/state/issuance-wallet.js";
 
 x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 
@@ -130,15 +132,18 @@ describe("Draft-transition endpoints return plain string confirmations (not obje
 
   // --- Funding -----------------------------------------------------------
 
-  function fundingSignature(f: { techFundRequestID: string; amount: string; creditedCashWalletOwnerID: string; debitedCashWalletOwnerID: string }) {
-    return nro.sign(f.techFundRequestID + f.amount + f.creditedCashWalletOwnerID + f.debitedCashWalletOwnerID);
+  // Signs FUNDING/DEFUNDING using the real-Pontes-confirmed formula (issue
+  // #124: 2dp amount + issuerTriggerBIC substitution + double hash) via the
+  // production buildSigningData(), rather than duplicating the formula here.
+  function fundingSignature(f: Record<string, unknown>) {
+    return nro.sign(buildSigningData(f)!);
   }
 
   it("approves a funding draft with a plain string confirmation (not an object)", async () => {
     const f = {
       type: "FUNDING", techFundRequestID: "FUND-DRAFT-RESP-1", amount: "1.00", currency: "EUR",
       creditedCashWalletManagerID: "BDFEFRPPXXX", creditedCashWalletOwnerID: ENTITY,
-      debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", debitedCashWalletManagerID: "ECBFDEFFXXX", debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      debitedCashWalletAlias: ISSUANCE_WALLET_ALIAS, debitedCashWalletManagerID: ISSUANCE_WALLET_BIC, debitedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
     };
     const created = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
       headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
@@ -158,7 +163,7 @@ describe("Draft-transition endpoints return plain string confirmations (not obje
     const f = {
       type: "FUNDING", techFundRequestID: "FUND-DRAFT-RESP-2", amount: "1.00", currency: "EUR",
       creditedCashWalletManagerID: "BDFEFRPPXXX", creditedCashWalletOwnerID: ENTITY,
-      debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", debitedCashWalletManagerID: "ECBFDEFFXXX", debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      debitedCashWalletAlias: ISSUANCE_WALLET_ALIAS, debitedCashWalletManagerID: ISSUANCE_WALLET_BIC, debitedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
     };
     const created = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
       headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
@@ -178,7 +183,7 @@ describe("Draft-transition endpoints return plain string confirmations (not obje
   it("approves a defunding draft with a plain string confirmation (not an object)", async () => {
     const f = {
       type: "DEFUNDING", techFundRequestID: "DEFUND-DRAFT-RESP-1", amount: "1.00", currency: "EUR",
-      creditedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", creditedCashWalletManagerID: "ECBFDEFFXXX", creditedCashWalletOwnerID: "ECBFDEFFXXX",
+      creditedCashWalletAlias: ISSUANCE_WALLET_ALIAS, creditedCashWalletManagerID: ISSUANCE_WALLET_BIC, creditedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
       debitedCashWalletManagerID: "BDFEFRPPXXX", debitedCashWalletOwnerID: ENTITY,
     };
     const created = await request(server.port, "POST", `${BASE}/tms/defunding-requests`, {
@@ -197,7 +202,7 @@ describe("Draft-transition endpoints return plain string confirmations (not obje
   it("cancels a defunding draft with a plain string confirmation (not an object)", async () => {
     const f = {
       type: "DEFUNDING", techFundRequestID: "DEFUND-DRAFT-RESP-2", amount: "1.00", currency: "EUR",
-      creditedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET", creditedCashWalletManagerID: "ECBFDEFFXXX", creditedCashWalletOwnerID: "ECBFDEFFXXX",
+      creditedCashWalletAlias: ISSUANCE_WALLET_ALIAS, creditedCashWalletManagerID: ISSUANCE_WALLET_BIC, creditedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
       debitedCashWalletManagerID: "BDFEFRPPXXX", debitedCashWalletOwnerID: ENTITY,
     };
     const created = await request(server.port, "POST", `${BASE}/tms/defunding-requests`, {
