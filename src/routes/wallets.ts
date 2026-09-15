@@ -15,6 +15,7 @@ import type { AuthContext } from "../auth/jwt-middleware.js";
 import { track } from "../http/route-registry.js";
 import { getGrsEntity } from "../state/grs-entities.js";
 import { networkId } from "./transfers.js";
+import { ISSUANCE_WALLET_ALIAS, ISSUANCE_WALLET_BIC } from "../state/issuance-wallet.js";
 
 /** The acting entity, derived from the verified JWT (issue #56 scoping). */
 function callerOf(event: H3Event): DcwCaller {
@@ -30,12 +31,6 @@ const OPERATION_TYPE_BY_TX_TYPE: Record<Transaction["type"], "Issuance" | "Redem
   PFOD: "Transfer",
   XVP: "Transfer",
 };
-
-// The ECB token-issuance wallet (funding source / defunding sink, see
-// funding.ts) has an infinite balance and is never persisted as a real Wallet
-// record, so `store.getWallet` can't resolve its owner/manager.
-const ISSUANCE_WALLET_ALIAS = "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET";
-const ISSUANCE_WALLET_BIC = "ECBFDEFFXXX";
 
 /** Resolves the owner/manager BIC of a move-leg wallet, with the ECB issuance-wallet fallback. */
 function moveParty(alias: string, store: MockStore): { owner?: string; manager?: string } {

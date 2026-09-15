@@ -1,13 +1,20 @@
 /**
- * NRO signing tests (issue #29).
+ * NRO signing tests (issue #29, re-scoped by issue #124).
  *
- * Pins the two aspects the official spec fixes but which the prose could be
- * misread on:
- *   1. The canonical field concatenation order (v1.0), and
- *   2. The digest convention: SHA-256 is applied EXACTLY ONCE over the plain
- *      concatenated string (SHA256withECDSA). A double-hash signature (signing a
- *      pre-computed SHA-256 digest) MUST be rejected, so that a client that gets
- *      it right against the mock also gets it right against the real platform.
+ * Pins:
+ *   1. The canonical field concatenation order (v1.0) for all three
+ *      NRO-signed operation families.
+ *   2. FUNDING/DEFUNDING's confirmed-real-Pontes signing convention (issue
+ *      #124): amount forced to 2dp, one BIC slot substituted with the fixed
+ *      `ISSUER_TRIGGER_BIC` constant, and a genuine DOUBLE SHA-256 hash. This
+ *      REVERSES the original issue #29 pinning for funding/defunding, which
+ *      had assumed the documented spec prose (single hash, real BICs only)
+ *      was correct — issue #124's live UTEST evidence shows it wasn't.
+ *   3. Direct RTGS payment / XvP are UNCHANGED from the original issue #29
+ *      pinning: SHA-256 applied EXACTLY ONCE over the plain concatenated
+ *      string (SHA256withECDSA), real business fields only. A double-hash
+ *      signature for these two families MUST still be rejected. Issue #124's
+ *      live evidence does not cover them.
  */
 
 import { describe, it, expect } from "@jest/globals";
@@ -16,7 +23,7 @@ import {
   createHash,
   generateKeyPairSync,
 } from "node:crypto";
-import { buildSigningData, verifySignature, decodeCertPem } from "../src/auth/nro-middleware.js";
+import { buildSigningData, verifySignature, decodeCertPem, ISSUER_TRIGGER_BIC } from "../src/auth/nro-middleware.js";
 import * as x509 from "@peculiar/x509";
 import { webcrypto } from "node:crypto";
 
@@ -38,24 +45,66 @@ function signSingleHash(data: string, privPem: string): string {
   return createSign("SHA256").update(data).sign(privPem, "base64");
 }
 
-/** Common mistake: sign a pre-computed SHA-256 digest (double hash). */
+/** Common mistake for direct RTGS/XvP: sign a pre-computed SHA-256 digest (double hash). */
 function signDoubleHash(data: string, privPem: string): string {
   const digest = createHash("sha256").update(data).digest();
   return createSign("SHA256").update(digest).sign(privPem, "base64");
 }
 
-describe("NRO canonical concatenation order (issue #29)", () => {
-  it("funding / defunding: techFundRequestID + amount + creditedCashWalletOwnerID + debitedCashWalletOwnerID", () => {
+describe("NRO canonical concatenation order (issue #29 / #124)", () => {
+  it("FUNDING: techFundRequestID + amount(2dp) + creditedCashWalletOwnerID + ISSUER_TRIGGER_BIC, then SHA-256 hex (issue #124)", () => {
     const data = buildSigningData({
+      type: "FUNDING",
       techFundRequestID: "FUND-2026-0001",
-      amount: "1000000.00",
+      amount: "1000000", // body has no decimals — real captured example behavior
       creditedCashWalletOwnerID: "PARTYAAAXXX",
+      // Real business field — present in the body, but NOT part of the
+      // FUNDING signing string (ISSUER_TRIGGER_BIC replaces it there).
       debitedCashWalletOwnerID: "ECBBDEFFXXX",
     });
-    expect(data).toBe("FUND-2026-00011000000.00PARTYAAAXXXECBBDEFFXXX");
+    const expectedConcat = `FUND-2026-00011000000.00PARTYAAAXXX${ISSUER_TRIGGER_BIC}`;
+    expect(data).toBe(createHash("sha256").update(expectedConcat, "utf8").digest("hex"));
   });
 
-  it("direct RTGS: id + amount + payerBank + receiverBank", () => {
+  it("DEFUNDING: techFundRequestID + amount(2dp) + ISSUER_TRIGGER_BIC + debitedCashWalletOwnerID, then SHA-256 hex (issue #124)", () => {
+    const data = buildSigningData({
+      type: "DEFUNDING",
+      techFundRequestID: "DEFUND-2026-0001",
+      amount: "10.00",
+      // Real business field — present in the body, but NOT part of the
+      // DEFUNDING signing string (ISSUER_TRIGGER_BIC replaces it there).
+      creditedCashWalletOwnerID: "ECBBDEFFXXX",
+      debitedCashWalletOwnerID: "PARTYAAAXXX",
+    });
+    const expectedConcat = `DEFUND-2026-000110.00${ISSUER_TRIGGER_BIC}PARTYAAAXXX`;
+    expect(data).toBe(createHash("sha256").update(expectedConcat, "utf8").digest("hex"));
+  });
+
+  it("amount is normalized to 2dp for signing regardless of the body's own formatting (issue #124)", () => {
+    const base = {
+      type: "FUNDING" as const,
+      techFundRequestID: "FUND-X",
+      creditedCashWalletOwnerID: "A",
+      debitedCashWalletOwnerID: "B",
+    };
+    expect(buildSigningData({ ...base, amount: "1000" })).toBe(
+      buildSigningData({ ...base, amount: "1000.00" }),
+    );
+  });
+
+  it("returns null for a funding/defunding-shaped body missing 'type' (can't pick the BIC-substitution side)", () => {
+    expect(
+      buildSigningData({
+        techFundRequestID: "FUND-1",
+        amount: "1.00",
+        creditedCashWalletOwnerID: "AAA",
+        debitedCashWalletOwnerID: "BBB",
+        // type missing
+      }),
+    ).toBeNull();
+  });
+
+  it("direct RTGS: id + amount + payerBank + receiverBank (unchanged — #124 does not cover this)", () => {
     const data = buildSigningData({
       id: "e3c8671d-44d7-4da1-b240-4a1b1e4e47e7",
       amount: "10000.50",
@@ -67,7 +116,7 @@ describe("NRO canonical concatenation order (issue #29)", () => {
     );
   });
 
-  it("XvP: xvp<uuid-no-dashes> + amount + buyer.bic + seller.bic", () => {
+  it("XvP: xvp<uuid-no-dashes> + amount + buyer.bic + seller.bic (unchanged — #124 does not cover this)", () => {
     const data = buildSigningData({
       xvpTransactionId: "11111111-2222-3333-4444-555555555555",
       amount: "42.00",
@@ -83,6 +132,7 @@ describe("NRO canonical concatenation order (issue #29)", () => {
     expect(
       buildSigningData({
         techFundRequestID: "FUND-1",
+        type: "FUNDING",
         amount: "1.00",
         creditedCashWalletOwnerID: "AAA",
         // debitedCashWalletOwnerID missing
@@ -91,7 +141,58 @@ describe("NRO canonical concatenation order (issue #29)", () => {
   });
 });
 
-describe("NRO digest convention: SINGLE hash (issue #29)", () => {
+describe("FUNDING/DEFUNDING NRO signing end-to-end: 2dp amount + issuerTriggerBIC substitution + double hash (issue #124)", () => {
+  it("verifySignature succeeds for a real-Pontes-shaped FUNDING request", () => {
+    const { privPem, pubPem } = ecKeyPair();
+    const body = {
+      type: "FUNDING",
+      techFundRequestID: "FUND-2026-0002",
+      amount: "1000", // body has no decimals — real captured example behavior
+      creditedCashWalletOwnerID: "PARTYAAAXXX",
+      debitedCashWalletOwnerID: "ECBBDEFFXXX",
+    };
+    const preimage = buildSigningData(body)!;
+    const sig = signSingleHash(preimage, privPem);
+    expect(verifySignature(preimage, sig, pubPem)).toBe(true);
+  });
+
+  it("verifySignature succeeds for a real-Pontes-shaped DEFUNDING request", () => {
+    const { privPem, pubPem } = ecKeyPair();
+    const body = {
+      type: "DEFUNDING",
+      techFundRequestID: "DEFUND-2026-0002",
+      amount: "10.00",
+      creditedCashWalletOwnerID: "ECBBDEFFXXX",
+      debitedCashWalletOwnerID: "PARTYAAAXXX",
+    };
+    const preimage = buildSigningData(body)!;
+    const sig = signSingleHash(preimage, privPem);
+    expect(verifySignature(preimage, sig, pubPem)).toBe(true);
+  });
+
+  it("REJECTS a FUNDING signature built with the OLD (single-hash, no substitution) formula", () => {
+    const { privPem, pubPem } = ecKeyPair();
+    const body = {
+      type: "FUNDING",
+      techFundRequestID: "FUND-2026-0003",
+      amount: "500.00",
+      creditedCashWalletOwnerID: "PARTYAAAXXX",
+      debitedCashWalletOwnerID: "ECBBDEFFXXX",
+    };
+    const oldConcat =
+      body.techFundRequestID + body.amount + body.creditedCashWalletOwnerID + body.debitedCashWalletOwnerID;
+    const sig = signSingleHash(oldConcat, privPem);
+    const preimage = buildSigningData(body)!;
+    expect(verifySignature(preimage, sig, pubPem)).toBe(false);
+  });
+});
+
+describe("verifySignature(): SINGLE hash primitive (issue #29)", () => {
+  // Reused as the SECOND hash pass for FUNDING/DEFUNDING (issue #124), since
+  // buildSigningData() pre-hashes those to a hex string before handing it to
+  // this function. For direct RTGS/XvP, `data` here is still the plain
+  // concatenated string, so the overall effect for those two remains a true
+  // single hash.
   const data = "FUND-2026-00011000000.00PARTYAAAXXXECBBDEFFXXX";
 
   it("accepts a spec-correct single-hash SHA256withECDSA signature", () => {
@@ -119,6 +220,7 @@ describe("NRO digest convention: SINGLE hash (issue #29)", () => {
     expect(verifySignature(data, sig, other.pubPem)).toBe(false);
   });
 });
+
 
 describe("decodeCertPem: signerPEM format compatibility (issue #121)", () => {
   const data = "FUND-2026-00011000000.00PARTYAAAXXXECBBDEFFXXX";

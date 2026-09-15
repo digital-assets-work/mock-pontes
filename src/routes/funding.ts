@@ -13,6 +13,7 @@ import type { AuthContext } from "../auth/jwt-middleware.js";
 import { FundingWorkflow, DefundingWorkflow } from "../workflows/funding.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 import { track } from "../http/route-registry.js";
+import { ISSUANCE_WALLET_ALIAS, ISSUANCE_WALLET_BIC } from "../state/issuance-wallet.js";
 
 /** Convert a workflow rejection into the h3 createError shape used by this router. */
 function rejectAsError(e: unknown): never {
@@ -125,7 +126,7 @@ export function createFundingRouter(store: MockStore) {
   const defunding = new DefundingWorkflow(store);
 
   // Funding source model (mock):
-  // The token-issuance wallet `WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET` is the DCA
+  // The token-issuance wallet (`ISSUANCE_WALLET_ALIAS`) is the DCA
   // that sources the funds for a funding request. In this mock it is treated as
   // having an INFINITE balance available — funding approvals always credit the
   // target wallet and never debit or balance-check the issuance wallet. This is
@@ -161,7 +162,7 @@ export function createFundingRouter(store: MockStore) {
           amount: body.amount || "0.00",
           currency: "EUR",
           creditedWalletAlias: body.creditedCashWalletAlias || "",
-          debitedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+          debitedWalletAlias: ISSUANCE_WALLET_ALIAS,
           // Initiator is the authenticated caller (four-eyes), never the body (#28).
           initiatorUserUUID: approverUUID(event),
           initiatorUserName: actingUsername(event),
@@ -171,8 +172,8 @@ export function createFundingRouter(store: MockStore) {
           signerPEM: body.signerPEM,
           creditedCashWalletManagerID: body.creditedCashWalletManagerID,
           creditedCashWalletOwnerID: body.creditedCashWalletOwnerID,
-          debitedCashWalletManagerID: body.debitedCashWalletManagerID || "ECBFDEFFXXX",
-          debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || "ECBFDEFFXXX",
+          debitedCashWalletManagerID: body.debitedCashWalletManagerID || ISSUANCE_WALLET_BIC,
+          debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || ISSUANCE_WALLET_BIC,
           // Lifecycle trail (workbench #113), same seed as TransferWorkflow (#109)
           // — kept on the `Draft` for the richer single-GET view even though the
           // create response itself still reports `historicStatus: null` (below),
@@ -215,8 +216,8 @@ export function createFundingRouter(store: MockStore) {
         creditedCashWalletManagerID: body.creditedCashWalletManagerID || "",
         creditedCashWalletOwnerID: body.creditedCashWalletOwnerID || "",
         debitedCashWalletAlias: draft.debitedWalletAlias,
-        debitedCashWalletManagerID: body.debitedCashWalletManagerID || "ECBFDEFFXXX",
-        debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || "ECBFDEFFXXX",
+        debitedCashWalletManagerID: body.debitedCashWalletManagerID || ISSUANCE_WALLET_BIC,
+        debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || ISSUANCE_WALLET_BIC,
         // The real API uses `creationDate` (blank at draft stage) instead of
         // the mock's former `createdAt`.
         creationDate: "",
@@ -280,7 +281,7 @@ export function createFundingRouter(store: MockStore) {
         id,
         amount: body.amount || "0.00",
         currency: "EUR",
-        creditedWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
+        creditedWalletAlias: ISSUANCE_WALLET_ALIAS,
         debitedWalletAlias: body.debitedCashWalletAlias || "",
         // Initiator is the authenticated caller (four-eyes), never the body (#28).
         initiatorUserUUID: approverUUID(event),
@@ -289,8 +290,8 @@ export function createFundingRouter(store: MockStore) {
         instructingPartyID: body.instructingPartyID,
         signature: body.signature,
         signerPEM: body.signerPEM,
-        creditedCashWalletManagerID: "ECBFDEFFXXX",
-        creditedCashWalletOwnerID: "ECBFDEFFXXX",
+        creditedCashWalletManagerID: ISSUANCE_WALLET_BIC,
+        creditedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
         debitedCashWalletManagerID: body.debitedCashWalletManagerID,
         debitedCashWalletOwnerID: body.debitedCashWalletOwnerID,
         // Lifecycle trail (workbench #113) — see the matching comment on the
@@ -323,8 +324,8 @@ export function createFundingRouter(store: MockStore) {
         currency: draft.currency,
         type: "DEFUNDING",
         creditedCashWalletAlias: draft.creditedWalletAlias,
-        creditedCashWalletManagerID: "ECBFDEFFXXX",
-        creditedCashWalletOwnerID: "ECBFDEFFXXX",
+        creditedCashWalletManagerID: ISSUANCE_WALLET_BIC,
+        creditedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
         debitedCashWalletAlias: draft.debitedWalletAlias,
         debitedCashWalletManagerID: body.debitedCashWalletManagerID || "",
         debitedCashWalletOwnerID: body.debitedCashWalletOwnerID || "",

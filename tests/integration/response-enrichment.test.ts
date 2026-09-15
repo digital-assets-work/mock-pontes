@@ -34,6 +34,8 @@ import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
 import { createInMemoryAuthUsersRepository } from "../../src/auth/users-repository.js";
 import officialSpec from "../../src/ui/spec/pontes-official-v1.0.json";
+import { buildSigningData } from "../../src/auth/nro-middleware.js";
+import { ISSUANCE_WALLET_ALIAS, ISSUANCE_WALLET_BIC } from "../../src/state/issuance-wallet.js";
 
 x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 
@@ -181,25 +183,32 @@ describe("Response enrichment — funding/defunding/direct-rtgs (workbench #113)
       creditedCashWalletAlias: "W113-FUND-01",
       creditedCashWalletManagerID: "MARKDEFFXXX",
       creditedCashWalletOwnerID: "BSUIFRPPXXX",
-      debitedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-      debitedCashWalletManagerID: "ECBFDEFFXXX",
-      debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      debitedCashWalletAlias: ISSUANCE_WALLET_ALIAS,
+      debitedCashWalletManagerID: ISSUANCE_WALLET_BIC,
+      debitedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
       instructingPartyID: "BSUIFRPPXXX",
       ...overrides,
     };
-    const signature = nro.sign(b.techFundRequestID + b.amount + b.creditedCashWalletOwnerID + b.debitedCashWalletOwnerID);
+    // Real-Pontes-confirmed formula (issue #124), via the production
+    // buildSigningData() rather than duplicating it here.
+    const signature = nro.sign(buildSigningData(b)!);
     return { ...b, signature, signerPEM: nro.certPem };
   }
 
+  // Signs a self-consistent FUNDING-shaped payload for draft-transition
+  // (approve/cancel) endpoints — the transition handler ignores the body's
+  // business fields once the NRO signature checks out, so this is reused for
+  // both funding AND defunding draft transitions (issue #124).
   function nroFundingLikeTransition(overrides: Record<string, unknown> = {}) {
     const f = {
+      type: "FUNDING",
       techFundRequestID: "FUND-113-APPROVE",
       amount: "1.00",
       creditedCashWalletOwnerID: "BSUIFRPPXXX",
-      debitedCashWalletOwnerID: "ECBFDEFFXXX",
+      debitedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
       ...overrides,
     };
-    const signature = nro.sign(f.techFundRequestID + f.amount + f.creditedCashWalletOwnerID + f.debitedCashWalletOwnerID);
+    const signature = nro.sign(buildSigningData(f)!);
     return { ...f, signature, signerPEM: nro.certPem };
   }
 
@@ -241,15 +250,15 @@ describe("Response enrichment — funding/defunding/direct-rtgs (workbench #113)
       techFundRequestID: "DEFUND-113-1",
       amount: "100.00",
       currency: "EUR",
-      creditedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-      creditedCashWalletManagerID: "ECBFDEFFXXX",
-      creditedCashWalletOwnerID: "ECBFDEFFXXX",
+      creditedCashWalletAlias: ISSUANCE_WALLET_ALIAS,
+      creditedCashWalletManagerID: ISSUANCE_WALLET_BIC,
+      creditedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
       debitedCashWalletAlias: "W113-DEFUND-SRC",
       debitedCashWalletManagerID: "MARKDEFFXXX",
       debitedCashWalletOwnerID: "BSUIFRPPXXX",
       instructingPartyID: "BSUIFRPPXXX",
     };
-    const signature = nro.sign(body.techFundRequestID + body.amount + "ECBFDEFFXXX" + body.debitedCashWalletOwnerID);
+    const signature = nro.sign(buildSigningData(body)!);
     const created = await request(server.port, "POST", `${BASE}/tms/defunding-requests`, {
       headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
       body: { ...body, signature, signerPEM: nro.certPem },
@@ -259,7 +268,7 @@ describe("Response enrichment — funding/defunding/direct-rtgs (workbench #113)
     expect(created.json.defundingRequestType).toBe("D");
     expect(created.json.techFundRequestID).toBe("DEFUND-113-1");
     expect(created.json.signature).toBe(signature);
-    expect(created.json.creditedCashWalletManagerID).toBe("ECBFDEFFXXX");
+    expect(created.json.creditedCashWalletManagerID).toBe(ISSUANCE_WALLET_BIC);
     assertConforms(created.json, "triggermanagement.DefundingRequestResponse", [
       "fourEyesType",
       "status",
@@ -326,14 +335,14 @@ describe("Response enrichment — funding/defunding/direct-rtgs (workbench #113)
       techFundRequestID: "DEFUND-113-READ",
       amount: "10.00",
       currency: "EUR",
-      creditedCashWalletAlias: "WEUEURECBFDEFFXXX-TOKEN_ISSUANCE_WALLET",
-      creditedCashWalletManagerID: "ECBFDEFFXXX",
-      creditedCashWalletOwnerID: "ECBFDEFFXXX",
+      creditedCashWalletAlias: ISSUANCE_WALLET_ALIAS,
+      creditedCashWalletManagerID: ISSUANCE_WALLET_BIC,
+      creditedCashWalletOwnerID: ISSUANCE_WALLET_BIC,
       debitedCashWalletAlias: "W113-DF-READ-SRC",
       debitedCashWalletManagerID: "MARKDEFFXXX",
       debitedCashWalletOwnerID: "BSUIFRPPXXX",
     };
-    const signature = nro.sign(body.techFundRequestID + body.amount + "ECBFDEFFXXX" + body.debitedCashWalletOwnerID);
+    const signature = nro.sign(buildSigningData(body)!);
     const created = await request(server.port, "POST", `${BASE}/tms/defunding-requests`, {
       headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
       body: { ...body, signature, signerPEM: nro.certPem },
