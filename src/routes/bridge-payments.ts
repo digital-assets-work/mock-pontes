@@ -25,7 +25,19 @@ import { isWorkflowRejection } from "../workflows/workflow.js";
  * `supplementaryData` (undocumented in the official spec, confirmed accepted
  * via direct correspondence with ECB support) is carried through to the
  * settled transaction, readable via GET .../ams/wallets/{walias}/transactions.
+ *
+ * `supplementaryData` is also subject to two undocumented real-UTEST
+ * constraints (issue #126, live-bisected): max 30 characters, charset
+ * `[A-Za-z0-9_-]` only. Real UTEST reuses the same charset-sounding error
+ * message for both violations, so the mock does too (wire compatibility).
+ * This 30-char cap is specific to `bridge/payments` — it does NOT apply to
+ * the two-step `rvs/transactions-requests` create, which real UTEST accepts
+ * well beyond 30 chars.
  */
+const SUPPLEMENTARY_DATA_PATTERN = /^[A-Za-z0-9_-]{0,30}$/;
+const SUPPLEMENTARY_DATA_ERROR =
+  "Error validating payment request. Reason: only letters, numbers, dashes, and underscores are allowed in SupplementaryData field";
+
 export function createBridgePaymentsRouter(store: MockStore) {
   const router = track(createRouter());
   const workflow = new PaymentWorkflow(store);
@@ -63,6 +75,16 @@ export function createBridgePaymentsRouter(store: MockStore) {
           businessErrors: [
             { errorCode: "HL-VAL-001", errorDescription: `Missing required fields: ${missing.join(", ")}` },
           ],
+        };
+      }
+
+      // supplementaryData (when present): max 30 chars, [A-Za-z0-9_-] only
+      // (issue #126) — matches real UTEST, which rejects both violations with
+      // the same charset-sounding message.
+      if (supplementaryData !== undefined && !SUPPLEMENTARY_DATA_PATTERN.test(supplementaryData)) {
+        setResponseStatus(event, 400);
+        return {
+          businessErrors: [{ errorCode: "HL-VAL-004", errorDescription: SUPPLEMENTARY_DATA_ERROR }],
         };
       }
 

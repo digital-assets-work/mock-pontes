@@ -393,7 +393,13 @@ official funding/defunding/transaction/wallet endpoints instead.
   .../ims/transactions` query. Direct correspondence with ECB support confirmed
   the field is also accepted on the **1-step** `POST .../bridge/payments`
   endpoint (implemented — see `routes/bridge-payments.ts`). The field is
-  absent from the official OpenAPI spec/SDD.
+  absent from the official OpenAPI spec/SDD. On `bridge/payments` specifically,
+  real UTEST enforces two further undocumented constraints (issue #126,
+  live-bisected): max **30 characters**, charset `[A-Za-z0-9_-]` only —
+  violating either is rejected `400 HL-VAL-004` with the same charset-sounding
+  error message. This cap does **not** apply to the 2-step
+  `rvs/transactions-requests` create, which real UTEST accepts well beyond 30
+  chars.
 
 ### Gaps worth follow-up (not fixed here)
 

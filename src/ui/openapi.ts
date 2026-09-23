@@ -395,6 +395,12 @@ export const SUPPLEMENTARY_DATA_SCHEMAS = [
  * Add the undocumented-but-confirmed `supplementaryData` property to the
  * schemas in {@link SUPPLEMENTARY_DATA_SCHEMAS}, in place. Never applied to the
  * vendored spec directly — only to the clone `annotateSpec` receives.
+ *
+ * `bridge.PaymentRequest` additionally gets `maxLength: 30` +
+ * `pattern: ^[A-Za-z0-9_-]*$` — the real-UTEST constraint the mock now
+ * enforces on `POST bridge/payments` (issue #126, live-bisected). This cap is
+ * specific to that endpoint; it's not applied to the transfer (`rvs`) schemas,
+ * which real UTEST accepts well beyond 30 chars.
  */
 function annotateSupplementaryData(schemas: AnyObj): void {
   for (const name of SUPPLEMENTARY_DATA_SCHEMAS) {
@@ -405,6 +411,9 @@ function annotateSupplementaryData(schemas: AnyObj): void {
         description:
           "Free-text reference. Undocumented in the official ECB spec, but " +
           "confirmed accepted/echoed via direct correspondence with ECB support.",
+        ...(name === "bridge.PaymentRequest"
+          ? { maxLength: 30, pattern: "^[A-Za-z0-9_-]*$" }
+          : {}),
       };
     }
   }
