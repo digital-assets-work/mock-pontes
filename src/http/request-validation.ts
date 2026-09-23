@@ -13,8 +13,11 @@
  *
  * Extra-field policy (issue #53 decision): unknown fields are **ignored** (not
  * rejected) — the schemas leave `additionalProperties` open and the handlers
- * only read named fields — with the exception that the mock-only
- * `supplementaryData` field is preserved by the handlers that support it.
+ * only read named fields — with the exception that `supplementaryData` is
+ * preserved by the handlers that support it. It's official-but-undocumented
+ * (confirmed accepted/echoed via direct correspondence with ECB support on
+ * `bridge/payments`; the transfer/`rvs` path's acceptance of it remains an
+ * unconfirmed mock extension — see issue #101), not a mock-only invention.
  */
 
 import Ajv, { type ValidateFunction, type ErrorObject } from "ajv";
@@ -53,8 +56,9 @@ const ajv = new Ajv({ allErrors: true, strict: false });
 /**
  * Sanitise the vendored spec before ajv compiles it:
  *  - relax `additionalProperties: false` everywhere so unknown fields are ignored
- *    (issue #53 policy) and the mock-only `supplementaryData` is always accepted,
- *    even on schemas (e.g. XvP) that otherwise seal the object;
+ *    (issue #53 policy) and the official-but-undocumented `supplementaryData`
+ *    is always accepted, even on schemas (e.g. XvP) that otherwise seal the
+ *    object;
  *  - normalise malformed regex quantifiers in `pattern` keywords. The ECB spec
  *    ships `{1, 15}` / `{64, 128}` (a space after the comma), an invalid
  *    ECMAScript quantifier: ajv throws "Incomplete quantifier" and fails the
