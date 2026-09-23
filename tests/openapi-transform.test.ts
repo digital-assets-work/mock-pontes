@@ -135,7 +135,7 @@ describe("annotateSpec (issue #34)", () => {
     expect(Object.keys(mockExtras.paths)).toContain("/check/mtls");
   });
 
-  it("annotates supplementaryData onto the confirmed-but-undocumented schemas", () => {
+  it("annotates supplementaryData onto all schemas, worded per ECB confirmation status (issue #101)", () => {
     const spec = fakeOfficial() as any;
     spec.components.schemas["bridge.PaymentRequest"] = {
       type: "object",
@@ -149,7 +149,16 @@ describe("annotateSpec (issue #34)", () => {
     for (const name of SUPPLEMENTARY_DATA_SCHEMAS) {
       const prop = annotated.components.schemas[name].properties.supplementaryData;
       expect(prop.type).toBe("string");
-      expect(prop.description).toContain("ECB support");
+    }
+    // bridge.PaymentRequest is ECB-confirmed.
+    expect(annotated.components.schemas["bridge.PaymentRequest"].properties.supplementaryData.description).toContain(
+      "ECB support",
+    );
+    // The transfer/rvs schemas are an unconfirmed mock extension for this path.
+    for (const name of ["requestvalidation.CreateOperationRequest", "requestvalidation.OperationRequest"] as const) {
+      const desc = annotated.components.schemas[name].properties.supplementaryData.description;
+      expect(desc).toContain("NOT confirmed by ECB");
+      expect(desc).not.toContain("ECB support");
     }
     // Pre-existing properties are untouched.
     expect(annotated.components.schemas["bridge.PaymentRequest"].properties.amount).toEqual({ type: "string" });

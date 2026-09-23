@@ -381,9 +381,16 @@ export const mockExtras = {
 type AnyObj = Record<string, any>;
 
 /**
- * Request/response schemas confirmed, via direct correspondence with ECB
- * support, to accept/echo `supplementaryData` — even though the official spec
- * never names the field on any of them.
+ * Schemas where the mock accepts/echoes `supplementaryData`, even though the
+ * official spec never names the field on any of them. Confirmation status
+ * differs per endpoint (issue #101):
+ *  - `bridge.PaymentRequest` — ECB-confirmed via direct correspondence with
+ *    ECB support (also subject to the real-UTEST 30-char/charset cap, issue
+ *    #126).
+ *  - `requestvalidation.CreateOperationRequest` / `OperationRequest` (the
+ *    transfer/`rvs` create + draft) — accepted/echoed by the mock as an
+ *    extension, but this acceptance is **not** ECB-confirmed for that path;
+ *    pending ECB confirmation.
  */
 export const SUPPLEMENTARY_DATA_SCHEMAS = [
   "bridge.PaymentRequest",
@@ -391,10 +398,14 @@ export const SUPPLEMENTARY_DATA_SCHEMAS = [
   "requestvalidation.OperationRequest",
 ] as const;
 
+/** Schemas within {@link SUPPLEMENTARY_DATA_SCHEMAS} that are ECB-confirmed. */
+const ECB_CONFIRMED_SUPPLEMENTARY_DATA_SCHEMAS: ReadonlySet<string> = new Set(["bridge.PaymentRequest"]);
+
 /**
- * Add the undocumented-but-confirmed `supplementaryData` property to the
- * schemas in {@link SUPPLEMENTARY_DATA_SCHEMAS}, in place. Never applied to the
- * vendored spec directly — only to the clone `annotateSpec` receives.
+ * Add the `supplementaryData` property to the schemas in
+ * {@link SUPPLEMENTARY_DATA_SCHEMAS}, in place, worded per their confirmation
+ * status. Never applied to the vendored spec directly — only to the clone
+ * `annotateSpec` receives.
  *
  * `bridge.PaymentRequest` additionally gets `maxLength: 30` +
  * `pattern: ^[A-Za-z0-9_-]*$` — the real-UTEST constraint the mock now
@@ -406,11 +417,15 @@ function annotateSupplementaryData(schemas: AnyObj): void {
   for (const name of SUPPLEMENTARY_DATA_SCHEMAS) {
     const props = schemas[name]?.properties;
     if (props && !props.supplementaryData) {
+      const confirmed = ECB_CONFIRMED_SUPPLEMENTARY_DATA_SCHEMAS.has(name);
       props.supplementaryData = {
         type: "string",
-        description:
-          "Free-text reference. Undocumented in the official ECB spec, but " +
-          "confirmed accepted/echoed via direct correspondence with ECB support.",
+        description: confirmed
+          ? "Free-text reference. Undocumented in the official ECB spec, but " +
+            "confirmed accepted/echoed via direct correspondence with ECB support."
+          : "Free-text reference. Undocumented in the official ECB spec. " +
+            "Accepted/echoed by this mock as an extension, but NOT confirmed " +
+            "by ECB for this endpoint — pending ECB confirmation (issue #101).",
         ...(name === "bridge.PaymentRequest"
           ? { maxLength: 30, pattern: "^[A-Za-z0-9_-]*$" }
           : {}),
