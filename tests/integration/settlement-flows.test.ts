@@ -192,6 +192,54 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     expect(tx.supplementaryData).toBe("invoice-2026-08-14-001");
   });
 
+  it("a 1-step bridge payment with a 30-char alnum/dash/underscore supplementaryData is accepted (#126 boundary)", async () => {
+    const before = total();
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-126-30", amount: "1.00", currency: "EUR",
+        creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX", creditedCashWalletOwnerID: ENTITY,
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "ECBFDEFFXXX",
+        supplementaryData: "A".repeat(30),
+      },
+    });
+    expect(pay.status).toBe(200);
+    expect(total()).toBeCloseTo(before); // conserved
+  });
+
+  it("a 1-step bridge payment with a 31-char supplementaryData is rejected (#126 length)", async () => {
+    const before = total();
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-126-31", amount: "1.00", currency: "EUR",
+        creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "ECBFDEFFXXX",
+        supplementaryData: "A".repeat(31),
+      },
+    });
+    expect(pay.status).toBe(400);
+    expect(pay.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
+    expect(pay.json.businessErrors[0].errorDescription).toMatch(
+      /only letters, numbers, dashes, and underscores are allowed in SupplementaryData field/,
+    );
+    expect(total()).toBeCloseTo(before); // rejected — nothing moved
+  });
+
+  it("a 1-step bridge payment with a space in supplementaryData is rejected (#126 charset)", async () => {
+    const pay = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/payments`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        paymentID: "PAY-126-charset", amount: "1.00", currency: "EUR",
+        creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "ECBFDEFFXXX",
+        supplementaryData: "invoice 2026",
+      },
+    });
+    expect(pay.status).toBe(400);
+    expect(pay.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
+  });
+
   it("a 1-step bridge payment to an unknown credited wallet is rejected (422) and conserves value (#93)", async () => {
     const before = total();
     const srcBefore = avail("S-SRC");

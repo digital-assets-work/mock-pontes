@@ -155,6 +155,25 @@ describe("annotateSpec (issue #34)", () => {
     expect(annotated.components.schemas["bridge.PaymentRequest"].properties.amount).toEqual({ type: "string" });
   });
 
+  it("caps supplementaryData at 30 chars / [A-Za-z0-9_-] only on bridge.PaymentRequest, but not on the transfer schemas (issue #126)", () => {
+    const spec = fakeOfficial() as any;
+    spec.components.schemas["bridge.PaymentRequest"] = { type: "object", properties: {} };
+    spec.components.schemas["requestvalidation.CreateOperationRequest"] = { type: "object", properties: {} };
+    spec.components.schemas["requestvalidation.OperationRequest"] = { type: "object", properties: {} };
+
+    const annotated = annotateSpec(spec, new Set(), "9.9.9");
+
+    const bridgeProp = annotated.components.schemas["bridge.PaymentRequest"].properties.supplementaryData;
+    expect(bridgeProp.maxLength).toBe(30);
+    expect(bridgeProp.pattern).toBe("^[A-Za-z0-9_-]*$");
+
+    for (const name of ["requestvalidation.CreateOperationRequest", "requestvalidation.OperationRequest"] as const) {
+      const prop = annotated.components.schemas[name].properties.supplementaryData;
+      expect(prop.maxLength).toBeUndefined();
+      expect(prop.pattern).toBeUndefined();
+    }
+  });
+
   it("skips supplementaryData annotation when a confirmed-but-undocumented schema is absent (no crash)", () => {
     expect(() => annotateSpec(fakeOfficial(), new Set(), "9.9.9")).not.toThrow();
   });
