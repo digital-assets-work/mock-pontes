@@ -41,10 +41,12 @@ import { buildP12 } from "./p12.js";
 import { adminTokenConfigured } from "../auth/admin-token.js";
 import { resolveAudienceAllowlist } from "../auth/jwt-middleware.js";
 import { stringify as stringifyYaml } from "yaml";
-// Official ECB Pontes OpenAPI v1.0 (EII API), vendored as JSON.
-// Source: https://www.ecb.europa.eu/paym/target/target-professional-use-documents-links/pontes/shared/pdf/ecb.pontes26_05_15_OpenAPI_Document_v1.0_Pontes_Pilot.en.zip
-// Retrieved 2026-07-24; pristine (converted from YAML). Refresh from that URL when ECB updates the spec.
-import officialSpec from "./spec/pontes-official-v1.0.json";
+// Official ECB Pontes OpenAPI v1.1 (EII API), vendored as JSON.
+// Source: https://www.ecb.europa.eu/paym/target/target-professional-use-documents-links/pontes/shared/pdf/ecb.pontes26_09_21_OpenAPI_Document_v1.1_Pontes_Pilot.en.zip
+// Retrieved 2026-09-24; converted from YAML (one field description merges a confirmed
+// ECB annotation from the 19 May 2026 call, carried forward from the v1.0 vendoring).
+// Refresh from that URL when ECB updates the spec.
+import officialSpec from "./spec/pontes-official-v1.1.json";
 
 /** Release version — from the release build's baked git ref, falling back to the
  *  npm package version (dev) so the UI always shows something meaningful. */

@@ -92,9 +92,11 @@ function rtgsResponseView(store: MockStore, d: Draft): Record<string, unknown> {
  * `triggermanagement.GetDirectRTGSPaymentInstruction` — the richer shape
  * returned by `GET .../payments/{id}` (non-drafts path, workbench #113).
  * Fields with no equivalent concept in this mock (`approvalTimeOut`,
- * `isManualDefunding`, `marketDLTOperatorBuyer/Seller`, `rootCause`,
- * `supplementaryData`) are blank/false, matching the established
- * not-yet-modeled convention used elsewhere (e.g. `t2AccountReference`).
+ * `isManualDefunding`, `marketDLTOperatorBuyer/Seller`, `rootCause`) are
+ * blank/false, matching the established not-yet-modeled convention used
+ * elsewhere (e.g. `t2AccountReference`). `supplementaryData` was dropped
+ * from this schema in ECB spec v1.1 (workbench issue #132) — no longer
+ * part of the documented response shape.
  */
 function rtgsGetView(store: MockStore, d: Draft): Record<string, unknown> {
   return {
@@ -124,7 +126,6 @@ function rtgsGetView(store: MockStore, d: Draft): Record<string, unknown> {
     signerPEM: d.signerPEM ?? "",
     source: "Payment",
     status: d.status,
-    supplementaryData: d.supplementaryData ?? "",
     techPaymentId: d.id,
     type: "Direct RTGS Payment",
   };

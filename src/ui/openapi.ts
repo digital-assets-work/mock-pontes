@@ -24,7 +24,7 @@
  * (never mutated — only the clone built by {@link buildServedSpec} is).
  */
 
-import officialSpec from "./spec/pontes-official-v1.0.json";
+import officialSpec from "./spec/pontes-official-v1.1.json";
 import { registeredKeySet, normalizePath } from "../http/route-registry.js";
 
 const HTTP_METHODS = ["get", "post", "put", "delete", "patch"];

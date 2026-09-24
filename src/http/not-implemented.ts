@@ -15,7 +15,7 @@
  */
 
 import { defineEventHandler, getMethod, setResponseStatus, type H3Event } from "h3";
-import officialSpec from "../ui/spec/pontes-official-v1.0.json";
+import officialSpec from "../ui/spec/pontes-official-v1.1.json";
 import { normalizePath, registeredKeySet } from "./route-registry.js";
 
 const METHODS = ["get", "post", "put", "delete", "patch"] as const;
