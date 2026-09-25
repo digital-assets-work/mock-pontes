@@ -132,6 +132,48 @@ function rtgsGetView(store: MockStore, d: Draft): Record<string, unknown> {
 }
 
 /**
+ * `BridgeDirectRTGS` — the structured response for the 1-step bridge variant
+ * (`POST .../bridge/direct-rtgs/payments`, ECB spec v1.1, workbench issue
+ * #133). Replaces the bare confirmation string (issue #82) now that the
+ * spec documents a full object. `status` is always `"COMPLETED"`: a
+ * rejection short-circuits via `sendRejection()` before this view is ever
+ * built, so `"FAILED"` is never actually reached by this mock. Fields with
+ * no equivalent concept here (`approvalTimeOut`, `isManualDefunding`,
+ * `rootCause`) are blank/false, matching the convention used by
+ * `rtgsGetView`. Unlike `GetDirectRTGSPaymentInstruction`'s `historicStatus`
+ * (a status-keyed map), `BridgeDirectRTGS.historicStatus` is a plain string
+ * array — seeded by the route handler to the spec's own one-step example
+ * trail since the settlement happens atomically, with no intermediate state
+ * to observe.
+ */
+function bridgeRtgsView(store: MockStore, d: Draft): Record<string, unknown> {
+  return {
+    amount: d.amount,
+    approvalTimeOut: "",
+    correlationId: d.correlationId ?? "",
+    creationDate: store.getBusinessDay().businessDate,
+    currency: d.currency,
+    historicStatus: d.historicStatus ?? [],
+    id: d.id,
+    includeSubmit: false,
+    initiatorUserName: d.initiatorUserName ?? "",
+    initiatorUserUUID: d.initiatorUserUUID ?? "",
+    instructingPartyID: d.instructingPartyID ?? "",
+    isCanceled: false,
+    isManualDefunding: false,
+    lastUpdatedBusinessDate: store.getBusinessDay().businessDate,
+    lastUpdatedTime: d.updatedAt,
+    payerBank: d.payerBank ?? "",
+    receiverBank: d.receiverBank ?? "",
+    rootCause: "",
+    signature: d.signature ?? "",
+    signerPEM: d.signerPEM ?? "",
+    status: "COMPLETED",
+    type: "Direct RTGS Payment",
+  };
+}
+
+/**
  * Direct RTGS payment router (issue #19). Composite defund(source)+fund(target).
  * Two-step (octopus/tms) and one-step (bridge) variants, both NRO-signed on
  * create (signature over `id + amount + payerBank + receiverBank`).
@@ -265,16 +307,32 @@ export function createDirectRtgsRouter(store: MockStore) {
       const body = await readBody(event);
       const id = body.id || body.paymentID || randomUUID();
       const auth = event.context.auth as AuthContext | undefined;
+      const now = new Date().toISOString();
+      const businessDate = store.getBusinessDay().businessDate;
+      let record: Draft;
       try {
-        workflow.execute(buildInit(body, id, auth?.userUUID, auth?.username), { caller: callerOf(event) });
+        record = workflow.execute(
+          {
+            ...buildInit(body, id, auth?.userUUID, auth?.username),
+            // Atomic one-step settlement — the spec's own example trail
+            // (workbench #133), all at the single instant of execution.
+            historicStatus: ["INITIALIZED", "ACCEPTED", "PAYMENT_SUBMITTED", "COMPLETED"],
+            timestamps: {
+              INITIALIZED: { calendarDate: now, businessDate },
+              ACCEPTED: { calendarDate: now, businessDate },
+              PAYMENT_SUBMITTED: { calendarDate: now, businessDate },
+              COMPLETED: { calendarDate: now, businessDate },
+            },
+          },
+          { caller: callerOf(event) },
+        );
       } catch (e) {
         return sendRejection(event, e);
       }
-      // JSON string response (issue #82) so `response.json()` works; the ECB
-      // spec's "Succesfully" spelling is intentional — do NOT "correct" it.
+      // Structured `BridgeDirectRTGS` response (ECB spec v1.1, workbench #133)
+      // — replaces the bare confirmation string used under v1.0 (issue #82).
       setResponseStatus(event, 200);
-      setResponseHeader(event, "content-type", "application/json");
-      return JSON.stringify("Direct RTGS Payment Settled Succesfully");
+      return bridgeRtgsView(store, record);
     }),
   );
 
