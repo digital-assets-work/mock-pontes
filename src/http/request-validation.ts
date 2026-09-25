@@ -228,6 +228,35 @@ export function currencyError(body: unknown): { errorCode: string; errorDescript
 }
 
 /**
+ * The undocumented real-UTEST `supplementaryData` charset/length rule
+ * (issue #126, live-bisected against `bridge/payments`): max 30 characters,
+ * `[A-Za-z0-9_-]` only. Real UTEST reuses the same charset-sounding error
+ * message for both violations, so the mock does too (wire compatibility).
+ *
+ * Extended (issue #134) to the PFoD deliver/receive legs, where v1.1 newly
+ * documents the field. It is deliberately NOT applied to
+ * `rvs/transactions-requests` — real UTEST accepts values well beyond 30
+ * chars there (see the `bridge/payments`-specific caveat above and issue
+ * #101) — see issue #134's follow-up comment for the open question on
+ * whether that route should gain the same cap.
+ */
+export const SUPPLEMENTARY_DATA_PATTERN = /^[A-Za-z0-9_-]{0,30}$/;
+export const SUPPLEMENTARY_DATA_ERROR =
+  "Error validating payment request. Reason: only letters, numbers, dashes, and underscores are allowed in SupplementaryData field";
+
+/**
+ * Validate an optional `supplementaryData` value against
+ * {@link SUPPLEMENTARY_DATA_PATTERN}. Returns the business error (HL-VAL-004)
+ * or `null` when absent/valid.
+ */
+export function supplementaryDataError(value: unknown): { errorCode: string; errorDescription: string } | null {
+  if (value !== undefined && !SUPPLEMENTARY_DATA_PATTERN.test(value as string)) {
+    return { errorCode: "HL-VAL-004", errorDescription: SUPPLEMENTARY_DATA_ERROR };
+  }
+  return null;
+}
+
+/**
  * Middleware that validates create request bodies. Placed after the auth/NRO
  * chain and before the route routers, so authentication and signer binding are
  * checked first, then the body shape.

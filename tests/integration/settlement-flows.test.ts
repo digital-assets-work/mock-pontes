@@ -279,4 +279,42 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     expect(approve.json.businessErrors[0].errorCode).toBe("HL-BAL-001");
     expect(total()).toBeCloseTo(before); // untouched
   });
+
+  it("a PFoD DELI leg with a 30-char alnum/dash/underscore supplementaryData is accepted (#134 boundary)", async () => {
+    const deli = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfoddeli`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-134-30", amount: "1.00", currency: "EUR",
+        sellerCashTokenWalletRef: "S-SRC", sellerID: ENTITY, supplementaryData: "A".repeat(30),
+      },
+    });
+    expect(deli.status).toBe(201);
+  });
+
+  it("a PFoD DELI leg with a 31-char supplementaryData is rejected (#134 length)", async () => {
+    const deli = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfoddeli`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-134-31", amount: "1.00", currency: "EUR",
+        sellerCashTokenWalletRef: "S-SRC", sellerID: ENTITY, supplementaryData: "A".repeat(31),
+      },
+    });
+    expect(deli.status).toBe(400);
+    expect(deli.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
+    // Rejected before any leg is stored — no PENDING_MATCH draft left behind.
+    expect(store.getDraft("PFOD-PFOD-134-31-DELI")).toBeUndefined();
+  });
+
+  it("a PFoD RECE leg with a space in supplementaryData is rejected (#134 charset)", async () => {
+    const rece = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfodrece`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-134-charset", amount: "1.00", currency: "EUR",
+        buyerCashTokenWalletRef: "S-DST", buyerID: ENTITY, sellerCAMBIC: "ECBFDEFFXXX",
+        supplementaryData: "invoice 2026",
+      },
+    });
+    expect(rece.status).toBe(400);
+    expect(rece.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
+  });
 });

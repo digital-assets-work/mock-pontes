@@ -11,6 +11,7 @@ import { track } from "../http/route-registry.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { PfodWorkflow } from "../workflows/pfod.js";
 import { isWorkflowRejection, unknownWalletMessage } from "../workflows/workflow.js";
+import { supplementaryDataError } from "../http/request-validation.js";
 
 /** Match window before an unmatched PFoD leg is considered expired. */
 const PFOD_MATCH_WINDOW_SEC = Number(process.env.PONTES_PFOD_MATCH_WINDOW_SEC || 3600);
@@ -30,6 +31,15 @@ function expired(leg: Draft, now: number): boolean {
  * PFOD draft; when its counterpart arrives (consistent `amount`/`currency`) the
  * matched wallet payment fires (debit seller, credit buyer) → `SETTLED`. An
  * unmatched leg past its window is lazily marked `EXPIRED`.
+ *
+ * `supplementaryData` (issue #134, v1.1 newly documents it on both leg
+ * requests) is validated with the same real-UTEST charset/length rule as
+ * `bridge/payments` (issue #126: max 30 chars, `[A-Za-z0-9_-]`), but is
+ * **not** persisted onto the leg's `Draft` — `storeLeg()` already repurposes
+ * `Draft.supplementaryData` internally to carry the PFoD-matching `tradeID`
+ * (see below), and neither documented success response for these routes
+ * echoes the field back to the caller, so there is no observable behaviour
+ * to preserve by threading it through.
  */
 export function createPfodRouter(store: MockStore) {
   const router = track(createRouter());
@@ -123,10 +133,15 @@ export function createPfodRouter(store: MockStore) {
     "/dlt/:ncb/api/bridge/initpfoddeli",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const { tradeID, amount, currency, sellerCashTokenWalletRef } = body;
+      const { tradeID, amount, currency, sellerCashTokenWalletRef, supplementaryData } = body;
       if (!tradeID || !amount || !currency || !sellerCashTokenWalletRef) {
         setResponseStatus(event, 400);
         return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, sellerCashTokenWalletRef" }] };
+      }
+      const suppErr = supplementaryDataError(supplementaryData);
+      if (suppErr) {
+        setResponseStatus(event, 400);
+        return { businessErrors: [suppErr] };
       }
       // The seller cash wallet is the DEBIT side of the matched settlement and
       // must already exist (issue #93) — it is never auto-created.
@@ -155,10 +170,15 @@ export function createPfodRouter(store: MockStore) {
     "/dlt/:ncb/api/bridge/initpfodrece",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const { tradeID, amount, currency, buyerCashTokenWalletRef } = body;
+      const { tradeID, amount, currency, buyerCashTokenWalletRef, supplementaryData } = body;
       if (!tradeID || !amount || !currency || !buyerCashTokenWalletRef) {
         setResponseStatus(event, 400);
         return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, buyerCashTokenWalletRef" }] };
+      }
+      const suppErr = supplementaryDataError(supplementaryData);
+      if (suppErr) {
+        setResponseStatus(event, 400);
+        return { businessErrors: [suppErr] };
       }
       // The buyer cash wallet is the CREDIT side of the matched settlement and
       // must already exist (issue #93) — it is never auto-created.
