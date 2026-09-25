@@ -317,4 +317,48 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     expect(rece.status).toBe(400);
     expect(rece.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
   });
+
+  it("a 2-step transfer create with a 30-char alnum/dash/underscore supplementaryData is accepted (#134 boundary)", async () => {
+    const create = await request(server.port, "POST", `/dlt/${NCB}/api/octopus/rvs/transactions-requests`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: {
+        instructionID: "TR-134-30", type: "TRANSFER", cbdcRequestType: "OPERATION",
+        amountTransferred: "1.00", currency: "EUR", instructingPartyID: ENTITY,
+        creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "BDFEFRPPXXX",
+        supplementaryData: "A".repeat(30),
+      },
+    });
+    expect(create.status).toBe(201);
+  });
+
+  it("a 2-step transfer create with a 31-char supplementaryData is rejected (#134 length)", async () => {
+    const create = await request(server.port, "POST", `/dlt/${NCB}/api/octopus/rvs/transactions-requests`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: {
+        instructionID: "TR-134-31", type: "TRANSFER", cbdcRequestType: "OPERATION",
+        amountTransferred: "1.00", currency: "EUR", instructingPartyID: ENTITY,
+        creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "BDFEFRPPXXX",
+        supplementaryData: "A".repeat(31),
+      },
+    });
+    expect(create.status).toBe(400);
+    expect(create.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
+  });
+
+  it("a 2-step transfer create with a space in supplementaryData is rejected (#134 charset)", async () => {
+    const create = await request(server.port, "POST", `/dlt/${NCB}/api/octopus/rvs/transactions-requests`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: {
+        instructionID: "TR-134-charset", type: "TRANSFER", cbdcRequestType: "OPERATION",
+        amountTransferred: "1.00", currency: "EUR", instructingPartyID: ENTITY,
+        creditedCashWalletAlias: "S-DST", creditedCashWalletManagerID: "BDFEFRPPXXX",
+        debitedCashWalletAlias: "S-SRC", debitedCashWalletManagerID: "BDFEFRPPXXX",
+        supplementaryData: "invoice 2026",
+      },
+    });
+    expect(create.status).toBe(400);
+    expect(create.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
+  });
 });

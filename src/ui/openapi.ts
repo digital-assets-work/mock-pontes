@@ -390,7 +390,10 @@ type AnyObj = Record<string, any>;
  *  - `requestvalidation.CreateOperationRequest` / `OperationRequest` (the
  *    transfer/`rvs` create + draft) — accepted/echoed by the mock as an
  *    extension, but this acceptance is **not** ECB-confirmed for that path;
- *    pending ECB confirmation.
+ *    pending ECB confirmation. The create schema additionally gets the same
+ *    30-char/charset cap as `bridge.PaymentRequest` (issue #134 — requester
+ *    confirmed 2026-09-25 the cap applies here too, though its ECB
+ *    confirmation status remains separately unconfirmed).
  */
 export const SUPPLEMENTARY_DATA_SCHEMAS = [
   "bridge.PaymentRequest",
@@ -401,17 +404,25 @@ export const SUPPLEMENTARY_DATA_SCHEMAS = [
 /** Schemas within {@link SUPPLEMENTARY_DATA_SCHEMAS} that are ECB-confirmed. */
 const ECB_CONFIRMED_SUPPLEMENTARY_DATA_SCHEMAS: ReadonlySet<string> = new Set(["bridge.PaymentRequest"]);
 
+/** Request (not read/response) schemas subject to the real-UTEST 30-char/charset cap. */
+const SUPPLEMENTARY_DATA_CAPPED_SCHEMAS: ReadonlySet<string> = new Set([
+  "bridge.PaymentRequest",
+  "requestvalidation.CreateOperationRequest",
+]);
+
 /**
  * Add the `supplementaryData` property to the schemas in
  * {@link SUPPLEMENTARY_DATA_SCHEMAS}, in place, worded per their confirmation
  * status. Never applied to the vendored spec directly — only to the clone
  * `annotateSpec` receives.
  *
- * `bridge.PaymentRequest` additionally gets `maxLength: 30` +
- * `pattern: ^[A-Za-z0-9_-]*$` — the real-UTEST constraint the mock now
- * enforces on `POST bridge/payments` (issue #126, live-bisected). This cap is
- * specific to that endpoint; it's not applied to the transfer (`rvs`) schemas,
- * which real UTEST accepts well beyond 30 chars.
+ * The two *create* request schemas ({@link SUPPLEMENTARY_DATA_CAPPED_SCHEMAS})
+ * additionally get `maxLength: 30` + `pattern: ^[A-Za-z0-9_-]*$` — the
+ * real-UTEST constraint the mock now enforces on `POST bridge/payments`
+ * (issue #126, live-bisected) and, as of issue #134, on
+ * `POST rvs/transactions-requests` too. It is not applied to
+ * `requestvalidation.OperationRequest`, which is a read/response view, not a
+ * validated create request.
  */
 function annotateSupplementaryData(schemas: AnyObj): void {
   for (const name of SUPPLEMENTARY_DATA_SCHEMAS) {
@@ -426,7 +437,7 @@ function annotateSupplementaryData(schemas: AnyObj): void {
           : "Free-text reference. Undocumented in the official ECB spec. " +
             "Accepted/echoed by this mock as an extension, but NOT confirmed " +
             "by ECB for this endpoint — pending ECB confirmation (issue #101).",
-        ...(name === "bridge.PaymentRequest"
+        ...(SUPPLEMENTARY_DATA_CAPPED_SCHEMAS.has(name)
           ? { maxLength: 30, pattern: "^[A-Za-z0-9_-]*$" }
           : {}),
       };

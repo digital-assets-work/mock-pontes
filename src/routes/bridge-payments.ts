@@ -31,7 +31,8 @@ import { supplementaryDataError } from "../http/request-validation.js";
  * constraints (issue #126, live-bisected): max 30 characters, charset
  * `[A-Za-z0-9_-]` only — enforced via the shared
  * {@link supplementaryDataError} helper (see `request-validation.ts` for the
- * full rationale, including why it does NOT apply to `rvs/transactions-requests`).
+ * full rationale, including its extension to `rvs/transactions-requests`
+ * and the PFoD legs under issue #134).
  */
 
 export function createBridgePaymentsRouter(store: MockStore) {

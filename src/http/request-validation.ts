@@ -234,11 +234,11 @@ export function currencyError(body: unknown): { errorCode: string; errorDescript
  * message for both violations, so the mock does too (wire compatibility).
  *
  * Extended (issue #134) to the PFoD deliver/receive legs, where v1.1 newly
- * documents the field. It is deliberately NOT applied to
- * `rvs/transactions-requests` — real UTEST accepts values well beyond 30
- * chars there (see the `bridge/payments`-specific caveat above and issue
- * #101) — see issue #134's follow-up comment for the open question on
- * whether that route should gain the same cap.
+ * documents the field, and to `rvs/transactions-requests` — even though
+ * `bridge-payments.ts` records an earlier issue #126 finding that real
+ * UTEST accepted longer values there, the requester confirmed (issue #134,
+ * 2026-09-25) that the cap should apply there too; that earlier
+ * observation is now considered superseded.
  */
 export const SUPPLEMENTARY_DATA_PATTERN = /^[A-Za-z0-9_-]{0,30}$/;
 export const SUPPLEMENTARY_DATA_ERROR =
