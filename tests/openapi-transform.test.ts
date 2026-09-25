@@ -164,7 +164,7 @@ describe("annotateSpec (issue #34)", () => {
     expect(annotated.components.schemas["bridge.PaymentRequest"].properties.amount).toEqual({ type: "string" });
   });
 
-  it("caps supplementaryData at 30 chars / [A-Za-z0-9_-] only on bridge.PaymentRequest, but not on the transfer schemas (issue #126)", () => {
+  it("caps supplementaryData at 30 chars / [A-Za-z0-9_-] only on bridge.PaymentRequest and the transfer create schema, but not the read view (issues #126, #134)", () => {
     const spec = fakeOfficial() as any;
     spec.components.schemas["bridge.PaymentRequest"] = { type: "object", properties: {} };
     spec.components.schemas["requestvalidation.CreateOperationRequest"] = { type: "object", properties: {} };
@@ -172,15 +172,15 @@ describe("annotateSpec (issue #34)", () => {
 
     const annotated = annotateSpec(spec, new Set(), "9.9.9");
 
-    const bridgeProp = annotated.components.schemas["bridge.PaymentRequest"].properties.supplementaryData;
-    expect(bridgeProp.maxLength).toBe(30);
-    expect(bridgeProp.pattern).toBe("^[A-Za-z0-9_-]*$");
-
-    for (const name of ["requestvalidation.CreateOperationRequest", "requestvalidation.OperationRequest"] as const) {
+    for (const name of ["bridge.PaymentRequest", "requestvalidation.CreateOperationRequest"] as const) {
       const prop = annotated.components.schemas[name].properties.supplementaryData;
-      expect(prop.maxLength).toBeUndefined();
-      expect(prop.pattern).toBeUndefined();
+      expect(prop.maxLength).toBe(30);
+      expect(prop.pattern).toBe("^[A-Za-z0-9_-]*$");
     }
+
+    const readProp = annotated.components.schemas["requestvalidation.OperationRequest"].properties.supplementaryData;
+    expect(readProp.maxLength).toBeUndefined();
+    expect(readProp.pattern).toBeUndefined();
   });
 
   it("skips supplementaryData annotation when a confirmed-but-undocumented schema is absent (no crash)", () => {

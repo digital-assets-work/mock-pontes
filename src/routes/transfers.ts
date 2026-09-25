@@ -13,6 +13,7 @@ import type { AuthContext } from "../auth/jwt-middleware.js";
 import type { DcwCaller } from "../state/dcw.js";
 import { resolveDraftId } from "../state/draft-id.js";
 import { track } from "../http/route-registry.js";
+import { supplementaryDataError } from "../http/request-validation.js";
 import { TransferWorkflow } from "../workflows/transfer.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
 
@@ -203,6 +204,16 @@ export function createTransfersRouter(store: MockStore) {
       const businessDate = store.getBusinessDay().businessDate;
       if (body.ISD && body.ISD !== businessDate) {
         return badRequest(event, `ISD must be the current business date (${businessDate})`);
+      }
+      // supplementaryData (when present): max 30 chars, [A-Za-z0-9_-] only
+      // (issue #134 — requester confirmed on 2026-09-25 that the #126
+      // bridge/payments cap also applies here, superseding the earlier
+      // finding recorded in bridge-payments.ts that real UTEST accepted
+      // longer values on this route).
+      const suppErr = supplementaryDataError(body.supplementaryData);
+      if (suppErr) {
+        setResponseStatus(event, 400);
+        return { businessErrors: [suppErr] };
       }
 
       // Honour a client-supplied instruction id only to detect a duplicate

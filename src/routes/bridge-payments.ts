@@ -11,6 +11,7 @@ import { track } from "../http/route-registry.js";
 import type { AuthContext } from "../auth/jwt-middleware.js";
 import { PaymentWorkflow } from "../workflows/payment.js";
 import { isWorkflowRejection } from "../workflows/workflow.js";
+import { supplementaryDataError } from "../http/request-validation.js";
 
 /**
  * Bridge Cash Token Payments router.
@@ -28,15 +29,11 @@ import { isWorkflowRejection } from "../workflows/workflow.js";
  *
  * `supplementaryData` is also subject to two undocumented real-UTEST
  * constraints (issue #126, live-bisected): max 30 characters, charset
- * `[A-Za-z0-9_-]` only. Real UTEST reuses the same charset-sounding error
- * message for both violations, so the mock does too (wire compatibility).
- * This 30-char cap is specific to `bridge/payments` — it does NOT apply to
- * the two-step `rvs/transactions-requests` create, which real UTEST accepts
- * well beyond 30 chars.
+ * `[A-Za-z0-9_-]` only — enforced via the shared
+ * {@link supplementaryDataError} helper (see `request-validation.ts` for the
+ * full rationale, including its extension to `rvs/transactions-requests`
+ * and the PFoD legs under issue #134).
  */
-const SUPPLEMENTARY_DATA_PATTERN = /^[A-Za-z0-9_-]{0,30}$/;
-const SUPPLEMENTARY_DATA_ERROR =
-  "Error validating payment request. Reason: only letters, numbers, dashes, and underscores are allowed in SupplementaryData field";
 
 export function createBridgePaymentsRouter(store: MockStore) {
   const router = track(createRouter());
@@ -81,11 +78,10 @@ export function createBridgePaymentsRouter(store: MockStore) {
       // supplementaryData (when present): max 30 chars, [A-Za-z0-9_-] only
       // (issue #126) — matches real UTEST, which rejects both violations with
       // the same charset-sounding message.
-      if (supplementaryData !== undefined && !SUPPLEMENTARY_DATA_PATTERN.test(supplementaryData)) {
+      const suppErr = supplementaryDataError(supplementaryData);
+      if (suppErr) {
         setResponseStatus(event, 400);
-        return {
-          businessErrors: [{ errorCode: "HL-VAL-004", errorDescription: SUPPLEMENTARY_DATA_ERROR }],
-        };
+        return { businessErrors: [suppErr] };
       }
 
       // Both the debit source and the credited wallet must already exist
