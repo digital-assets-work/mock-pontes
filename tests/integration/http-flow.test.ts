@@ -37,7 +37,7 @@ import { buildApp } from "../../src/app.js";
 import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
 import { createInMemoryAuthUsersRepository } from "../../src/auth/users-repository.js";
-import officialSpec from "../../src/ui/spec/pontes-official-v1.0.json";
+import officialSpec from "../../src/ui/spec/pontes-official-v1.1.json";
 import { buildSigningData } from "../../src/auth/nro-middleware.js";
 import { ISSUANCE_WALLET_ALIAS, ISSUANCE_WALLET_BIC } from "../../src/state/issuance-wallet.js";
 

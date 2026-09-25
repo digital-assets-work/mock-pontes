@@ -24,7 +24,7 @@ import {
   type H3Event,
 } from "h3";
 import { createHash, createVerify, X509Certificate } from "node:crypto";
-import officialSpec from "../ui/spec/pontes-official-v1.0.json";
+import officialSpec from "../ui/spec/pontes-official-v1.1.json";
 
 /**
  * Real Pontes UTEST substitutes a fixed "issuer trigger" BIC constant for one

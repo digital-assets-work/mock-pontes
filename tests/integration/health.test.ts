@@ -15,7 +15,7 @@ import { buildApp } from "../../src/app.js";
 import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
 import { createInMemoryAuthUsersRepository } from "../../src/auth/users-repository.js";
-import officialSpec from "../../src/ui/spec/pontes-official-v1.0.json";
+import officialSpec from "../../src/ui/spec/pontes-official-v1.1.json";
 
 interface Server {
   port: number;

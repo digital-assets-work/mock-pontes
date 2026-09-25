@@ -28,7 +28,7 @@ import {
   setResponseStatus,
   type H3Event,
 } from "h3";
-import officialSpec from "../ui/spec/pontes-official-v1.0.json";
+import officialSpec from "../ui/spec/pontes-official-v1.1.json";
 
 /**
  * Create (POST) write endpoints → the official request schema to validate the
@@ -59,12 +59,15 @@ const ajv = new Ajv({ allErrors: true, strict: false });
  *    (issue #53 policy) and the official-but-undocumented `supplementaryData`
  *    is always accepted, even on schemas (e.g. XvP) that otherwise seal the
  *    object;
- *  - normalise malformed regex quantifiers in `pattern` keywords. The ECB spec
- *    ships `{1, 15}` / `{64, 128}` (a space after the comma), an invalid
+ *  - normalise malformed regex quantifiers in `pattern` keywords. The v1.0 ECB
+ *    spec shipped `{1, 15}` / `{64, 128}` (a space after the comma), an invalid
  *    ECMAScript quantifier: ajv throws "Incomplete quantifier" and fails the
- *    schema open, silently disabling validation (e.g. XvPInitRequest). Stripping
- *    the space at compile time keeps the vendored spec byte-faithful to the ECB
- *    source while restoring validation.
+ *    schema open, silently disabling validation (e.g. XvPInitRequest). v1.1
+ *    fixes the `{1, 15}` (amount) occurrences upstream but still ships the
+ *    `{64, 128}` (executionHash/cancellationHash) ones broken, so this
+ *    normalisation stays necessary. Stripping the space at compile time keeps
+ *    the vendored spec byte-faithful to the ECB source while restoring
+ *    validation; it is a no-op on patterns that are already well-formed.
  * Required/type/pattern semantics are otherwise unaffected.
  */
 function sanitizeForAjv(node: unknown): void {

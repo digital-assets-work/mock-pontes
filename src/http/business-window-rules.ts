@@ -22,7 +22,7 @@
  * carrying an `(only for …)` qualifier when building the rule.
  */
 
-import officialSpec from "../ui/spec/pontes-official-v1.0.json";
+import officialSpec from "../ui/spec/pontes-official-v1.1.json";
 import type { BusinessWindowName } from "../state/mock-store.js";
 import { segmentsMatch } from "./not-implemented.js";
 
