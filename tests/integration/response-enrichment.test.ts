@@ -449,4 +449,43 @@ describe("Response enrichment — funding/defunding/direct-rtgs (workbench #113)
     );
     assertConforms(richRead.json, "triggermanagement.GetDirectRTGSPaymentInstruction");
   });
+
+  it("returns the structured BridgeDirectRTGS response for the 1-step bridge variant (workbench #133)", async () => {
+    // Same wallet-existence precondition as the 2-step variant (issue #93).
+    const funded = await request(server.port, "POST", `${BASE}/tms/funding-requests`, {
+      headers: { authorization: `Bearer ${u1}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
+      body: fundingBody({ creditedCashWalletAlias: "W133-BRIDGE-SRC", techFundRequestID: "FUND-133-BRIDGE" }),
+    });
+    await request(server.port, "PUT", `${BASE}/tms/funding-requests-drafts/${funded.json.id}/approve`, {
+      headers: { authorization: `Bearer ${u2}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
+      body: nroFundingLikeTransition(),
+    });
+    const mkDst = await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "W133-BRIDGE-DST" },
+    });
+    expect(mkDst.status).toBe(201);
+
+    // 1-step bridge endpoints require the EXTERNAL_USER profile.
+    const ext = await mintJwt("user-ext-133", "EXTERNAL_USER");
+    const settled = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/direct-rtgs/payments`, {
+      headers: { authorization: `Bearer ${ext}`, "x-forwarded-client-cert": encodeURIComponent(nro.certPem) },
+      body: rtgsBody({
+        id: "DRTGS-133-BRIDGE-01",
+        creditedCashWalletAlias: "W133-BRIDGE-DST",
+        debitedCashWalletAlias: "W133-BRIDGE-SRC",
+      }),
+    });
+    expect(settled.status).toBe(200);
+    // v1.1 documents a structured `BridgeDirectRTGS` object here, replacing the
+    // bare confirmation string used under v1.0 (issue #82).
+    expect(settled.json.id).toBe("DRTGS-133-BRIDGE-01");
+    expect(settled.json.type).toBe("Direct RTGS Payment");
+    expect(settled.json.status).toBe("COMPLETED");
+    expect(settled.json.correlationId).toBe("CORR-113-01");
+    expect(settled.json.payerBank).toBe("MP01FRAAXXX");
+    expect(settled.json.receiverBank).toBe("MP01DEAAXXX");
+    expect(settled.json.historicStatus).toEqual(["INITIALIZED", "ACCEPTED", "PAYMENT_SUBMITTED", "COMPLETED"]);
+    assertConforms(settled.json, "BridgeDirectRTGS");
+  });
 });
