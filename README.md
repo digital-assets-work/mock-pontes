@@ -46,6 +46,11 @@ docker run --rm -p 3001:3001 ghcr.io/digital-assets-work/mock-pontes:latest
 >   ghcr.io/digital-assets-work/mock-pontes:latest
 > ```
 
+> **Image tags:** `:latest` and semver tags (`:1.8.4`, `:1.8`, `:1`) track
+> tagged releases. `:dev` is rebuilt on every push to `main` and tracks the
+> tip of `main` between releases — handy for testing unreleased changes, but
+> not pinned/stable.
+
 Then call a public endpoint. The mock uses a self-signed certificate locally, so
 first fetch its CA and verify against it (or, against the hosted instance, `curl`
 verifies normally with no flags):
