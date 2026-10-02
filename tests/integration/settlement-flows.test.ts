@@ -318,6 +318,68 @@ describe("Settlement flows — conservation of value (issue #83)", () => {
     expect(rece.json.businessErrors[0].errorCode).toBe("HL-VAL-004");
   });
 
+  it("PFoD settlement credits the DELI submitter and debits the RECE submitter (#137 direction)", async () => {
+    store.ensureWallet("S-137-DELI", { ownerEntityID: ENTITY, managerNCB: "BDFEFRPPXXX", availableBalance: "500.00" });
+    // RECE submitter is the debited side (issue #137 direction) — needs
+    // sufficient balance to be debited without tripping the overdraft guard.
+    store.ensureWallet("S-137-RECE", { ownerEntityID: ENTITY, managerNCB: "BDFEFRPPXXX", availableBalance: "500.00" });
+    const deli = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfoddeli`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-137-direction", amount: "50.00", currency: "EUR",
+        sellerCashTokenWalletRef: "S-137-DELI", sellerID: ENTITY,
+      },
+    });
+    expect(deli.status).toBe(201);
+    const rece = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfodrece`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-137-direction", amount: "50.00", currency: "EUR",
+        buyerCashTokenWalletRef: "S-137-RECE", buyerID: ENTITY, sellerCAMBIC: "ECBFDEFFXXX",
+      },
+    });
+    expect(rece.status).toBe(200);
+    // Confirmed real-Pontes direction: the DELI submitter is credited, the
+    // RECE submitter is debited — the reverse of the naive seller/buyer
+    // field-name reading.
+    expect(store.getWallet("S-137-DELI")!.balance).toBe("550.00");
+    expect(store.getWallet("S-137-RECE")!.balance).toBe("450.00");
+  });
+
+  it("RECE submitted before any matching DELI leg is rejected with a 500 system error (#137 ordering)", async () => {
+    const rece = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfodrece`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-137-no-deli", amount: "1.00", currency: "EUR",
+        buyerCashTokenWalletRef: "S-DST", buyerID: ENTITY, sellerCAMBIC: "ECBFDEFFXXX",
+      },
+    });
+    expect(rece.status).toBe(500);
+    expect(rece.json.businessErrors[0].errorCode).toBe("HL-GER-000");
+    // Rejected before any leg is stored — no PENDING_MATCH draft left behind.
+    expect(store.getDraft("PFOD-PFOD-137-no-deli-RECE")).toBeUndefined();
+  });
+
+  it("a RECE leg without sellerCAMBIC is rejected (#137 required field)", async () => {
+    const deli = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfoddeli`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-137-no-cambic", amount: "1.00", currency: "EUR",
+        sellerCashTokenWalletRef: "S-SRC", sellerID: ENTITY,
+      },
+    });
+    expect(deli.status).toBe(201);
+    const rece = await request(server.port, "POST", `/dlt/${NCB}/api/bridge/initpfodrece`, {
+      headers: { authorization: `Bearer ${ext}` },
+      body: {
+        tradeID: "PFOD-137-no-cambic", amount: "1.00", currency: "EUR",
+        buyerCashTokenWalletRef: "S-DST", buyerID: ENTITY,
+      },
+    });
+    expect(rece.status).toBe(400);
+    expect(rece.json.businessErrors[0].errorCode).toBe("HL-VAL-001");
+  });
+
   it("a 2-step transfer create with a 30-char alnum/dash/underscore supplementaryData is accepted (#134 boundary)", async () => {
     const create = await request(server.port, "POST", `/dlt/${NCB}/api/octopus/rvs/transactions-requests`, {
       headers: { authorization: `Bearer ${u1}` },

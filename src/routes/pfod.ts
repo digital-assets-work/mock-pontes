@@ -29,8 +29,18 @@ function expired(leg: Draft, now: number): boolean {
  * Two one-sided legs (deliver = seller, receive = buyer) are submitted
  * independently and matched on `tradeID`. Each leg persists as a `PENDING_MATCH`
  * PFOD draft; when its counterpart arrives (consistent `amount`/`currency`) the
- * matched wallet payment fires (debit seller, credit buyer) → `SETTLED`. An
- * unmatched leg past its window is lazily marked `EXPIRED`.
+ * matched wallet payment fires → `SETTLED`. An unmatched leg past its window
+ * is lazily marked `EXPIRED`.
+ *
+ * **Settlement direction (issue #137, confirmed live against real Pontes
+ * UTEST, including via a raw API test bypassing all bridge business logic):**
+ * whoever submits the DELI leg is **credited**, whoever submits the RECE leg
+ * is **debited** once it settles — the reverse of what the `seller`/`buyer`
+ * field naming suggests. `DELI` must always be submitted first: submitting
+ * `RECE` before a matching `DELI` leg exists is a hard backend failure on
+ * real Pontes (a generic 500 "system error", not a clean validation/business
+ * error) — `initpfodrece` rejects up front (without persisting the RECE leg)
+ * when no `PENDING_MATCH` DELI leg exists yet for the trade.
  *
  * `supplementaryData` (issue #134, v1.1 newly documents it on both leg
  * requests) is validated with the same real-UTEST charset/length rule as
@@ -110,14 +120,16 @@ export function createPfodRouter(store: MockStore) {
         ],
       };
     }
-    // Match → settle: debit seller (deliver.debited), credit buyer (receive.credited).
-    const seller = deliver.debitedWalletAlias;
-    const buyer = receive.creditedWalletAlias;
-    const sellerWallet = store.getWallet(seller);
-    const caller = sellerWallet?.ownerEntityID ? { entityBIC: sellerWallet.ownerEntityID } : undefined;
+    // Match → settle (confirmed real-Pontes direction, issue #137 — the
+    // reverse of what the "seller"/"buyer" field naming suggests): credit
+    // the DELI submitter's wallet, debit the RECE submitter's wallet.
+    const deliverWallet = deliver.debitedWalletAlias;
+    const receiveWallet = receive.creditedWalletAlias;
+    const debitedWallet = store.getWallet(receiveWallet);
+    const caller = debitedWallet?.ownerEntityID ? { entityBIC: debitedWallet.ownerEntityID } : undefined;
     try {
       workflow.execute(
-        { id: `PFOD-${tradeID}`, amount: deliver.amount, currency: deliver.currency, creditedWalletAlias: buyer, debitedWalletAlias: seller },
+        { id: `PFOD-${tradeID}`, amount: deliver.amount, currency: deliver.currency, creditedWalletAlias: deliverWallet, debitedWalletAlias: receiveWallet },
         { caller },
       );
     } catch (e) {
@@ -125,7 +137,7 @@ export function createPfodRouter(store: MockStore) {
     }
     store.updateDraft(deliver.id, { status: "SETTLED" });
     store.updateDraft(receive.id, { status: "SETTLED" });
-    return { tradeID, status: "SETTLED", debitedCashWalletAlias: seller, creditedCashWalletAlias: buyer, amount: deliver.amount, currency: deliver.currency };
+    return { tradeID, status: "SETTLED", debitedCashWalletAlias: receiveWallet, creditedCashWalletAlias: deliverWallet, amount: deliver.amount, currency: deliver.currency };
   }
 
   // POST /dlt/:ncb/api/bridge/initpfoddeli — Deliver (seller) leg
@@ -170,10 +182,14 @@ export function createPfodRouter(store: MockStore) {
     "/dlt/:ncb/api/bridge/initpfodrece",
     defineEventHandler(async (event) => {
       const body = await readBody(event);
-      const { tradeID, amount, currency, buyerCashTokenWalletRef, supplementaryData } = body;
-      if (!tradeID || !amount || !currency || !buyerCashTokenWalletRef) {
+      const { tradeID, amount, currency, buyerCashTokenWalletRef, sellerCAMBIC, supplementaryData } = body;
+      // `sellerCAMBIC` is mandatory on RECE per the official schema (issue #137)
+      // — already enforced end-to-end by the global ajv request-validation
+      // middleware (`bridge.PFoDReceRequest.required`), but duplicated here
+      // for defense-in-depth, consistent with the other required fields below.
+      if (!tradeID || !amount || !currency || !buyerCashTokenWalletRef || !sellerCAMBIC) {
         setResponseStatus(event, 400);
-        return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, buyerCashTokenWalletRef" }] };
+        return { businessErrors: [{ errorCode: "HL-VAL-001", errorDescription: "Missing required fields: tradeID, amount, currency, buyerCashTokenWalletRef, sellerCAMBIC" }] };
       }
       const suppErr = supplementaryDataError(supplementaryData);
       if (suppErr) {
@@ -185,6 +201,23 @@ export function createPfodRouter(store: MockStore) {
       if (!store.getWallet(buyerCashTokenWalletRef)) {
         setResponseStatus(event, 422);
         return { businessErrors: [{ errorCode: "HL-WAL-003", errorDescription: unknownWalletMessage("Credit", buyerCashTokenWalletRef) }] };
+      }
+      // Confirmed real-Pontes behavior (issue #137): submitting RECE before a
+      // matching DELI leg exists is a hard backend failure (a generic 500
+      // "system error"), not a clean validation/business error. Reject
+      // up front — without persisting this RECE leg — rather than silently
+      // accepting it as PENDING_MATCH the way the mock previously did.
+      // `HL-GER-000` is this codebase's existing generic-failure fallback
+      // code (see `error-response.ts`), the closest fit in its own
+      // conventions for an unmodelled backend error.
+      const deliverLeg = store.getDraft(deliverId(tradeID));
+      if (!deliverLeg || deliverLeg.status !== "PENDING_MATCH") {
+        setResponseStatus(event, 500);
+        return {
+          businessErrors: [
+            { errorCode: "HL-GER-000", errorDescription: `No matching DELI leg found for trade ${tradeID}; RECE must be submitted after DELI` },
+          ],
+        };
       }
       storeLeg(receiveId(tradeID), tradeID, amount, currency, "", buyerCashTokenWalletRef, (event.context.auth as AuthContext | undefined)?.userUUID);
       setResponseStatus(event, 201);
