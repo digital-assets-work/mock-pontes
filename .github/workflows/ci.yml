@@ -29,17 +29,37 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: test
+    # Only a push to main needs to publish anything; PR builds just validate
+    # the Dockerfile and never need registry write access.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (no push)
+      # `:dev` tracks the latest build of `main` so an image is always
+      # pullable between releases, mirroring how a release updates `:latest`
+      # (see release.yml). PRs keep the previous build-only (no push)
+      # behavior, so forked/untrusted PRs never need registry credentials.
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          tags: mock-pontes:ci
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && format('ghcr.io/{0}:dev', github.repository) || 'mock-pontes:ci' }}
+          build-args: |
+            COMMIT_HASH=${{ github.sha }}
+            GIT_REF_NAME=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
