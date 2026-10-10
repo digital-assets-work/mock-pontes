@@ -722,7 +722,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       const xvpId = init.json.xvpTransactionId as string;
       // The buyer pays, naming their (funded) wallet.
       const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
-        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "EIB-XFER-01" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
+        body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "EIB-XFER-01" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
       });
       expect(pay.status).toBe(200);
       expect(pay.json.xvpTransactionId).toBe(xvpId);
@@ -789,7 +789,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       const xvpId = init.json.xvpTransactionId as string;
       // Buyer pays after the timeout → 409, no debit.
       const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
-        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "EIB-TO" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
+        body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "EIB-TO" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
       });
       expect(pay.status).toBe(409);
       expect(s.getWallet("EIB-TO")?.balance).toBe("1000.00");
@@ -823,7 +823,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       // Buyer initiates a well-formed payment within the window but has no funds
       // → 422 (the attempt is recorded).
       const failed = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
-        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "EIB-UN" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
+        body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "EIB-UN" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
       });
       expect(failed.status).toBe(422);
       // Force the timeout to pass.
@@ -945,7 +945,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       // follow-on payment against the resolved (main) wallet proves it was used.
       expect(get.status).toBe(200);
       const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${res.json.xvpTransactionId}/payment`, {
-        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "W-139-BUYER" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.00", currency: "EUR" },
+        body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "W-139-BUYER" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.00", currency: "EUR" },
       });
       expect(pay.status).toBe(422); // buyer wallet doesn't exist yet — resolution ran before any mutation
       expect(s.getWallet("W-139-MAIN")?.balance).toBe("0.00");
@@ -995,7 +995,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(init.status).toBe(200);
       const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
         body: {
-          buyer: { bic: "BEIILULUXXX", cashWalletAlias: "WBUY-139-MISSING" },
+          buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "WBUY-139-MISSING" },
           seller: { bic: "BSUIFRPPXXX" },
           amount: "10.00",
           currency: "EUR",
@@ -1027,7 +1027,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
         body: {
           // Legacy fields alone, no cashWalletAlias — must be ignored.
-          buyer: { bic: "BEIILULUXXX", cashWalletRef: "WOULD-HAVE-AUTO-CREATED" },
+          buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletRef: "WOULD-HAVE-AUTO-CREATED" },
           buyerCashWalletRef: "WOULD-HAVE-AUTO-CREATED-TOO",
           seller: { bic: "BSUIFRPPXXX" },
           amount: "10.00",
@@ -1058,7 +1058,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(init.status).toBe(200);
       const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
         // No buyer.cashWalletAlias — must resolve by BIC to the main wallet.
-        body: { buyer: { bic: "BEIILULUXXX" }, seller: { bic: "BSUIFRPPXXX" }, amount: "15.00", currency: "EUR" },
+        body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M" }, seller: { bic: "BSUIFRPPXXX" }, amount: "15.00", currency: "EUR" },
       });
       expect(pay.status).toBe(200);
       expect(s.getWallet("WBUY-139-MAIN")?.balance).toBe("85.00");
@@ -1085,6 +1085,196 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     } finally {
       await local.close();
     }
+  });
+
+  describe("XvP payment body validation against the official PaymentRequest (issue #142)", () => {
+    async function initXvp(local: { port: number }) {
+      return request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-142" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+    }
+
+    it("a realistic UUID path invokes the PaymentRequest validator (missing buyer.marketDLTOperator → 400)", async () => {
+      const s = new MemoryStore();
+      s.ensureWallet("WSELL-142", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+      s.ensureWallet("WBUY-142", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+      s.credit("WBUY-142", "100.00");
+      const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+      const local = await listen(localApp);
+      try {
+        const init = await initXvp(local);
+        expect(init.status).toBe(200);
+        // A well-formed-looking request (real UUID path) but missing the
+        // required buyer.marketDLTOperator — the schema validator must catch
+        // it before the handler runs any business logic.
+        const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+          body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "WBUY-142" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.00", currency: "EUR" },
+        });
+        expect(pay.status).toBe(400);
+        expect(pay.json.businessErrors[0].errorDescription).toMatch(/marketDLTOperator/);
+        // No mutation: buyer not debited, no transaction, paymentAttempted unset.
+        expect(s.getWallet("WBUY-142")?.balance).toBe("100.00");
+        expect(s.getTransactions()).toHaveLength(0);
+        const status = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment?key=CANCELLATION`);
+        expect(status.json.payment.status).toBe("PENDING");
+      } finally {
+        await local.close();
+      }
+    });
+
+    it("rejects a missing seller object entirely (400, no mutation)", async () => {
+      const s = new MemoryStore();
+      s.ensureWallet("WSELL-142", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+      s.ensureWallet("WBUY-142", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+      s.credit("WBUY-142", "100.00");
+      const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+      const local = await listen(localApp);
+      try {
+        const init = await initXvp(local);
+        const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+          body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "WBUY-142" }, amount: "10.00", currency: "EUR" },
+        });
+        expect(pay.status).toBe(400);
+        expect(pay.json.businessErrors[0].errorDescription).toMatch(/seller/);
+        expect(s.getWallet("WBUY-142")?.balance).toBe("100.00");
+      } finally {
+        await local.close();
+      }
+    });
+
+    it("rejects a malformed amount (400, no mutation)", async () => {
+      const s = new MemoryStore();
+      s.ensureWallet("WSELL-142", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+      s.ensureWallet("WBUY-142", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+      s.credit("WBUY-142", "100.00");
+      const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+      const local = await listen(localApp);
+      try {
+        const init = await initXvp(local);
+        const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+          body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "WBUY-142" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.123", currency: "EUR" },
+        });
+        expect(pay.status).toBe(400);
+        expect(pay.json.businessErrors.map((e: { errorDescription: string }) => e.errorDescription).join(" ")).toMatch(/amount/i);
+        expect(s.getWallet("WBUY-142")?.balance).toBe("100.00");
+      } finally {
+        await local.close();
+      }
+    });
+
+    it("rejects a non-EUR currency (400, no mutation)", async () => {
+      const s = new MemoryStore();
+      s.ensureWallet("WSELL-142", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+      s.ensureWallet("WBUY-142", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+      s.credit("WBUY-142", "100.00");
+      const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+      const local = await listen(localApp);
+      try {
+        const init = await initXvp(local);
+        const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+          body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "WBUY-142" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.00", currency: "USD" },
+        });
+        expect(pay.status).toBe(400);
+        expect(s.getWallet("WBUY-142")?.balance).toBe("100.00");
+      } finally {
+        await local.close();
+      }
+    });
+
+    it("a spec-valid payment without buyer.cashWalletAlias passes schema validation and reaches the default-wallet resolver", async () => {
+      const s = new MemoryStore();
+      s.ensureWallet("WSELL-142", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+      s.ensureWallet("WBUY-142-MAIN", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR", isMainWallet: true });
+      s.credit("WBUY-142-MAIN", "100.00");
+      const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+      const local = await listen(localApp);
+      try {
+        const init = await initXvp(local);
+        const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+          body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.00", currency: "EUR" },
+        });
+        expect(pay.status).toBe(200);
+        expect(s.getWallet("WBUY-142-MAIN")?.balance).toBe("90.00");
+      } finally {
+        await local.close();
+      }
+    });
+  });
+
+  describe("XvP payment GET ?key= must be exactly EXECUTION or CANCELLATION (issue #142)", () => {
+    async function seedPending() {
+      const s = new MemoryStore();
+      s.ensureWallet("WSELL-142Q", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+      s.ensureWallet("WBUY-142Q", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+      s.credit("WBUY-142Q", "100.00");
+      const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+      const local = await listen(localApp);
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-142Q" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      return { s, local, xvpId: init.json.xvpTransactionId as string };
+    }
+
+    it.each([
+      ["missing", ""],
+      ["empty", "?key="],
+      ["invalid value", "?key=FOO"],
+      ["lowercase", "?key=execution"],
+      ["multivalued", "?key=EXECUTION&key=CANCELLATION"],
+    ])("rejects a %s key for a PENDING record — 400, no secret", async (_label, qs) => {
+      const { local, xvpId } = await seedPending();
+      try {
+        const res = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment${qs}`);
+        expect(res.status).toBe(400);
+        expect(res.json.executionKey).toBeUndefined();
+        expect(res.json.cancellationKey).toBeUndefined();
+      } finally {
+        await local.close();
+      }
+    });
+
+    it("rejects an invalid key for a SETTLED record — 400, no secret", async () => {
+      const { local, xvpId } = await seedPending();
+      try {
+        const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
+          body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "WBUY-142Q" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.00", currency: "EUR" },
+        });
+        expect(pay.status).toBe(200);
+        const res = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment?key=execution`);
+        expect(res.status).toBe(400);
+        expect(res.json.executionKey).toBeUndefined();
+      } finally {
+        await local.close();
+      }
+    });
+
+    it("rejects an invalid key for an expired (BURNED) record — 400, no secret", async () => {
+      const { s, local, xvpId } = await seedPending();
+      try {
+        s.updateDraft(xvpId, { expiresAt: new Date(Date.now() - 1000).toISOString() });
+        const res = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment?key=`);
+        expect(res.status).toBe(400);
+        expect(res.json.cancellationKey).toBeUndefined();
+      } finally {
+        await local.close();
+      }
+    });
+
+    it("both valid enum values preserve the status-based disclosure matrix (no 400, but no secret outside the matching status)", async () => {
+      const { s, local, xvpId } = await seedPending();
+      try {
+        s.updateDraft(xvpId, { expiresAt: new Date(Date.now() - 1000).toISOString() });
+        // BURNED: ?key=EXECUTION is a valid enum value, so 200 — but no
+        // executionKey (only cancellationKey is disclosable in this status).
+        const res = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment?key=EXECUTION`);
+        expect(res.status).toBe(200);
+        expect(res.json.payment.status).toBe("BURNED");
+        expect(res.json.executionKey).toBeUndefined();
+        expect(res.json.cancellationKey).toBeUndefined(); // requested EXECUTION, not CANCELLATION
+      } finally {
+        await local.close();
+      }
+    });
   });
 });
 
