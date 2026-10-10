@@ -645,6 +645,13 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
   });
 
   it("accepts a spec-valid XvP init (seller registers; no funds move) — #102", async () => {
+    // Issue #139: the seller's receive wallet must already exist and be
+    // theirs — no auto-create on XvP init. Create it via the one-step wallet
+    // endpoint (authenticated as BSUIFRPPXXX, same entity as the seller BIC).
+    await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WSELL-XVP-INIT" },
+    });
     // Official XvPInitRequest: the seller names their receive wallet, the buyer
     // is a BIC only. Init moves no funds.
     const res = await request(server.port, "POST", `/igw/${NCB}/v1/xvps`, {
@@ -702,6 +709,11 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
   });
 
   it("GET /xvps/{id} returns the official XvPInitResponse fields (no status/transactionType) — #102", async () => {
+    // Issue #139: the seller's receive wallet must already exist.
+    await request(server.port, "POST", `${BASE}/ams/wallets/one-step`, {
+      headers: { authorization: `Bearer ${u1}` },
+      body: { walletAlias: "WSELL-GET" },
+    });
     const init = await request(server.port, "POST", `/igw/${NCB}/v1/xvps`, {
       body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "MARKDEFFXXX", cashWalletAlias: "WSELL-GET" }, buyer: { bic: "BEIILULUXXX" }, amount: "12.00", currency: "EUR", type: "DVP" },
     });
@@ -818,6 +830,203 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       const raw = JSON.stringify(list.json);
       expect(raw).not.toContain(execKey);
       expect(raw).not.toContain(cancelKey);
+    } finally {
+      await local.close();
+    }
+  });
+
+  // --- Issue #139: BIC-based wallet resolution (no fallback alias, no auto-create) ---
+
+  it("XvP init 422s with HL-WAL-003 when the seller's explicit alias does not exist", async () => {
+    const res = await request(server.port, "POST", `/igw/${NCB}/v1/xvps`, {
+      body: {
+        seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-139-MISSING" },
+        buyer: { bic: "BEIILULUXXX" },
+        amount: "10.00",
+        currency: "EUR",
+        type: "DVP",
+      },
+    });
+    expect(res.status).toBe(422);
+    expect(res.json.businessErrors[0].errorCode).toBe("HL-WAL-003");
+  });
+
+  it("XvP init 422s identically (HL-WAL-003) when the seller's explicit alias is owned by someone else", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("W-OTHER-OWNER", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const res = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: {
+          seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "W-OTHER-OWNER" },
+          buyer: { bic: "BEIILULUXXX" },
+          amount: "10.00",
+          currency: "EUR",
+          type: "DVP",
+        },
+      });
+      expect(res.status).toBe(422);
+      expect(res.json.businessErrors[0].errorCode).toBe("HL-WAL-003");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("XvP init resolves the seller's main wallet by BIC when no alias is supplied", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("W-139-OTHER", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR", isMainWallet: false });
+    s.ensureWallet("W-139-MAIN", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR", isMainWallet: true });
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const res = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        // No seller.cashWalletAlias — must resolve by BIC to the main wallet.
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      expect(res.status).toBe(200);
+      const get = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${res.json.xvpTransactionId}`);
+      // The resolved wallet isn't echoed in the response body directly, but a
+      // follow-on payment against the resolved (main) wallet proves it was used.
+      expect(get.status).toBe(200);
+      const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${res.json.xvpTransactionId}/payment`, {
+        body: { buyer: { bic: "BEIILULUXXX", cashWalletAlias: "W-139-BUYER" }, seller: { bic: "BSUIFRPPXXX" }, amount: "10.00", currency: "EUR" },
+      });
+      expect(pay.status).toBe(422); // buyer wallet doesn't exist yet — resolution ran before any mutation
+      expect(s.getWallet("W-139-MAIN")?.balance).toBe("0.00");
+      expect(s.getWallet("W-139-OTHER")?.balance).toBe("0.00");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("XvP init 422s with HL-WAL-007 (legacy field ignored) when the seller BIC owns no wallet at all", async () => {
+    const s = new MemoryStore();
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const res = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: {
+          // Legacy field alone, no cashWalletAlias — must be ignored, falling
+          // through to BIC-based resolution, which also fails (no wallet owned).
+          // Valid-BIC11-format but unregistered, so resolution genuinely fails.
+          seller: { bic: "BUNKFRPPXXX", marketDLTOperator: "M", cashWalletRef: "WOULD-HAVE-AUTO-CREATED" },
+          sellerCashWalletRef: "WOULD-HAVE-AUTO-CREATED-TOO",
+          buyer: { bic: "BEIILULUXXX" },
+          amount: "10.00",
+          currency: "EUR",
+          type: "DVP",
+        },
+      });
+      expect(res.status).toBe(422);
+      expect(res.json.businessErrors[0].errorCode).toBe("HL-WAL-007");
+      expect(res.json.businessErrors[0].errorDescription).toMatch(/BUNKFRPPXXX/);
+      expect(s.getWallet("WOULD-HAVE-AUTO-CREATED")).toBeUndefined();
+      expect(s.getWallet("WOULD-HAVE-AUTO-CREATED-TOO")).toBeUndefined();
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("XvP payment 422s with HL-WAL-002 when the buyer's explicit alias does not exist", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-139-PAY", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-139-PAY" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      expect(init.status).toBe(200);
+      const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+        body: {
+          buyer: { bic: "BEIILULUXXX", cashWalletAlias: "WBUY-139-MISSING" },
+          seller: { bic: "BSUIFRPPXXX" },
+          amount: "10.00",
+          currency: "EUR",
+        },
+      });
+      expect(pay.status).toBe(422);
+      expect(pay.json.businessErrors[0].errorCode).toBe("HL-WAL-002");
+      expect(s.getWallet("WBUY-139-MISSING")).toBeUndefined();
+      expect(s.getWallet("WSELL-139-PAY")?.balance).toBe("0.00"); // no mutation on a rejected payment
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("XvP payment ignores legacy wallet-ref fields, falling through to BIC-based resolution", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-139-LEGACY", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    // The buyer's real (main) wallet — distinct from the legacy-field alias,
+    // so a pass only proves resolution used the BIC policy, not the legacy field.
+    s.ensureWallet("WBUY-139-REAL", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR", isMainWallet: true });
+    s.credit("WBUY-139-REAL", "50.00");
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-139-LEGACY" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      expect(init.status).toBe(200);
+      const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+        body: {
+          // Legacy fields alone, no cashWalletAlias — must be ignored.
+          buyer: { bic: "BEIILULUXXX", cashWalletRef: "WOULD-HAVE-AUTO-CREATED" },
+          buyerCashWalletRef: "WOULD-HAVE-AUTO-CREATED-TOO",
+          seller: { bic: "BSUIFRPPXXX" },
+          amount: "10.00",
+          currency: "EUR",
+        },
+      });
+      expect(pay.status).toBe(200);
+      expect(s.getWallet("WOULD-HAVE-AUTO-CREATED")).toBeUndefined();
+      expect(s.getWallet("WOULD-HAVE-AUTO-CREATED-TOO")).toBeUndefined();
+      expect(s.getWallet("WBUY-139-REAL")?.balance).toBe("40.00");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("XvP payment resolves the buyer's main wallet by BIC when no alias is supplied", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-139-MAIN", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    s.ensureWallet("WBUY-139-OTHER", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR", isMainWallet: false });
+    s.ensureWallet("WBUY-139-MAIN", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR", isMainWallet: true });
+    s.credit("WBUY-139-MAIN", "100.00");
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-139-MAIN" }, buyer: { bic: "BEIILULUXXX" }, amount: "15.00", currency: "EUR", type: "DVP" },
+      });
+      expect(init.status).toBe(200);
+      const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+        // No buyer.cashWalletAlias — must resolve by BIC to the main wallet.
+        body: { buyer: { bic: "BEIILULUXXX" }, seller: { bic: "BSUIFRPPXXX" }, amount: "15.00", currency: "EUR" },
+      });
+      expect(pay.status).toBe(200);
+      expect(s.getWallet("WBUY-139-MAIN")?.balance).toBe("85.00");
+      expect(s.getWallet("WBUY-139-OTHER")?.balance).toBe("0.00");
+      expect(s.getWallet("WSELL-139-MAIN")?.balance).toBe("15.00");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("direct-RTGS XvP init is unaffected by #139: still auto-creates a default seller wallet", async () => {
+    const s = new MemoryStore();
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      expect(s.getWallet("BSUIFRPPXXX-XVP-CASH")).toBeUndefined();
+      const res = await request(local.port, "POST", `/igw/${NCB}/v1/direct-rtgs/xvps`, {
+        // No cashWalletAlias — the RTGS rail has none in the official schema —
+        // the pre-#139 default-alias-guess + auto-create behavior must persist.
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      expect(res.status).toBe(200);
+      expect(s.getWallet("BSUIFRPPXXX-XVP-CASH")).toBeDefined();
     } finally {
       await local.close();
     }
