@@ -64,8 +64,15 @@ function resolveXvpWallet(
  *   POST /igw/{ncb}/v1/xvps                         → init (locks funds)
  *   POST /igw/{ncb}/v1/direct-rtgs/xvps             → init (direct-RTGS variant)
  *   GET  /igw/{ncb}/v1/xvps/{id}                    → XvP status
- *   POST /igw/{ncb}/v1/xvps/{id}/payment            → execute / cancel (preimage)
- *   GET  /igw/{ncb}/v1/xvps/{id}/payment            → payment status
+ *   POST /igw/{ncb}/v1/xvps/{id}/payment            → execute (debit buyer, credit seller)
+ *   GET  /igw/{ncb}/v1/xvps/{id}/payment            → payment status + conditional key disclosure
+ *
+ * There is no cancellation *endpoint* here: cancellation is driven by the
+ * seller off-ledger (e.g. on the asset leg) once the cancellation key is
+ * disclosed via the GET above after a timeout — this mock does not itself
+ * reverse/burn anything cash-side when that happens. Also no cross-ledger
+ * atomicity is implemented or claimed: the cash and asset legs are entirely
+ * independent systems from this mock's point of view.
  */
 export function createXvpRouter(store: MockStore) {
   const router = track(createRouter());
@@ -106,8 +113,12 @@ export function createXvpRouter(store: MockStore) {
         timeoutSec: body.timeoutSec as number | undefined,
       });
       // Official success is 200 + XvPInitResponse (echoes buyer/seller/amount/
-      // currency/type alongside the hash-lock params). The preimage keys are a
-      // mock convenience, outside the official schema.
+      // currency/type alongside the hash-lock params). Issue #140: the
+      // execution/cancellation secrets are deliberately NOT echoed here —
+      // they are disclosed only via the payment-outcome query (conditional
+      // disclosure: executionKey once SETTLED, cancellationKey once
+      // UNSETTLED/BURNED). They remain stored internally (workflow.init()
+      // persists them) for that later retrieval.
       setResponseStatus(event, 200);
       return {
         xvpTransactionId: result.xvpTransactionId,
@@ -120,8 +131,6 @@ export function createXvpRouter(store: MockStore) {
         currency: body.currency,
         type: transactionType,
         status: result.status,
-        executionKey: result.executionKey,
-        cancellationKey: result.cancellationKey,
       };
     } catch (e) {
       return reject(event, e);

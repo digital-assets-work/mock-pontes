@@ -32,7 +32,13 @@ export interface XvpInitResult {
   status: "INITIALIZED";
   executionHash: string;
   cancellationHash: string;
-  /** Mock convenience: the preimages are returned so a client can execute/cancel. */
+  /**
+   * Returned by `init()` for the workflow's own internal persistence only
+   * (issue #140: the route layer must NOT echo these in the init HTTP
+   * response — they are disclosed later, conditionally, via the
+   * payment-outcome query: `executionKey` once SETTLED, `cancellationKey`
+   * once UNSETTLED/BURNED).
+   */
   executionKey: string;
   cancellationKey: string;
   timeout: string;
