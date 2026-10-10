@@ -354,10 +354,13 @@ official funding/defunding/transaction/wallet endpoints instead.
   `POST .../xvps/{id}/payment` — naming their cash wallet: when the buyer/seller
   BICs, amount and currency match the initialisation, the buyer wallet is funded,
   and the caller may debit it, the buyer's wallet is **debited** and the seller's
-  wallet **credited** (a new `XVP` transaction), returning the `executionKey` (to
-  the buyer, on `SETTLED`). `GET .../xvps/{id}` and `.../payment` report status.
-  *(Mock convenience: the hash-lock secrets are returned so a client can drive the
-  asset leg; a real deployment keeps them with the parties.)* XvP **init**
+  wallet **credited** (a new `XVP` transaction). `GET .../xvps/{id}` and
+  `.../payment` report status; `.../payment?key=EXECUTION|CANCELLATION`
+  conditionally discloses the matching secret (`executionKey` to the buyer once
+  `SETTLED`; `cancellationKey` once `UNSETTLED`/`BURNED`) — **neither secret is
+  ever echoed at init** (#140). Each hash is `SHA-256` of the key's **decoded 32
+  bytes**, not of its 64-character hex text (#141); a verifier must hex-decode
+  the key before hashing to reproduce the commitment. XvP **init**
   is **not** NRO-signed (the spec models no `## Signing Rules:` there); per the
   spec, NRO applies to the direct-RTGS XvP `/payment`
   (`xvpTransactionId + amount + buyer.bic + seller.bic`), effective once that

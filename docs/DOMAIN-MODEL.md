@@ -410,6 +410,16 @@ Two variants live on the **IGW** (inbound gateway):
 | `Payment` | `id`, `status` (`PaymentStatus`), `reason` |
 | `PaymentResponse` | `xvpTransactionId`, `payment`, **`executionKey`**, **`cancellationKey`** |
 
+> **Hash convention (issue #141).** `executionKey`/`cancellationKey` are
+> 32 random bytes, encoded on the wire as 64 lowercase hex characters.
+> `executionHash`/`cancellationHash` are `SHA-256` of those **decoded bytes**,
+> *not* of the 64-character hex text — a verifier must hex-decode the key
+> before hashing it to reproduce the commitment. Golden vector: a 32-byte
+> all-zero key (`"0"` × 64 on the wire) hashes to
+> `66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925`.
+> Records created before this convention keep whichever commitment they were
+> issued with; only new `init()` calls use byte-hashing.
+
 ### Flow
 
 1. **Init** — `POST /igw/{ncb}/v1/xvps` with `XvPInitRequest`. Pontes locks the

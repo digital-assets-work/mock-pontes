@@ -731,8 +731,13 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(pay.json.executionKey).toHaveLength(64);
       expect(pay.json.cancellationKey).toBeUndefined();
       // Issue #140: the disclosed key is THE matching secret for this XvP —
-      // it must hash to the init response's executionHash.
-      expect(createHash("sha256").update(pay.json.executionKey as string).digest("hex")).toBe(init.json.executionHash);
+      // it must hash to the init response's executionHash. Issue #141: the
+      // commitment is SHA-256 of the *decoded bytes*, not the hex text, so
+      // the wire key must be hex-decoded before hashing to verify it.
+      expect(createHash("sha256").update(Buffer.from(pay.json.executionKey as string, "hex")).digest("hex")).toBe(init.json.executionHash);
+      // Regression: hashing the raw hex *text* (the pre-#141 bug) must NOT
+      // reproduce the commitment — proving the server truly hashes bytes.
+      expect(createHash("sha256").update(pay.json.executionKey as string).digest("hex")).not.toBe(init.json.executionHash);
       // Buyer debited, seller credited, transaction records buyer → seller.
       expect(s.getWallet("EIB-XFER-01")?.balance).toBe("960.00");
       expect(s.getWallet("WSELL-XFER")?.balance).toBe("40.00");
@@ -796,7 +801,8 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(cancel.json.cancellationKey).toHaveLength(64);
       expect(cancel.json.executionKey).toBeUndefined();
       // Issue #140: the disclosed cancellation key matches this XvP's hash.
-      expect(createHash("sha256").update(cancel.json.cancellationKey as string).digest("hex")).toBe(init.json.cancellationHash);
+      // Issue #141: hex-decode before hashing (byte commitment, not text).
+      expect(createHash("sha256").update(Buffer.from(cancel.json.cancellationKey as string, "hex")).digest("hex")).toBe(init.json.cancellationHash);
     } finally {
       await local.close();
     }
