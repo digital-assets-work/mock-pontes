@@ -21,6 +21,7 @@ import {
   expect,
   beforeAll,
   afterAll,
+  afterEach,
 } from "@jest/globals";
 import http from "node:http";
 import { createHash, createSign, webcrypto } from "node:crypto";
@@ -37,6 +38,7 @@ import { buildApp } from "../../src/app.js";
 import { MemoryStore } from "../../src/state/memory-store.js";
 import { getRuntimePkiBundle } from "../../src/auth/runtime-pki.js";
 import { createInMemoryAuthUsersRepository } from "../../src/auth/users-repository.js";
+import { xvpCommitmentHash } from "../../src/workflows/xvp-commitment.js";
 import officialSpec from "../../src/ui/spec/pontes-official-v1.1.json";
 import { buildSigningData } from "../../src/auth/nro-middleware.js";
 import { ISSUANCE_WALLET_ALIAS, ISSUANCE_WALLET_BIC } from "../../src/state/issuance-wallet.js";
@@ -762,6 +764,10 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
   it("XvP payment: buyer pays — debits buyer, credits seller, returns PaymentResponse + executionKey (#102)", async () => {
     // Own store so the transfer can be inspected. The seller receives (starts
     // empty); the buyer's wallet is funded and is the one debited.
+    // Issue #145: explicitly exercise the opt-in byte-hashing convention here
+    // (this test predates #145 and was written against #141's original
+    // unconditional byte-only behavior) — the default is now hex-string.
+    process.env.XVP_HASH_METHOD = "bytes";
     const s = new MemoryStore();
     s.ensureWallet("WSELL-XFER", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
     s.ensureWallet("EIB-XFER-01", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
@@ -786,12 +792,14 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(pay.json.executionKey).toHaveLength(64);
       expect(pay.json.cancellationKey).toBeUndefined();
       // Issue #140: the disclosed key is THE matching secret for this XvP —
-      // it must hash to the init response's executionHash. Issue #141: the
+      // it must hash to the init response's executionHash. Issue #141/#145:
+      // under the (here explicitly configured) byte convention, the
       // commitment is SHA-256 of the *decoded bytes*, not the hex text, so
       // the wire key must be hex-decoded before hashing to verify it.
       expect(createHash("sha256").update(Buffer.from(pay.json.executionKey as string, "hex")).digest("hex")).toBe(init.json.executionHash);
-      // Regression: hashing the raw hex *text* (the pre-#141 bug) must NOT
-      // reproduce the commitment — proving the server truly hashes bytes.
+      // Regression: hashing the raw hex *text* (the pre-#141 bug / the #145
+      // hex-string convention) must NOT reproduce the byte-mode commitment —
+      // proving the server truly hashed bytes here, not text.
       expect(createHash("sha256").update(pay.json.executionKey as string).digest("hex")).not.toBe(init.json.executionHash);
       // Buyer debited, seller credited, transaction records buyer → seller.
       expect(s.getWallet("EIB-XFER-01")?.balance).toBe("960.00");
@@ -804,6 +812,7 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(tx?.supplementaryData).toBe(xvpId);
     } finally {
       await local.close();
+      delete process.env.XVP_HASH_METHOD;
     }
   });
 
@@ -829,6 +838,10 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
   });
 
   it("XvP timeout with no payment → BURNED; buyer pay fails 409; seller ?key=CANCELLATION returns the cancellation key — #102", async () => {
+    // Issue #145: explicitly exercise the opt-in byte-hashing convention here
+    // (this test predates #145 and was written against #141's original
+    // unconditional byte-only behavior) — the default is now hex-string.
+    process.env.XVP_HASH_METHOD = "bytes";
     const s = new MemoryStore();
     s.ensureWallet("WSELL-TO", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
     s.ensureWallet("EIB-TO", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
@@ -857,10 +870,12 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(cancel.json.cancellationKey).toHaveLength(64);
       expect(cancel.json.executionKey).toBeUndefined();
       // Issue #140: the disclosed cancellation key matches this XvP's hash.
-      // Issue #141: hex-decode before hashing (byte commitment, not text).
+      // Issue #141/#145: hex-decode before hashing (the here explicitly
+      // configured byte convention, not the #145 default hex-string one).
       expect(createHash("sha256").update(Buffer.from(cancel.json.cancellationKey as string, "hex")).digest("hex")).toBe(init.json.cancellationHash);
     } finally {
       await local.close();
+      delete process.env.XVP_HASH_METHOD;
     }
   });
 
@@ -1596,6 +1611,102 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
         await local.close();
       }
     });
+  });
+
+  describe("XvP hash-method commitment across the full flow (issue #145)", () => {
+    const ORIGINAL_ENV = process.env.XVP_HASH_METHOD;
+    const SELLER = "WSELL-145";
+    const BUYER_W = "WBUY-145";
+
+    afterEach(() => {
+      if (ORIGINAL_ENV === undefined) delete process.env.XVP_HASH_METHOD;
+      else process.env.XVP_HASH_METHOD = ORIGINAL_ENV;
+    });
+
+    async function buildLocalApp(method: "hex-string" | "bytes") {
+      process.env.XVP_HASH_METHOD = method;
+      const s = new MemoryStore();
+      s.ensureWallet(SELLER, { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+      s.ensureWallet(BUYER_W, { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+      s.credit(BUYER_W, "100.00");
+      // XVP_HASH_METHOD is resolved once, when createXvpRouter() constructs
+      // the XvpWorkflow inside buildApp() — matching "validate once at
+      // startup/configuration loading" in production.
+      return buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    }
+
+    it.each(["hex-string", "bytes"] as const)(
+      "a SETTLED payment's disclosed executionKey reproduces the init executionHash under %s",
+      async (method) => {
+        const localApp = await buildLocalApp(method);
+        const local = await listen(localApp);
+        try {
+          const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+            body: {
+              seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: SELLER },
+              buyer: { bic: "BEIILULUXXX" },
+              amount: "10.00",
+              currency: "EUR",
+              type: "DVP",
+            },
+          });
+          expect(init.status).toBe(200);
+          const { executionHash } = init.json;
+
+          const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment`, {
+            headers: { authorization: await buyerAuthHeader() },
+            body: {
+              buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: BUYER_W },
+              seller: { bic: "BSUIFRPPXXX" },
+              amount: "10.00",
+              currency: "EUR",
+            },
+          });
+          expect(pay.status).toBe(200);
+          const executionKey: string = pay.json.executionKey;
+          expect(executionKey).toMatch(/^[0-9a-f]{64}$/);
+          // The disclosed key, re-hashed under the SAME configured method,
+          // must reproduce the commitment issued at init.
+          expect(xvpCommitmentHash(executionKey, method)).toBe(executionHash);
+        } finally {
+          await local.close();
+        }
+      },
+    );
+
+    it.each(["hex-string", "bytes"] as const)(
+      "a BURNED (timed-out, never-paid) XvP's disclosed cancellationKey reproduces the init cancellationHash under %s",
+      async (method) => {
+        const localApp = await buildLocalApp(method);
+        const local = await listen(localApp);
+        try {
+          const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+            body: {
+              seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: SELLER },
+              buyer: { bic: "BEIILULUXXX" },
+              amount: "10.00",
+              currency: "EUR",
+              type: "DVP",
+              timeoutSec: -1,
+            },
+          });
+          expect(init.status).toBe(200);
+          const { cancellationHash } = init.json;
+
+          const status = await request(
+            local.port,
+            "GET",
+            `/igw/${NCB}/v1/xvps/${init.json.xvpTransactionId}/payment?key=CANCELLATION`,
+          );
+          expect(status.json.payment.status).toBe("BURNED");
+          const cancellationKey: string = status.json.cancellationKey;
+          expect(cancellationKey).toMatch(/^[0-9a-f]{64}$/);
+          expect(xvpCommitmentHash(cancellationKey, method)).toBe(cancellationHash);
+        } finally {
+          await local.close();
+        }
+      },
+    );
   });
 });
 

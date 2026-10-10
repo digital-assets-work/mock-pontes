@@ -4,7 +4,7 @@
  * (issue #14).
  */
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, afterEach } from "@jest/globals";
 import { MemoryStore } from "../src/state/memory-store.js";
 import { CacheMemory } from "../src/cache/in-memory.js";
 import { TransferWorkflow } from "../src/workflows/transfer.js";
@@ -13,6 +13,7 @@ import { PaymentWorkflow } from "../src/workflows/payment.js";
 import { DirectRtgsWorkflow } from "../src/workflows/direct-rtgs.js";
 import { PfodWorkflow } from "../src/workflows/pfod.js";
 import { XvpWorkflow } from "../src/workflows/xvp.js";
+import { xvpCommitmentHash } from "../src/workflows/xvp-commitment.js";
 import { isWorkflowRejection, WorkflowRejection } from "../src/workflows/workflow.js";
 
 function seededStore(): MemoryStore {
@@ -490,6 +491,89 @@ describe("XvpWorkflow (cash leg: buyer → seller — issue #21)", () => {
       wf.pay("XVP-TO", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR", caller: BUYER }),
     ).rejects.toMatchObject({ statusCode: 409 });
     expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
+  });
+
+  describe("XVP_HASH_METHOD (issue #145)", () => {
+    const ORIGINAL_ENV = process.env.XVP_HASH_METHOD;
+
+    afterEach(() => {
+      if (ORIGINAL_ENV === undefined) delete process.env.XVP_HASH_METHOD;
+      else process.env.XVP_HASH_METHOD = ORIGINAL_ENV;
+    });
+
+    it("defaults to hex-string when neither the option nor XVP_HASH_METHOD is set", () => {
+      delete process.env.XVP_HASH_METHOD;
+      const { r } = init();
+      expect(r.executionHash).toBe(xvpCommitmentHash(r.executionKey, "hex-string"));
+      expect(r.cancellationHash).toBe(xvpCommitmentHash(r.cancellationKey, "hex-string"));
+    });
+
+    it("explicit hashMethod: 'bytes' option produces byte-mode commitments for both keys", () => {
+      const store = seed();
+      const wf = new XvpWorkflow(store, { hashMethod: "bytes" });
+      const r = wf.init({
+        xvpTransactionId: "XVP-BYTES",
+        transactionType: "DVP",
+        amount: "40.00",
+        currency: "EUR",
+        sellerWalletAlias: "SELLER-W",
+        sellerBic: "BANKAXXXXXX",
+        buyerBic: "BANKBXXXXXX",
+      });
+      expect(r.executionHash).toBe(xvpCommitmentHash(r.executionKey, "bytes"));
+      expect(r.cancellationHash).toBe(xvpCommitmentHash(r.cancellationKey, "bytes"));
+      // Proves the two modes actually diverge for this record, not just in isolation.
+      expect(r.executionHash).not.toBe(xvpCommitmentHash(r.executionKey, "hex-string"));
+    });
+
+    it("XVP_HASH_METHOD env var wires through when no explicit option is given", () => {
+      process.env.XVP_HASH_METHOD = "bytes";
+      const { r } = init();
+      expect(r.executionHash).toBe(xvpCommitmentHash(r.executionKey, "bytes"));
+    });
+
+    it("an explicit hashMethod option overrides XVP_HASH_METHOD", () => {
+      process.env.XVP_HASH_METHOD = "bytes";
+      const store = seed();
+      const wf = new XvpWorkflow(store, { hashMethod: "hex-string" });
+      const r = wf.init({
+        xvpTransactionId: "XVP-OVERRIDE",
+        transactionType: "DVP",
+        amount: "40.00",
+        currency: "EUR",
+        sellerWalletAlias: "SELLER-W",
+        sellerBic: "BANKAXXXXXX",
+        buyerBic: "BANKBXXXXXX",
+      });
+      expect(r.executionHash).toBe(xvpCommitmentHash(r.executionKey, "hex-string"));
+    });
+
+    it("rejects an unsupported nonempty XVP_HASH_METHOD with a clear configuration error", () => {
+      process.env.XVP_HASH_METHOD = "garbage";
+      expect(() => new XvpWorkflow(seed())).toThrow(/XVP_HASH_METHOD/);
+    });
+
+    it("a mode change only affects newly initialized records — existing commitments are never recomputed", async () => {
+      const store = seed();
+      const hexWf = new XvpWorkflow(store, { hashMethod: "hex-string" });
+      const original = hexWf.init({
+        xvpTransactionId: "XVP-STABLE",
+        transactionType: "DVP",
+        amount: "40.00",
+        currency: "EUR",
+        sellerWalletAlias: "SELLER-W",
+        sellerBic: "BANKAXXXXXX",
+        buyerBic: "BANKBXXXXXX",
+      });
+
+      // A fresh workflow instance (e.g. after a restart with a changed
+      // setting) reading the same store must report the exact same hashes.
+      const bytesWf = new XvpWorkflow(store, { hashMethod: "bytes" });
+      const reread = await bytesWf.get("XVP-STABLE");
+      expect(reread).toBeDefined();
+      expect(reread?.executionHash).toBe(original.executionHash);
+      expect(reread?.cancellationHash).toBe(original.cancellationHash);
+    });
   });
 });
 
