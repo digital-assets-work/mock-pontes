@@ -1,6 +1,7 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { DcwCaller } from "../state/dcw.js";
 import { Workflow, WorkflowRejection } from "./workflow.js";
+import { xvpCommitmentHash } from "./xvp-commitment.js";
 
 export type XvpTransactionType = "DVP" | "PVP";
 export type XvpKeyType = "EXECUTION" | "CANCELLATION";
@@ -46,10 +47,6 @@ export interface XvpInitResult {
 
 const DEFAULT_TIMEOUT_SEC = Number(process.env.PONTES_XVP_TIMEOUT_SEC || 3600);
 
-function sha256Hex(preimage: string): string {
-  return createHash("sha256").update(preimage).digest("hex");
-}
-
 /**
  * XvP (Hash-Linked cash leg).
  *
@@ -81,11 +78,17 @@ export class XvpWorkflow extends Workflow {
       throw new WorkflowRejection(400, "HL-XVP-001", `Invalid XvP transactionType '${params.transactionType}'`);
     }
 
-    const executionKey = randomBytes(32).toString("hex");
-    const cancellationKey = randomBytes(32).toString("hex");
+    const executionKeyBytes = randomBytes(32);
+    const cancellationKeyBytes = randomBytes(32);
+    const executionKey = executionKeyBytes.toString("hex");
+    const cancellationKey = cancellationKeyBytes.toString("hex");
     const paymentId = randomUUID();
-    const executionHash = sha256Hex(executionKey);
-    const cancellationHash = sha256Hex(cancellationKey);
+    // Commitments are derived from the raw secret bytes (issue #141), not the
+    // hex text above. Existing persisted records keep whatever hash they were
+    // created with — only new `init()` calls use this convention, so no
+    // upgrade/migration of stored commitments is needed.
+    const executionHash = xvpCommitmentHash(executionKeyBytes);
+    const cancellationHash = xvpCommitmentHash(cancellationKeyBytes);
     const now = new Date();
     const timeout = new Date(now.getTime() + (params.timeoutSec ?? DEFAULT_TIMEOUT_SEC) * 1000).toISOString();
 
