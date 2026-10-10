@@ -205,12 +205,16 @@ export function createXvpRouter(store: MockStore) {
     }),
   );
 
-  // GET XvP status — official XvPInitResponse shape.
+  // GET XvP status — official XvPInitResponse shape. Issue #144: `workflow.get()`
+  // is one of the three triggers (alongside payment admission and GET payment)
+  // that can observe and persist a first-time expiry transition — it must not
+  // add any field to this response beyond the official shape below, so a
+  // persisted EXPIRED stays an internal-only side effect here.
   router.get(
     "/igw/:ncb/v1/xvps/:id",
-    defineEventHandler((event) => {
+    defineEventHandler(async (event) => {
       const id = getRouterParam(event, "id")!;
-      const rec = workflow.get(id);
+      const rec = await workflow.get(id);
       if (!rec) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-XVP-002", errorDescription: `XvP transaction ${id} not found` }] };
@@ -270,7 +274,7 @@ export function createXvpRouter(store: MockStore) {
       // or a valid PoA grantee to debit — reused as-is here.
       const auth = event.context.auth as AuthContext | undefined;
       try {
-        const result = workflow.pay(id, {
+        const result = await workflow.pay(id, {
           buyerWalletAlias: buyerWallet,
           buyerBic,
           sellerBic,
@@ -298,10 +302,15 @@ export function createXvpRouter(store: MockStore) {
   // (EXECUTION|CANCELLATION) selects which HLC secret the caller wants; the key
   // is only returned when its status allows it: executionKey to the buyer once
   // SETTLED; cancellationKey to the seller once the payment is UNSETTLED/BURNED
-  // — which includes a passed timeout.
+  // — which includes a passed timeout. Issue #144: this is one of the three
+  // expiry-observation triggers, so it goes through `workflow.get()` (which
+  // persists EXPIRED on first observation under the shared coordination
+  // boundary) rather than re-deriving a timed-out status from `timeout`/
+  // `Date.now()` here — that would bypass both the centralised rule and the
+  // injectable clock.
   router.get(
     "/igw/:ncb/v1/xvps/:id/payment",
-    defineEventHandler((event) => {
+    defineEventHandler(async (event) => {
       const id = getRouterParam(event, "id")!;
       // Issue #142: `key` must be exactly one of the official KeyType enum
       // values, verbatim. Missing, empty, repeated/multivalued (h3 parses
@@ -322,19 +331,21 @@ export function createXvpRouter(store: MockStore) {
         };
       }
       const requested = rawKey;
-      const rec = workflow.get(id);
+      const rec = await workflow.get(id);
       if (!rec) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-XVP-002", errorDescription: `XvP transaction ${id} not found` }] };
       }
-      const timedOut = !!rec.timeout && Date.parse(rec.timeout) < Date.now();
+      // `rec.status` already reflects a first-observation EXPIRED transition
+      // (see `workflow.get()`/`maybeExpire()`) — no separate timeout check
+      // needed here.
       // Terminal-but-unsettled state: a payment that was attempted → UNSETTLED;
       // a timeout with no payment ever attempted → BURNED (the spec burns the
       // payment on timeout to release the seller's cancellation key).
       const status =
         rec.status === "SETTLED"
           ? "SETTLED"
-          : rec.status === "INITIALIZED" && !timedOut
+          : rec.status === "INITIALIZED"
             ? "PENDING"
             : rec.paymentAttempted
               ? "UNSETTLED"

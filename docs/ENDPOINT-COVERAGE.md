@@ -200,11 +200,11 @@ including the JWT `401` on `/dlt` — is normalised.
 
 | Method | Official path | Status | Mock path | Controls | Since |
 |--------|---------------|--------|-----------|----------|-------|
-| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | `STATE` (locks funds; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | `STATE` (404) | unreleased |
+| POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | `STATE` (registers the XvP; no funds move; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | `STATE` (404; persists EXPIRED on first observation, issue #144) | unreleased |
 | POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `JWT` `mTLS` `STATE` (buyer/PoA pays: debit buyer + credit seller, issue #143) | unreleased |
-| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (404) | unreleased |
-| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | `STATE` (locks funds; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
+| GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (404; persists EXPIRED on first observation, issue #144) | unreleased |
+| POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | `STATE` (registers the XvP; no funds move; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
 | POST | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}/payment` | NOT IMPLEMENTED | — | — | — |
@@ -304,20 +304,23 @@ official funding/defunding/transaction/wallet endpoints instead.
   (by default only a user of the owning entity may debit; PoA grantees and
   whitelisted market DLT operators are also allowed). The store exposes
   `credit`/`debit`/`lock`/`release`/`settleLocked` + `canDebit`, and wallet reads
-  expose the available/locked/holdings model. State **persists to Redis** when
-  `REDIS_URL` is set. *(Money-movement handlers are migrated onto these ops in the
-  workflow issues; see the tracking epic.)*
+  expose the available/locked/holdings model (`lock`/`release`/`settleLocked`
+  exist on the store but no implemented workflow calls them today — XvP, the
+  only flow that ever considered up-front locking, settles via a direct
+  checked debit/credit instead; see the XvP bullet below). State **persists to
+  Redis** when `REDIS_URL` is set. *(Money-movement handlers are migrated onto
+  these ops in the workflow issues; see the tracking epic.)*
 - **Generic workflow engine.** Every settlement operation (2-step transfer,
-  funding, defunding, 1-step bridge payment — and, later, XvP) runs on a shared
+  funding, defunding, 1-step bridge payment, PFoD and XvP) runs on a shared
   `Workflow` base (`src/workflows/`) with one state machine
   (`INITIALIZED → PENDING_APPROVAL → SETTLED | CANCELED`) and two extension
   points: `conditions(phase)` (validate/authorise a transition) and `apply()`
   (the DCW debit/credit effect at settlement). Two-step workflows persist a
   `PENDING_APPROVAL` record and settle on approval; one-step workflows settle in
-  a single call. Consistent with the availability policy, **two-step workflows do
-  not reserve funds** — availability is only ever checked at the approval step,
-  and only XvP locks funds up-front. Workflow records (drafts) and settled
-  transactions **persist to Redis** when `REDIS_URL` is set.
+  a single call. Consistent with the availability policy, **no workflow reserves
+  funds up front** — availability is only ever checked at the settling step
+  (approval for two-step workflows; `pay()` for XvP). Workflow records (drafts)
+  and settled transactions **persist to Redis** when `REDIS_URL` is set.
 - **One-step payment enforces funds + rights.** `POST .../bridge/payments`
   (EXTERNAL_USER) now debits via the checked DCW op: the caller must have a
   **debit right** on the source (owner / PoA / whitelisted operator, and the
@@ -388,6 +391,23 @@ official funding/defunding/transaction/wallet endpoints instead.
   all. The `buyer.bic` field is still required and still independently checked
   against the XvP's initialisation (`HL-XVP-006`) — it now represents only the
   agreement participant, decoupled from who is actually authorized to debit.
+  **Expiry persistence + coordination boundary (issue #144).** No route
+  independently re-derives a timed-out status from `timeout`/`Date.now()`;
+  `XvpWorkflow` centralises it behind an injectable clock. An `INITIALIZED`
+  record past its `timeout` (exact equality is not expired) is persisted
+  `EXPIRED` the first time any of payment admission, `GET /xvps/{id}`, or
+  `GET .../payment` observes it; `SETTLED`/`EXPIRED` are terminal and never
+  revert, even on a backwards clock move or a store reload. Payment
+  admission/settlement, the expiry transition, and key disclosure for a given
+  XvP all run under one per-XvP, in-process coordination boundary (an async
+  FIFO queue, not a distributed lock) — unrelated XvP ids never block each
+  other, and a failed payment always releases the boundary so a
+  before-deadline retry can still be admitted. Every late payment attempt
+  (first or subsequent) now gets the same `HL-XVP-003` "already EXPIRED"
+  rejection (the old first-attempt-only `HL-XVP-004` code is gone). This
+  boundary is **single-process only**: with multiple mock-pontes replicas
+  behind a shared Redis, each replica still coordinates independently — see
+  `src/workflows/xvp-lock.ts` for the documented limitation.
 - **Auto-created wallets (funding only).** Only the **funding** path auto-creates
   its credited wallet (owned by the caller's entity, from the JWT — issue #77),
   as the on-ramp for cash. **Every other settlement path** (RVS transfers,
