@@ -427,9 +427,9 @@ describe("XvpWorkflow (cash leg: buyer → seller — issue #21)", () => {
     expect(store.getWallet("SELLER-W")?.balance).toBe("0.00");
   });
 
-  it("pay debits the buyer, credits the seller and records the transfer", () => {
+  it("pay debits the buyer, credits the seller and records the transfer", async () => {
     const { store, wf } = init();
-    const p = wf.pay("XVP1", {
+    const p = await wf.pay("XVP1", {
       buyerWalletAlias: "BUYER-W",
       buyerBic: "BANKBXXXXXX",
       sellerBic: "BANKAXXXXXX",
@@ -450,19 +450,16 @@ describe("XvpWorkflow (cash leg: buyer → seller — issue #21)", () => {
     expect(tx.supplementaryData).toBe("XVP1");
   });
 
-  it("rejects pay when the buyer has insufficient funds (422)", () => {
+  it("rejects pay when the buyer has insufficient funds (422)", async () => {
     const { store, wf } = init(seed(), "500.00");
-    try {
-      wf.pay("XVP1", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "500.00", currency: "EUR", caller: BUYER });
-      throw new Error("expected rejection");
-    } catch (e) {
-      expect((e as WorkflowRejection).statusCode).toBe(422);
-    }
+    await expect(
+      wf.pay("XVP1", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "500.00", currency: "EUR", caller: BUYER }),
+    ).rejects.toMatchObject({ statusCode: 422 });
     expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
     expect(store.getWallet("SELLER-W")?.balance).toBe("0.00");
   });
 
-  it("rejects pay on a buyer-BIC / seller-BIC / amount / currency mismatch (400)", () => {
+  it("rejects pay on a buyer-BIC / seller-BIC / amount / currency mismatch (400)", async () => {
     const bads = [
       { buyerBic: "WRONGBICXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR" },
       { buyerBic: "BANKBXXXXXX", sellerBic: "WRONGBICXXX", amount: "40.00", currency: "EUR" },
@@ -471,38 +468,27 @@ describe("XvpWorkflow (cash leg: buyer → seller — issue #21)", () => {
     ];
     for (const bad of bads) {
       const { wf } = init();
-      try {
-        wf.pay("XVP1", { buyerWalletAlias: "BUYER-W", caller: BUYER, ...bad });
-        throw new Error("expected rejection");
-      } catch (e) {
-        expect((e as WorkflowRejection).statusCode).toBe(400);
-      }
+      await expect(wf.pay("XVP1", { buyerWalletAlias: "BUYER-W", caller: BUYER, ...bad })).rejects.toMatchObject({ statusCode: 400 });
     }
   });
 
-  it("rejects pay on an unknown seller (credit) wallet without debiting the buyer (422)", () => {
+  it("rejects pay on an unknown seller (credit) wallet without debiting the buyer (422)", async () => {
     const store = seed();
     const wf = new XvpWorkflow(store);
     wf.init({ xvpTransactionId: "XVP9", transactionType: "DVP", amount: "40.00", currency: "EUR", sellerWalletAlias: "GHOST", sellerBic: "BANKAXXXXXX", buyerBic: "BANKBXXXXXX" });
-    try {
-      wf.pay("XVP9", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR", caller: BUYER });
-      throw new Error("expected rejection");
-    } catch (e) {
-      expect((e as WorkflowRejection).statusCode).toBe(422);
-    }
+    await expect(
+      wf.pay("XVP9", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR", caller: BUYER }),
+    ).rejects.toMatchObject({ statusCode: 422 });
     expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
   });
 
-  it("rejects pay after the timeout (409) without debiting the buyer", () => {
+  it("rejects pay after the timeout (409) without debiting the buyer", async () => {
     const store = seed();
     const wf = new XvpWorkflow(store);
     wf.init({ xvpTransactionId: "XVP-TO", transactionType: "DVP", amount: "40.00", currency: "EUR", sellerWalletAlias: "SELLER-W", sellerBic: "BANKAXXXXXX", buyerBic: "BANKBXXXXXX", timeoutSec: -1 });
-    try {
-      wf.pay("XVP-TO", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR", caller: BUYER });
-      throw new Error("expected rejection");
-    } catch (e) {
-      expect((e as WorkflowRejection).statusCode).toBe(409);
-    }
+    await expect(
+      wf.pay("XVP-TO", { buyerWalletAlias: "BUYER-W", buyerBic: "BANKBXXXXXX", sellerBic: "BANKAXXXXXX", amount: "40.00", currency: "EUR", caller: BUYER }),
+    ).rejects.toMatchObject({ statusCode: 409 });
     expect(store.getWallet("BUYER-W")?.balance).toBe("100.00");
   });
 });

@@ -338,17 +338,18 @@ In the mock this is implemented for **transactions** and **funding/defunding**
 not implemented. Behaviour: `404` on unknown draft, `409` if not `PENDING_APPROVAL`.
 
 **Generic Workflow engine.** All money-movement operations (2-step transfer,
-funding, defunding, direct-RTGS, the 1-step bridge payment, matched PFoD and the
-fund-locking XvP) share a single `Workflow` base (`src/workflows/`) that implements exactly this
+funding, defunding, direct-RTGS, the 1-step bridge payment, matched PFoD and
+XvP, §4) share a single `Workflow` base (`src/workflows/`) that implements exactly this
 state machine plus two extension points: `conditions(phase)` (validate/authorise
 a transition) and `apply()` (the DCW debit/credit effect at settlement). One-step
 workflows collapse `create`+`approve` into a single `execute()`. Consistent with
-the availability policy, **two-step workflows do not reserve funds** — a debit's
-availability and debit **rights** are checked **only at the approval step** (via
-the checked DCW op, returning `403` for rights / `422` for insufficient funds),
-and approval enforces **four-eyes** (approver ≠ initiator). Only XvP (§4) locks
-funds up-front via the DCW `lock`/`release` ops. Workflow records and settled
-transactions persist to Redis when `REDIS_URL` is set.
+the availability policy, **no workflow reserves funds up front** — a debit's
+availability and debit **rights** are checked **only at the settling step**
+(the approval step for two-step workflows; `pay()` for XvP) via the checked
+DCW op, returning `403` for rights / `422` for insufficient funds, and
+two-step workflows additionally enforce **four-eyes** (approver ≠ initiator).
+Workflow records and settled transactions persist to Redis when `REDIS_URL`
+is set.
 
 ### 3.2 Settlement / payment status
 
@@ -378,12 +379,15 @@ stateDiagram-v2
 
 ## 4. XvP (Hash-Link) protocol 🟢 — implemented
 
-**XvP** ("eXchange versus Payment") atomically settles the **cash leg** on Pontes
-against a **delivery/other leg** on a separate (market) DLT — i.e. **DvP**
-(delivery-vs-payment) or **PvP** (payment-vs-payment). It uses a **hashed
-time-lock** (the "Hash-Link" protocol): the cash leg is locked with two hashes
-and a timeout; revealing the matching **preimage key** either **executes** or
-**cancels** it, keeping both legs atomic.
+**XvP** ("eXchange versus Payment") settles the **cash leg** on Pontes
+alongside a **delivery/other leg** on a separate (market) DLT — i.e. **DvP**
+(delivery-vs-payment) or **PvP** (payment-vs-payment). It is called a
+"Hash-Link" protocol because `init()` issues two commitments — an
+`executionHash` and a `cancellationHash` — that the *other* (market) leg is
+built against; on this mock's cash leg itself, settlement is driven directly
+by the buyer's `POST .../payment` matching the agreement (BICs/amount/
+currency), **not** by that caller submitting a preimage — see the Flow and
+"Implemented as `XvpWorkflow`" notes below for what actually happens.
 
 Two variants live on the **IGW** (inbound gateway):
 
@@ -447,41 +451,96 @@ Two variants live on the **IGW** (inbound gateway):
 > per the scope the maintainer set, the existing owner/PoA/whitelisted-operator
 > model was reused as-is.
 
+> **Expiry persistence + coordination boundary (issue #144).** State/expiry
+> observation is centralised in `XvpWorkflow` — no route independently
+> re-derives a timed-out status from `timeout`/`Date.now()`. `SETTLED` and
+> `EXPIRED` are terminal: once committed, neither a later clock reading (even
+> one that moves backwards) nor a store reload ever recomputes them into
+> something else. An `INITIALIZED` record past its deadline (`timeout < now`;
+> exact equality is **not** expired) is persisted as `EXPIRED` the first time
+> *any* of the three triggers observes it — payment admission (`POST
+> .../payment`), `GET /xvps/{id}`, or `GET .../payment` alike — via an
+> injectable clock (real wall clock in production, overridable in tests).
+> Persisting it never adds a field to `GET /xvps/{id}`'s response, which keeps
+> its official `XvPInitResponse`-only shape.
+>
+> Payment admission/settlement, the expiry transition and outcome-key
+> disclosure for a given XvP all run under **one per-XvP coordination
+> boundary**: whichever of those three triggers is first admitted commits the
+> outcome, and every other one queues behind it and only then re-reads the
+> committed result — never a half-applied state. A payment admitted just
+> before the deadline holds the boundary through settlement even if that work
+> crosses the deadline (it still wins); the reverse order works too (an
+> expiry observed first makes a queued payment fail cleanly, with zero money
+> movement). A failed payment always releases the boundary, so a
+> before-deadline retry is never blocked by a stuck lock, and unrelated XvP
+> ids never block each other. The previous first-late-attempt-only `HL-XVP-004`
+> rejection is gone: every late payment attempt — first or subsequent — now
+> gets the same `HL-XVP-003` "already EXPIRED" rejection.
+>
+> **Supported deployment scope:** this boundary (`InProcessXvpLock`, see
+> `src/workflows/xvp-lock.ts`) is an in-process promise queue — correct and
+> sufficient for a single mock-pontes process, which is what this guarantee
+> targets. It is **not** a cross-process guarantee: when `REDIS_URL` is set,
+> Redis only persists an asynchronous whole-store snapshot for restart
+> recovery, not a synchronously-read, authoritative shared state multiple
+> replicas could serialize against. Running several mock-pontes replicas
+> behind one Redis does **not** get this serialization guarantee — each
+> replica still reads/writes its own in-memory copy. Making that safe would
+> need the store itself to become a shared, atomically-read source of truth,
+> which is out of scope here; multi-replica XvP coordination is therefore an
+> explicit, documented limitation, not a silently-assumed guarantee.
+
 ### Flow
 
-1. **Init** — `POST /igw/{ncb}/v1/xvps` with `XvPInitRequest`. Pontes locks the
-   cash leg and returns `xvpTransactionId`, an `executionHash`, a
+1. **Init** — `POST /igw/{ncb}/v1/xvps` with `XvPInitRequest`. Pontes registers
+   the XvP and returns `xvpTransactionId`, an `executionHash`, a
    `cancellationHash` and a `timeout`. The two hashes are commitments the other
-   leg is built against.
-2. **Settle / cancel** — `POST /igw/{ncb}/v1/xvps/{xvpTransactionId}/payment`
-   supplying the preimage that matches a hash: the **execution key** (`KeyType
-   EXECUTION`) settles both legs; the **cancellation key** (`CANCELLATION`)
-   unwinds. Returns `PaymentResponse` (with the revealed `executionKey`/
-   `cancellationKey` and `payment.status`).
+   (market) leg is built against; no funds move yet.
+2. **Settle** — `POST /igw/{ncb}/v1/xvps/{xvpTransactionId}/payment`: the
+   authenticated buyer pays by matching the agreement (BICs, amount,
+   currency) — no preimage/key is submitted here. On success this debits the
+   buyer and credits the seller, and returns `PaymentResponse` with the
+   revealed `executionKey` (for the buyer to drive the asset leg) and
+   `payment.status: SETTLED`.
 3. **Poll** — `GET /igw/{ncb}/v1/xvps/{xvpTransactionId}` (XvP status) and
-   `.../payment` (`PaymentStatus`).
-4. **Timeout** — if neither key is revealed before `timeout`, the lock expires
-   and the XvP is cancelled/burned.
+   `.../payment` (`PaymentStatus` + the conditionally-disclosed key — see
+   issue #144 above for exactly when each is observed/persisted).
+4. **Timeout** — if payment is not settled before `timeout`, the XvP is
+   persisted `EXPIRED` on first observation (issue #144) and the cash leg
+   never settles; the seller's `GET .../payment?key=CANCELLATION` then
+   discloses the cancellation key so the off-ledger/asset leg can be unwound.
+   This mock does not itself move or burn anything cash-side on expiry.
 
 ### XvP state machine
 
 ```mermaid
 stateDiagram-v2
   [*] --> INITIALIZED: POST /xvps<br/>(returns executionHash,<br/>cancellationHash, timeout)
-  INITIALIZED --> PENDING: POST .../payment<br/>(key submitted)
-  PENDING --> SETTLED: execution key<br/>(matches executionHash)
-  PENDING --> CANCELLED: cancellation key<br/>(matches cancellationHash)
-  INITIALIZED --> CANCELLED: timeout elapsed
+  INITIALIZED --> SETTLED: POST .../payment<br/>(matches the agreement,<br/>before the deadline)
+  INITIALIZED --> EXPIRED: first observation past<br/>the deadline (payment POST,<br/>GET XvP, or GET payment)
   SETTLED --> [*]
-  CANCELLED --> [*]
+  EXPIRED --> [*]
 ```
 
-> **Implemented** as `XvpWorkflow` — the only workflow that reserves funds: init
-> locks the seller's available balance (DCW `lock`), generates
-> `executionHash`/`cancellationHash` (SHA-256) + a `timeout`, and persists an
-> `XVP` record keyed by `xvpTransactionId`; the payment call verifies the
-> preimage and either `settleLocked`+credits (EXECUTION) or `release`s
-> (CANCELLATION/timeout), for both the cash-token and direct-RTGS variants.
+`PaymentStatus` (as returned by `GET .../payment`) is a read-only projection of
+the state above, not a separate stored state: `INITIALIZED` (unexpired) →
+`PENDING`; `SETTLED` → `SETTLED`; `EXPIRED` with a payment ever attempted →
+`UNSETTLED`; `EXPIRED` with none → `BURNED` (a late-only attempt never
+qualifies as "attempted" for this purpose).
+
+> **Implemented** as `XvpWorkflow` — `init()` generates `executionHash`/
+> `cancellationHash` (SHA-256 commitments) + a `timeout` and persists an `XVP`
+> record keyed by `xvpTransactionId`; **no funds are reserved/locked up
+> front**. `pay()` validates the request against the initialisation
+> (BICs/amount/currency) and, if still `INITIALIZED` and unexpired, debits the
+> buyer and credits the seller directly (the existing DCW rights/availability
+> checks — not a hash-preimage check — gate the debit); there is no
+> cancellation endpoint that consumes the cancellation key — it is disclosed
+> (not submitted) once the payment is `UNSETTLED`/`BURNED`, for an off-ledger/
+> asset-leg party to act on. Same code path for both the cash-token and
+> direct-RTGS variants. See issue #144 above for the expiry-persistence and
+> coordination-boundary behaviour.
 
 ---
 
@@ -495,7 +554,7 @@ stateDiagram-v2
 | Bridge 1-step payment | 🟢 | bridge/payments (checked availability + rights) |
 | Direct RTGS Payment | 🟡 | tms + bridge `direct-rtgs/payments` (defund+fund composite) |
 | PFoD (matched) | 🟢 | bridge/initpfoddeli + initpfodrece (matched on tradeID) |
-| XvP (hash-lock) | 🟢 | `/igw/{ncb}/v1/xvps(+payment)` — the only fund-locking flow |
+| XvP (hash-link) | 🟢 | `/igw/{ncb}/v1/xvps(+payment)` — direct debit/credit, no up-front fund lock |
 | Settlement query | 🟢 | ims/transactions (drafts) |
 | Dedicated Cash Wallet | 🟡 | read + **funding-only** credit auto-create (else 422 → one-step endpoint); available/locked, debit rights, Redis |
 | Holding / balance | 🟡 | available + locked balance per wallet |

@@ -894,6 +894,66 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     }
   });
 
+  it("GET XvP status alone (no payment, no key query) persists EXPIRED on first observation, without leaking it into the response — #144", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-G144", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-G144" }, buyer: { bic: "BEIILULUXXX" }, amount: "40.00", currency: "EUR", type: "DVP", timeoutSec: -1 },
+      });
+      expect(init.status).toBe(200);
+      const xvpId = init.json.xvpTransactionId as string;
+      // Nothing has queried this XvP yet — the stored draft is still
+      // INITIALIZED even though its deadline (timeoutSec: -1) has already
+      // passed; only an *observation* triggers the transition.
+      expect(s.getDraft(xvpId)!.status).toBe("INITIALIZED");
+      const get = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}`);
+      expect(get.status).toBe(200);
+      // Official XvPInitResponse shape only — persisting expiry must not add a
+      // status (or any other non-spec) field to this response.
+      expect(get.json.status).toBeUndefined();
+      expect(get.json.executionKey).toBeUndefined();
+      expect(get.json.cancellationKey).toBeUndefined();
+      // The side effect: EXPIRED is now committed, from the GET XvP route alone.
+      expect(s.getDraft(xvpId)!.status).toBe("EXPIRED");
+      // The payment-status projection (a separate endpoint) now reflects it too.
+      const cancel = await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}/payment?key=CANCELLATION`);
+      expect(cancel.json.payment.status).toBe("BURNED");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("a late payment is rejected the same way (HL-XVP-003, already EXPIRED) whether or not an earlier GET already observed the expiry — #144", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-G144B", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    s.ensureWallet("EIB-G144B", { ownerEntityID: "BEIILULUXXX", ownerBIC: "BEIILULUXXX", currency: "EUR" });
+    s.credit("EIB-G144B", "1000.00");
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const init = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-G144B" }, buyer: { bic: "BEIILULUXXX" }, amount: "40.00", currency: "EUR", type: "DVP", timeoutSec: -1 },
+      });
+      const xvpId = init.json.xvpTransactionId as string;
+      // An earlier GET already observed (and persisted) the expiry.
+      await request(local.port, "GET", `/igw/${NCB}/v1/xvps/${xvpId}`);
+      expect(s.getDraft(xvpId)!.status).toBe("EXPIRED");
+      const pay = await request(local.port, "POST", `/igw/${NCB}/v1/xvps/${xvpId}/payment`, {
+        headers: { authorization: await buyerAuthHeader() },
+        body: { buyer: { bic: "BEIILULUXXX", marketDLTOperator: "M", cashWalletAlias: "EIB-G144B" }, seller: { bic: "BSUIFRPPXXX" }, amount: "40.00", currency: "EUR" },
+      });
+      expect(pay.status).toBe(409);
+      expect(pay.json.businessErrors[0].errorCode).toBe("HL-XVP-003");
+      expect(pay.json.businessErrors[0].errorDescription).toBe(`XvP ${xvpId} is already EXPIRED`);
+      expect(s.getWallet("EIB-G144B")?.balance).toBe("1000.00");
+    } finally {
+      await local.close();
+    }
+  });
+
   it("XvP records never surface via the Cash Token Transaction list (ims/transactions) — #102", async () => {
     // The XvP HTLC record lives in the /igw domain (read via GET /igw/.../xvps/{id}),
     // not the Cash Token Transaction list. It must not appear in ims/transactions —
