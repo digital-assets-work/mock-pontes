@@ -407,6 +407,7 @@ Two variants live on the **IGW** (inbound gateway):
 |--------|-----------|
 | `XvPInitRequest` | `seller`, `buyer`, `amount`, `currency` (`EUR`), `type` (DVP/PVP) |
 | `XvPInitResponse` | `xvpTransactionId`, **`executionHash`**, **`cancellationHash`**, `timeout` (ISO ts), + echoed `seller`/`buyer`/`amount`/`currency`/`type` |
+| `PaymentRequest` | `buyer` (`Participant`: `bic` + `marketDLTOperator` required, `cashWalletAlias` optional/nullable), `seller` (`SimpleParticipant`: `bic`), `amount`, `currency` (`EUR`) |
 | `Payment` | `id`, `status` (`PaymentStatus`), `reason` |
 | `PaymentResponse` | `xvpTransactionId`, `payment`, **`executionKey`**, **`cancellationKey`** |
 
@@ -419,6 +420,15 @@ Two variants live on the **IGW** (inbound gateway):
 > `66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925`.
 > Records created before this convention keep whichever commitment they were
 > issued with; only new `init()` calls use byte-hashing.
+
+> **Payment validation (issue #142).** `POST .../payment` is validated against
+> the official `PaymentRequest` schema above before any business logic runs —
+> a request missing a required field, with a malformed `amount`, or a
+> non-`EUR` currency is a `400`, and never debits/credits/mutates the XvP.
+> `GET .../payment?key=` requires exactly one of the literal `KeyType` values
+> (`EXECUTION` or `CANCELLATION`); missing, empty, repeated/multivalued, or
+> case-mismatched values are a `400` — the mock never coerces an arbitrary
+> string into a valid enum value, and no secret is disclosed either way.
 
 ### Flow
 

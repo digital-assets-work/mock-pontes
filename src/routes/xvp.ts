@@ -276,12 +276,30 @@ export function createXvpRouter(store: MockStore) {
     "/igw/:ncb/v1/xvps/:id/payment",
     defineEventHandler((event) => {
       const id = getRouterParam(event, "id")!;
+      // Issue #142: `key` must be exactly one of the official KeyType enum
+      // values, verbatim. Missing, empty, repeated/multivalued (h3 parses
+      // `?key=A&key=B` as an array), or case-mismatched ("execution") values
+      // are all rejected with a normalised 400 — before the record is even
+      // looked up, so no secret can be disclosed either way. We never coerce
+      // (e.g. uppercase) an arbitrary string into a valid enum value.
+      const rawKey = getQuery(event).key;
+      if (rawKey !== "EXECUTION" && rawKey !== "CANCELLATION") {
+        setResponseStatus(event, 400);
+        return {
+          businessErrors: [
+            {
+              errorCode: "HL-VAL-001",
+              errorDescription: "Query parameter 'key' is required and must be exactly 'EXECUTION' or 'CANCELLATION'.",
+            },
+          ],
+        };
+      }
+      const requested = rawKey;
       const rec = workflow.get(id);
       if (!rec) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-XVP-002", errorDescription: `XvP transaction ${id} not found` }] };
       }
-      const requested = String(getQuery(event).key || "").toUpperCase();
       const timedOut = !!rec.timeout && Date.parse(rec.timeout) < Date.now();
       // Terminal-but-unsettled state: a payment that was attempted → UNSETTLED;
       // a timeout with no payment ever attempted → BURNED (the spec burns the
