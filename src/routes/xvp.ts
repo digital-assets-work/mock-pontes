@@ -8,6 +8,7 @@ import {
 } from "h3";
 import type { H3Event } from "h3";
 import { randomUUID } from "node:crypto";
+import type { AuthContext } from "../auth/jwt-middleware.js";
 import type { MockStore } from "../state/mock-store.js";
 import { resolveParticipantWallet } from "../state/participant-wallet.js";
 import { track } from "../http/route-registry.js";
@@ -64,7 +65,7 @@ function resolveXvpWallet(
  *   POST /igw/{ncb}/v1/xvps                         → init (locks funds)
  *   POST /igw/{ncb}/v1/direct-rtgs/xvps             → init (direct-RTGS variant)
  *   GET  /igw/{ncb}/v1/xvps/{id}                    → XvP status
- *   POST /igw/{ncb}/v1/xvps/{id}/payment            → execute (debit buyer, credit seller)
+ *   POST /igw/{ncb}/v1/xvps/{id}/payment            → execute (debit buyer, credit seller) — JWT-protected (#143)
  *   GET  /igw/{ncb}/v1/xvps/{id}/payment            → payment status + conditional key disclosure
  *
  * There is no cancellation *endpoint* here: cancellation is driven by the
@@ -73,6 +74,16 @@ function resolveXvpWallet(
  * reverse/burn anything cash-side when that happens. Also no cross-ledger
  * atomicity is implemented or claimed: the cash and asset legs are entirely
  * independent systems from this mock's point of view.
+ *
+ * Issue #143: unlike every other route here, the payment POST requires JWT
+ * authentication (and, transitively, mTLS-consistency once auth is set —
+ * see app.ts). The authenticated caller must be either the resolved buyer
+ * wallet's owning entity or a valid PoA grantee on it (state/dcw.ts's
+ * existing owner/PoA/whitelisted-operator model) — never the submitted
+ * `buyer.bic`, which remains only the agreement-participant value checked
+ * against the XvP's initialisation. The rest of `/igw` (init, reads,
+ * payment-key queries, direct-RTGS) is deliberately left unauthenticated —
+ * widening that is an explicitly out-of-scope follow-up, not implied here.
  */
 export function createXvpRouter(store: MockStore) {
   const router = track(createRouter());
@@ -194,12 +205,16 @@ export function createXvpRouter(store: MockStore) {
     }),
   );
 
-  // GET XvP status — official XvPInitResponse shape.
+  // GET XvP status — official XvPInitResponse shape. Issue #144: `workflow.get()`
+  // is one of the three triggers (alongside payment admission and GET payment)
+  // that can observe and persist a first-time expiry transition — it must not
+  // add any field to this response beyond the official shape below, so a
+  // persisted EXPIRED stays an internal-only side effect here.
   router.get(
     "/igw/:ncb/v1/xvps/:id",
-    defineEventHandler((event) => {
+    defineEventHandler(async (event) => {
       const id = getRouterParam(event, "id")!;
-      const rec = workflow.get(id);
+      const rec = await workflow.get(id);
       if (!rec) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-XVP-002", errorDescription: `XvP transaction ${id} not found` }] };
@@ -224,6 +239,11 @@ export function createXvpRouter(store: MockStore) {
   // (issue #139) follows the same policy as the seller at init: an explicit
   // `cashWalletAlias` must already exist and be theirs; absent that, their own
   // main wallet — else their first wallet — is used; no auto-creation.
+  // Issue #143: this route is individually JWT-protected (app.ts's
+  // XVP_PAYMENT_JWT_ROUTES); a missing/invalid/expired/forged token never
+  // reaches this handler at all (401, no money movement). The authenticated
+  // caller's entity — not the body's `buyer.bic` — is what must own (or hold
+  // valid PoA on) the resolved buyer wallet to debit it.
   router.post(
     "/igw/:ncb/v1/xvps/:id/payment",
     defineEventHandler(async (event) => {
@@ -242,14 +262,25 @@ export function createXvpRouter(store: MockStore) {
       const resolved = resolveXvpWallet(event, store, buyerBic, body.buyer?.cashWalletAlias, "Debit");
       if ("businessErrors" in resolved) return resolved;
       const buyerWallet = resolved.alias;
+      // Issue #143: the debit-rights caller is the JWT-authenticated identity
+      // (set by the route-specific JWT protection above — see
+      // XVP_PAYMENT_JWT_ROUTES in app.ts), never the submitted `buyer.bic`.
+      // `buyerBic` above remains purely the agreement-participant value
+      // workflow.pay() matches against the XvP's initialisation (HL-XVP-006)
+      // — it must still identify the original buyer even when the
+      // authenticated actor is a PoA grantee acting on that buyer's wallet,
+      // not the actor's own identity. The DCW owner/PoA/whitelisted-operator
+      // model (state/dcw.ts) already allows either the wallet's owning entity
+      // or a valid PoA grantee to debit — reused as-is here.
+      const auth = event.context.auth as AuthContext | undefined;
       try {
-        const result = workflow.pay(id, {
+        const result = await workflow.pay(id, {
           buyerWalletAlias: buyerWallet,
           buyerBic,
           sellerBic,
           amount: body.amount,
           currency: body.currency,
-          caller: buyerBic ? { entityBIC: buyerBic } : undefined,
+          caller: auth?.entityBIC ? { entityBIC: auth.entityBIC } : undefined,
         });
         // Per PaymentResponse: executionKey is returned (to the buyer) on SETTLED.
         return {
@@ -271,25 +302,50 @@ export function createXvpRouter(store: MockStore) {
   // (EXECUTION|CANCELLATION) selects which HLC secret the caller wants; the key
   // is only returned when its status allows it: executionKey to the buyer once
   // SETTLED; cancellationKey to the seller once the payment is UNSETTLED/BURNED
-  // — which includes a passed timeout.
+  // — which includes a passed timeout. Issue #144: this is one of the three
+  // expiry-observation triggers, so it goes through `workflow.get()` (which
+  // persists EXPIRED on first observation under the shared coordination
+  // boundary) rather than re-deriving a timed-out status from `timeout`/
+  // `Date.now()` here — that would bypass both the centralised rule and the
+  // injectable clock.
   router.get(
     "/igw/:ncb/v1/xvps/:id/payment",
-    defineEventHandler((event) => {
+    defineEventHandler(async (event) => {
       const id = getRouterParam(event, "id")!;
-      const rec = workflow.get(id);
+      // Issue #142: `key` must be exactly one of the official KeyType enum
+      // values, verbatim. Missing, empty, repeated/multivalued (h3 parses
+      // `?key=A&key=B` as an array), or case-mismatched ("execution") values
+      // are all rejected with a normalised 400 — before the record is even
+      // looked up, so no secret can be disclosed either way. We never coerce
+      // (e.g. uppercase) an arbitrary string into a valid enum value.
+      const rawKey = getQuery(event).key;
+      if (rawKey !== "EXECUTION" && rawKey !== "CANCELLATION") {
+        setResponseStatus(event, 400);
+        return {
+          businessErrors: [
+            {
+              errorCode: "HL-VAL-001",
+              errorDescription: "Query parameter 'key' is required and must be exactly 'EXECUTION' or 'CANCELLATION'.",
+            },
+          ],
+        };
+      }
+      const requested = rawKey;
+      const rec = await workflow.get(id);
       if (!rec) {
         setResponseStatus(event, 404);
         return { businessErrors: [{ errorCode: "HL-XVP-002", errorDescription: `XvP transaction ${id} not found` }] };
       }
-      const requested = String(getQuery(event).key || "").toUpperCase();
-      const timedOut = !!rec.timeout && Date.parse(rec.timeout) < Date.now();
+      // `rec.status` already reflects a first-observation EXPIRED transition
+      // (see `workflow.get()`/`maybeExpire()`) — no separate timeout check
+      // needed here.
       // Terminal-but-unsettled state: a payment that was attempted → UNSETTLED;
       // a timeout with no payment ever attempted → BURNED (the spec burns the
       // payment on timeout to release the seller's cancellation key).
       const status =
         rec.status === "SETTLED"
           ? "SETTLED"
-          : rec.status === "INITIALIZED" && !timedOut
+          : rec.status === "INITIALIZED"
             ? "PENDING"
             : rec.paymentAttempted
               ? "UNSETTLED"

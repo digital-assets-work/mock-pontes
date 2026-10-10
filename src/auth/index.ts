@@ -1,5 +1,5 @@
 export { createEnrollmentAuthRouter } from "./enrollment-routes.js";
-export { createJwtMiddleware, type AuthContext } from "./jwt-middleware.js";
+export { createJwtMiddleware, type AuthContext, type JwtRouteMatcher } from "./jwt-middleware.js";
 export { createNroMiddleware } from "./nro-middleware.js";
 export { createProfileAuthorizationMiddleware } from "./profile-authorization-middleware.js";
 export { getTestKeys, signData } from "./test-keys.js";

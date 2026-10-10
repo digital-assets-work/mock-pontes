@@ -17,6 +17,7 @@ import {
   createEnrollmentAuthRouter,
   createNroMiddleware,
   createProfileAuthorizationMiddleware,
+  type JwtRouteMatcher,
 } from "./auth/index.js";
 import { createNroCertCheckMiddleware, deriveNroRouteMatchers } from "./auth/nro-middleware.js";
 import { createNcbValidationMiddleware } from "./auth/ncb-middleware.js";
@@ -53,6 +54,17 @@ import { mockVersion } from "./version.js";
  * enforcement in lock-step with the contract instead of a hand-maintained list.
  */
 export const nroRouteMatchers = deriveNroRouteMatchers();
+
+/**
+ * Individually JWT-protected `/igw` routes (issue #143): the XvP payment POST
+ * only. Deliberately scoped to this one route — widening the whole `/igw`
+ * prefix would also force authentication onto XvP init, reads, the
+ * payment-key query and direct-RTGS routes, which are out of this issue's
+ * scope (see the issue's own "audit the impact" guidance).
+ */
+export const XVP_PAYMENT_JWT_ROUTES: readonly JwtRouteMatcher[] = [
+  { method: "POST", pathTemplate: "/igw/{ncb}/v1/xvps/{id}/payment" },
+];
 
 export interface AppDeps {
   store: MockStore;
@@ -118,7 +130,12 @@ export function buildApp({ store, runtimePki, authUsersRepository }: AppDeps): A
   // → business window → the rest (wallet/profile access rights). JWT is applied
   // before the mTLS-consistency check because that check cross-references the
   // JWT-authenticated username against the presented client certificate.
-  app.use(createJwtMiddleware(["/dlt"], runtimePki.jwtSigningPublicKeyPem));
+  // Issue #143: also protects the XvP payment POST specifically (not the
+  // whole `/igw` surface) — see XVP_PAYMENT_JWT_ROUTES above. Because
+  // mTLS-consistency below is itself already gated on `event.context.auth`
+  // being set (not on path), it automatically also applies to that one XvP
+  // route once JWT sets the auth context there, with no further change.
+  app.use(createJwtMiddleware(["/dlt"], runtimePki.jwtSigningPublicKeyPem, XVP_PAYMENT_JWT_ROUTES));
   app.use(createMtlsConsistencyMiddleware(authUsersRepository));
 
   // Required fields & formatting (issue #53) — before NRO and the window guard

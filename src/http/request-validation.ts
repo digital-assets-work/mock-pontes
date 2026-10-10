@@ -31,9 +31,13 @@ import {
 import officialSpec from "../ui/spec/pontes-official-v1.1.json";
 
 /**
- * Create (POST) write endpoints → the official request schema to validate the
- * body against. Keys are `"<METHOD> <normalized-path>"` (params collapsed to
- * `{}` by {@link normalizePath}). Only create bodies are validated; the PUT
+ * Create (POST) / payment-read (GET-adjacent POST) write endpoints → the
+ * official request schema to validate the body against. Keys are
+ * `"<METHOD> <template-path>"`, where each `{}` segment matches any single
+ * concrete path segment (see {@link schemaForRequest}) — not just the `{ncb}`
+ * realm: issue #142 added a transaction-ID segment to the XvP payment
+ * template, so matching had to stop assuming the dynamic segment is always at
+ * position 2. Only bodies that drive business logic are validated; the PUT
  * approve/cancel transitions carry no meaningful body.
  */
 const ROUTE_SCHEMAS: Record<string, string> = {
@@ -47,7 +51,13 @@ const ROUTE_SCHEMAS: Record<string, string> = {
   "POST /dlt/{}/api/bridge/initpfodrece": "bridge.PFoDReceRequest",
   "POST /igw/{}/v1/xvps": "XvPInitRequest",
   "POST /igw/{}/v1/direct-rtgs/xvps": "RTGSXvPInitRequest",
+  // Issue #142: cash-token XvP payment (the buyer's execute-payment call).
+  // Scope note: the direct-RTGS payment endpoint does not exist yet, so it
+  // has no entry here — add one (reusing this same official schema) once
+  // that route is implemented.
+  "POST /igw/{}/v1/xvps/{}/payment": "PaymentRequest",
 };
+
 
 // `strict:false` so the OpenAPI-3 dialect keywords (nullable/example/format …)
 // are tolerated; `allErrors` so one 400 reports every failing constraint.
@@ -135,16 +145,27 @@ export function validateRequestBody(
   }));
 }
 
+/**
+ * Pre-split `ROUTE_SCHEMAS` templates once: `{ method, segments, schema }`,
+ * where `segments` is the template path split on `/` (a `{}` segment matches
+ * any single concrete segment).
+ */
+const ROUTE_TEMPLATES = Object.entries(ROUTE_SCHEMAS).map(([key, schema]) => {
+  const spaceIdx = key.indexOf(" ");
+  return { method: key.slice(0, spaceIdx), segments: key.slice(spaceIdx + 1).split("/"), schema };
+});
+
 /** Look up the schema name for a request, if this endpoint is validated. */
 export function schemaForRequest(method: string, path: string): string | undefined {
-  const clean = (path || "").split("?")[0];
-  // The mapped create endpoints have exactly one path parameter — the `{ncb}`
-  // realm at segment 2 of `/dlt/{ncb}/…` or `/igw/{ncb}/…`. Collapse it to `{}`
-  // so the concrete realm (e.g. `bdf`) matches the templated keys above.
-  const segs = clean.split("/");
-  if (segs[1] === "dlt" || segs[1] === "igw") segs[2] = "{}";
-  return ROUTE_SCHEMAS[`${method.toUpperCase()} ${segs.join("/")}`];
+  const segs = (path || "").split("?")[0].split("/");
+  const m = method.toUpperCase();
+  for (const t of ROUTE_TEMPLATES) {
+    if (t.method !== m || t.segments.length !== segs.length) continue;
+    if (t.segments.every((seg, i) => seg === "{}" || seg === segs[i])) return t.schema;
+  }
+  return undefined;
 }
+
 
 /** The only currency Pontes settles in (central-bank digital EUR). */
 export const SUPPORTED_CURRENCY = "EUR";

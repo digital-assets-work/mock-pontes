@@ -1,6 +1,9 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { DcwCaller } from "../state/dcw.js";
+import type { Draft, MockStore } from "../state/mock-store.js";
 import { Workflow, WorkflowRejection } from "./workflow.js";
+import { generateXvpCommitments, resolveXvpHashMethod, type XvpHashMethod } from "./xvp-commitment.js";
+import { InProcessXvpLock, type XvpLock } from "./xvp-lock.js";
 
 export type XvpTransactionType = "DVP" | "PVP";
 export type XvpKeyType = "EXECUTION" | "CANCELLATION";
@@ -46,8 +49,55 @@ export interface XvpInitResult {
 
 const DEFAULT_TIMEOUT_SEC = Number(process.env.PONTES_XVP_TIMEOUT_SEC || 3600);
 
-function sha256Hex(preimage: string): string {
-  return createHash("sha256").update(preimage).digest("hex");
+/** Shaped view of a persisted XvP `Draft` + its hash/key/BIC metadata. */
+export interface XvpRecord {
+  id: string;
+  status: string;
+  amount: string;
+  currency: string;
+  sellerWalletAlias: string;
+  buyerWalletAlias: string;
+  timeout?: string;
+  executionHash: string;
+  cancellationHash: string;
+  transactionType: string;
+  executionKey?: string;
+  cancellationKey?: string;
+  paymentId?: string;
+  sellerBic?: string;
+  buyerBic?: string;
+  seller?: unknown;
+  buyer?: unknown;
+  paymentAttempted?: boolean;
+}
+
+export interface XvpWorkflowOptions {
+  /**
+   * Injectable clock (issue #144): epoch-ms "now", defaulting to the real
+   * wall clock (`Date.now`). Override in tests for deterministic expiry and
+   * concurrency scenarios (e.g. placing "now" exactly 1ms either side of a
+   * deadline) instead of racing the real clock.
+   */
+  now?: () => number;
+  /**
+   * Per-XvP coordination boundary (issue #144, see `./xvp-lock.ts`). Defaults
+   * to a fresh `InProcessXvpLock` scoped to this workflow instance — correct
+   * for the single mock-pontes process this guarantee targets; see the
+   * module docblock on `xvp-lock.ts` for the documented multi-replica
+   * limitation.
+   */
+  lock?: XvpLock;
+  /**
+   * Test-only instrumentation (issue #144): awaited once a payment has been
+   * admitted (status/expiry/BIC/amount/currency all validated) but before the
+   * debit/credit settle, so deterministic tests can hold the coordination
+   * boundary open with a controlled barrier and prove a concurrent GET
+   * genuinely queues behind it. Defaults to a no-op; must never be set in
+   * production.
+   */
+  onPaymentAdmitted?: () => Promise<void> | void;
+  /** Injectable hash method for tests. Defaults to `resolveXvpHashMethod(process.env.XVP_HASH_METHOD)`. */
+  hashMethod?: XvpHashMethod;
 }
 
 /**
@@ -65,10 +115,38 @@ function sha256Hex(preimage: string): string {
  *
  * XvP records are persisted as `XVP` drafts (hash/key/BIC metadata in
  * `supplementaryData` as JSON).
+ *
+ * **Expiry + concurrency (issue #144).** `get()` and `pay()` both run under
+ * one per-XvP coordination boundary (`this.lock`, see `./xvp-lock.ts`) and
+ * both centralise the first-observation `EXPIRED` transition through
+ * `maybeExpire()` — no route or caller re-derives a timed-out status from
+ * `timeout`/`Date.now()` independently. See the module docblock on
+ * `xvp-lock.ts` for exactly what this boundary does and does not guarantee.
+ *
+ * **Hash method (issue #145).** `executionHash`/`cancellationHash` are
+ * SHA-256 commitments over the corresponding key, computed by
+ * `generateXvpCommitments()` (see `./xvp-commitment.ts`) per the configured
+ * `XvpHashMethod` — `init()` itself never branches on the method. The method
+ * is resolved once, at construction time, from `options.hashMethod` or else
+ * `XVP_HASH_METHOD` (default `hex-string`); it only affects commitments for
+ * *new* records — already-persisted hashes are never recomputed.
  */
 export class XvpWorkflow extends Workflow {
   readonly type = "XVP" as const;
   protected readonly notFoundLabel = "XvP transaction";
+
+  private readonly now: () => number;
+  private readonly lock: XvpLock;
+  private readonly onPaymentAdmitted: () => Promise<void> | void;
+  private readonly hashMethod: XvpHashMethod;
+
+  constructor(store: MockStore, options: XvpWorkflowOptions = {}) {
+    super(store);
+    this.now = options.now ?? Date.now;
+    this.lock = options.lock ?? new InProcessXvpLock();
+    this.onPaymentAdmitted = options.onPaymentAdmitted ?? (() => undefined);
+    this.hashMethod = options.hashMethod ?? resolveXvpHashMethod(process.env.XVP_HASH_METHOD);
+  }
 
   // The base `apply()` is unused: XvP settles via execute() below.
   protected apply(): void {
@@ -81,12 +159,11 @@ export class XvpWorkflow extends Workflow {
       throw new WorkflowRejection(400, "HL-XVP-001", `Invalid XvP transactionType '${params.transactionType}'`);
     }
 
-    const executionKey = randomBytes(32).toString("hex");
-    const cancellationKey = randomBytes(32).toString("hex");
+    const { executionKey, executionHash, cancellationKey, cancellationHash } = generateXvpCommitments(
+      this.hashMethod,
+    );
     const paymentId = randomUUID();
-    const executionHash = sha256Hex(executionKey);
-    const cancellationHash = sha256Hex(cancellationKey);
-    const now = new Date();
+    const now = new Date(this.now());
     const timeout = new Date(now.getTime() + (params.timeoutSec ?? DEFAULT_TIMEOUT_SEC) * 1000).toISOString();
 
     this.store.addDraft({
@@ -125,29 +202,14 @@ export class XvpWorkflow extends Workflow {
     };
   }
 
-  /** Read the persisted XvP record + its hash metadata. */
-  get(xvpTransactionId: string): {
-    id: string;
-    status: string;
-    amount: string;
-    currency: string;
-    sellerWalletAlias: string;
-    buyerWalletAlias: string;
-    timeout?: string;
-    executionHash: string;
-    cancellationHash: string;
-    transactionType: string;
-    executionKey?: string;
-    cancellationKey?: string;
-    paymentId?: string;
-    sellerBic?: string;
-    buyerBic?: string;
-    seller?: unknown;
-    buyer?: unknown;
-    paymentAttempted?: boolean;
-  } | undefined {
-    const d = this.store.getDraft(xvpTransactionId);
-    if (!d || d.type !== "XVP") return undefined;
+  /**
+   * Build the external record shape from a committed draft. Pure/read-only —
+   * no clock read, no mutation. Callers decide whether `maybeExpire()` must
+   * run first; both `get()` and `pay()` always run it under `this.lock`
+   * before shaping, so every caller of this method already sees a
+   * first-observation-settled status.
+   */
+  private shape(d: Draft): XvpRecord {
     const meta = d.supplementaryData ? JSON.parse(d.supplementaryData) : {};
     return {
       id: d.id,
@@ -172,73 +234,130 @@ export class XvpWorkflow extends Workflow {
   }
 
   /**
+   * First-observation expiry transition (issue #144). `SETTLED`/`EXPIRED` are
+   * terminal and are returned unchanged — once committed, no later clock
+   * reading (including one that moves backwards, or a persisted-state
+   * reload) ever recomputes them into something else. An `INITIALIZED`
+   * record past its deadline (`timeout < now`; exact equality is NOT
+   * expired) is atomically persisted as `EXPIRED` here, the first time *any*
+   * caller observes it — payment admission, GET XvP, or GET payment alike.
+   *
+   * Must only ever be called while already holding this XvP's `lock`
+   * boundary, and must stay fully synchronous (no `await`) so the
+   * check-then-persist step itself can never be interleaved by another
+   * queued caller.
+   */
+  private maybeExpire(d: Draft): Draft {
+    if (d.status !== "INITIALIZED") return d;
+    if (!d.expiresAt || Date.parse(d.expiresAt) >= this.now()) return d;
+    this.store.updateDraft(d.id, { status: "EXPIRED" });
+    return { ...d, status: "EXPIRED" };
+  }
+
+  /**
+   * Read the persisted XvP record + its hash metadata. Issue #144: this is
+   * one of the three places (alongside payment admission and GET payment)
+   * that can observe and persist a first-time expiry transition, so it runs
+   * under the same per-XvP coordination boundary as `pay()` — a concurrent
+   * payment that already holds the boundary is waited out, and this call
+   * then re-reads the committed outcome rather than deriving its own.
+   */
+  async get(xvpTransactionId: string): Promise<XvpRecord | undefined> {
+    return this.lock.withLock(xvpTransactionId, () => {
+      const d = this.store.getDraft(xvpTransactionId);
+      if (!d || d.type !== "XVP") return undefined;
+      return this.shape(this.maybeExpire(d));
+    });
+  }
+
+  /**
    * Execute the cash leg (the buyer pays): validate the request matches the
    * initialisation (BICs, amount, currency), then debit the buyer's wallet and
    * credit the seller's wallet. Returns the HLC secrets for the asset leg.
+   *
+   * Issue #144: the whole admission-through-settlement sequence runs inside
+   * one acquisition of this XvP's coordination boundary — a payment admitted
+   * just before the deadline holds the boundary through settlement even if
+   * that work crosses the deadline, so a competing expiry/cancellation-key
+   * check (GET XvP / GET payment) queued behind it only ever observes the
+   * fully-committed outcome, never a half-applied one. The boundary is always
+   * released (success or rejection) so a failed payment never leaves the XvP
+   * permanently stuck — a before-deadline retry can still be admitted.
    */
-  pay(xvpTransactionId: string, params: XvpPaymentParams): {
+  async pay(xvpTransactionId: string, params: XvpPaymentParams): Promise<{
     xvpTransactionId: string;
     status: "SETTLED";
     executionKey?: string;
     cancellationKey?: string;
     paymentId?: string;
-  } {
-    const rec = this.get(xvpTransactionId);
-    if (!rec) {
-      throw new WorkflowRejection(404, "HL-XVP-002", `XvP transaction ${xvpTransactionId} not found`);
-    }
-    if (rec.status !== "INITIALIZED") {
-      throw new WorkflowRejection(409, "HL-XVP-003", `XvP ${xvpTransactionId} is already ${rec.status}`);
-    }
-    if (rec.timeout && Date.parse(rec.timeout) < Date.now()) {
-      this.store.updateDraft(rec.id, { status: "EXPIRED" });
-      throw new WorkflowRejection(409, "HL-XVP-004", `XvP ${xvpTransactionId} has timed out and can no longer be paid`);
-    }
-    // The payment must match the initialisation.
-    if (rec.buyerBic && params.buyerBic && params.buyerBic !== rec.buyerBic) {
-      throw new WorkflowRejection(400, "HL-XVP-006", `Buyer BIC '${params.buyerBic}' does not match the XvP buyer '${rec.buyerBic}'`);
-    }
-    if (rec.sellerBic && params.sellerBic && params.sellerBic !== rec.sellerBic) {
-      throw new WorkflowRejection(400, "HL-XVP-006", `Seller BIC '${params.sellerBic}' does not match the XvP seller '${rec.sellerBic}'`);
-    }
-    if (params.amount !== rec.amount) {
-      throw new WorkflowRejection(400, "HL-XVP-006", `Payment amount '${params.amount}' does not match the XvP amount '${rec.amount}'`);
-    }
-    if (params.currency !== rec.currency) {
-      throw new WorkflowRejection(400, "HL-XVP-006", `Payment currency '${params.currency}' does not match the XvP currency '${rec.currency}'`);
-    }
-    // A well-formed payment has been initiated — record it so a later timeout is
-    // reported as UNSETTLED (payment attempted) rather than BURNED (never
-    // attempted).
-    this.markPaymentAttempted(rec.id);
-    // Conservation (issue #77): the seller's credit wallet must exist before we
-    // debit the buyer, so a settlement never debits and then discards the credit.
-    this.requireCreditWallet(rec.sellerWalletAlias);
-    // Debit the buyer (rights + availability), then credit the seller.
-    this.checkedDebit(params.buyerWalletAlias, rec.amount, params.caller);
-    this.rawCredit(rec.sellerWalletAlias, rec.amount);
-    this.store.updateDraft(rec.id, { status: "SETTLED", debitedWalletAlias: params.buyerWalletAlias });
-    this.store.addTransaction({
-      // Identify the settled cash movement by its payment id, and link it back
-      // to the originating XvP via supplementaryData (as other payments do).
-      id: rec.paymentId ?? `TX-${rec.id}`,
-      type: "XVP",
-      status: "SETTLED",
-      amount: rec.amount,
-      currency: rec.currency,
-      creditedWalletAlias: rec.sellerWalletAlias,
-      debitedWalletAlias: params.buyerWalletAlias,
-      createdAt: new Date().toISOString(),
-      settledAt: new Date().toISOString(),
-      supplementaryData: xvpTransactionId,
+  }> {
+    return this.lock.withLock(xvpTransactionId, async () => {
+      const d = this.store.getDraft(xvpTransactionId);
+      if (!d || d.type !== "XVP") {
+        throw new WorkflowRejection(404, "HL-XVP-002", `XvP transaction ${xvpTransactionId} not found`);
+      }
+      const rec = this.shape(this.maybeExpire(d));
+      // Issue #144: a late payment is reported identically regardless of
+      // whether an earlier caller already observed/persisted the expiry —
+      // `maybeExpire` above always runs first, so this generic "already
+      // <status>" rejection uniformly covers both the first late attempt and
+      // any subsequent one (previously the first got a dedicated HL-XVP-004
+      // "timed out" rejection and only a later one got this HL-XVP-003
+      // message; unified per the issue's acceptance criteria — same
+      // committed terminal state, zero money movement, either way).
+      if (rec.status !== "INITIALIZED") {
+        throw new WorkflowRejection(409, "HL-XVP-003", `XvP ${xvpTransactionId} is already ${rec.status}`);
+      }
+      // The payment must match the initialisation.
+      if (rec.buyerBic && params.buyerBic && params.buyerBic !== rec.buyerBic) {
+        throw new WorkflowRejection(400, "HL-XVP-006", `Buyer BIC '${params.buyerBic}' does not match the XvP buyer '${rec.buyerBic}'`);
+      }
+      if (rec.sellerBic && params.sellerBic && params.sellerBic !== rec.sellerBic) {
+        throw new WorkflowRejection(400, "HL-XVP-006", `Seller BIC '${params.sellerBic}' does not match the XvP seller '${rec.sellerBic}'`);
+      }
+      if (params.amount !== rec.amount) {
+        throw new WorkflowRejection(400, "HL-XVP-006", `Payment amount '${params.amount}' does not match the XvP amount '${rec.amount}'`);
+      }
+      if (params.currency !== rec.currency) {
+        throw new WorkflowRejection(400, "HL-XVP-006", `Payment currency '${params.currency}' does not match the XvP currency '${rec.currency}'`);
+      }
+      // Admitted: every precondition above held while we hold the boundary.
+      // From here on we commit — see the `onPaymentAdmitted` docblock for why
+      // this call exists (test-only instrumentation, no-op in production).
+      await this.onPaymentAdmitted();
+      // A well-formed payment has been initiated — record it so a later timeout is
+      // reported as UNSETTLED (payment attempted) rather than BURNED (never
+      // attempted).
+      this.markPaymentAttempted(rec.id);
+      // Conservation (issue #77): the seller's credit wallet must exist before we
+      // debit the buyer, so a settlement never debits and then discards the credit.
+      this.requireCreditWallet(rec.sellerWalletAlias);
+      // Debit the buyer (rights + availability), then credit the seller.
+      this.checkedDebit(params.buyerWalletAlias, rec.amount, params.caller);
+      this.rawCredit(rec.sellerWalletAlias, rec.amount);
+      this.store.updateDraft(rec.id, { status: "SETTLED", debitedWalletAlias: params.buyerWalletAlias });
+      this.store.addTransaction({
+        // Identify the settled cash movement by its payment id, and link it back
+        // to the originating XvP via supplementaryData (as other payments do).
+        id: rec.paymentId ?? `TX-${rec.id}`,
+        type: "XVP",
+        status: "SETTLED",
+        amount: rec.amount,
+        currency: rec.currency,
+        creditedWalletAlias: rec.sellerWalletAlias,
+        debitedWalletAlias: params.buyerWalletAlias,
+        createdAt: new Date(this.now()).toISOString(),
+        settledAt: new Date(this.now()).toISOString(),
+        supplementaryData: xvpTransactionId,
+      });
+      return {
+        xvpTransactionId,
+        status: "SETTLED" as const,
+        executionKey: rec.executionKey,
+        cancellationKey: rec.cancellationKey,
+        paymentId: rec.paymentId,
+      };
     });
-    return {
-      xvpTransactionId,
-      status: "SETTLED",
-      executionKey: rec.executionKey,
-      cancellationKey: rec.cancellationKey,
-      paymentId: rec.paymentId,
-    };
   }
 
   /**

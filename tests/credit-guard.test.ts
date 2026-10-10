@@ -37,6 +37,16 @@ function reject(fn: () => unknown): { statusCode: number; errorCode: string } {
   throw new Error("expected a WorkflowRejection");
 }
 
+async function rejectAsync(fn: () => Promise<unknown>): Promise<{ statusCode: number; errorCode: string }> {
+  try {
+    await fn();
+  } catch (e) {
+    expect(isWorkflowRejection(e)).toBe(true);
+    return e as unknown as { statusCode: number; errorCode: string };
+  }
+  throw new Error("expected a WorkflowRejection");
+}
+
 describe("Conservation of value on credit (issue #77)", () => {
   it("rejects a transfer to an unknown credited wallet at create, without debiting", () => {
     const s = seed();
@@ -83,7 +93,7 @@ describe("Conservation of value on credit (issue #77)", () => {
     expect(total(s)).toBeCloseTo(before);
   });
 
-  it("rejects XvP payment crediting an unknown seller wallet, without debiting the buyer", () => {
+  it("rejects XvP payment crediting an unknown seller wallet, without debiting the buyer", async () => {
     const s = seed(); // A-DCW1 = the buyer's wallet (1000, owned BANKAXXXXXX)
     const wf = new XvpWorkflow(s);
     const before = total(s);
@@ -96,7 +106,7 @@ describe("Conservation of value on credit (issue #77)", () => {
       sellerBic: "BANKAXXXXXX",
       buyerBic: "BANKAXXXXXX",
     });
-    const err = reject(() =>
+    const err = await rejectAsync(() =>
       wf.pay("XV1", { buyerWalletAlias: "A-DCW1", buyerBic: "BANKAXXXXXX", sellerBic: "BANKAXXXXXX", amount: "100.00", currency: "EUR", caller: OWNER }),
     );
     expect(err.errorCode).toBe("HL-WAL-003");
