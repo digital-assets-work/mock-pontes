@@ -1,8 +1,8 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { DcwCaller } from "../state/dcw.js";
 import type { Draft, MockStore } from "../state/mock-store.js";
 import { Workflow, WorkflowRejection } from "./workflow.js";
-import { xvpCommitmentHash } from "./xvp-commitment.js";
+import { generateXvpCommitments, resolveXvpHashMethod, type XvpHashMethod } from "./xvp-commitment.js";
 import { InProcessXvpLock, type XvpLock } from "./xvp-lock.js";
 
 export type XvpTransactionType = "DVP" | "PVP";
@@ -96,6 +96,8 @@ export interface XvpWorkflowOptions {
    * production.
    */
   onPaymentAdmitted?: () => Promise<void> | void;
+  /** Injectable hash method for tests. Defaults to `resolveXvpHashMethod(process.env.XVP_HASH_METHOD)`. */
+  hashMethod?: XvpHashMethod;
 }
 
 /**
@@ -120,6 +122,14 @@ export interface XvpWorkflowOptions {
  * `maybeExpire()` — no route or caller re-derives a timed-out status from
  * `timeout`/`Date.now()` independently. See the module docblock on
  * `xvp-lock.ts` for exactly what this boundary does and does not guarantee.
+ *
+ * **Hash method (issue #145).** `executionHash`/`cancellationHash` are
+ * SHA-256 commitments over the corresponding key, computed by
+ * `generateXvpCommitments()` (see `./xvp-commitment.ts`) per the configured
+ * `XvpHashMethod` — `init()` itself never branches on the method. The method
+ * is resolved once, at construction time, from `options.hashMethod` or else
+ * `XVP_HASH_METHOD` (default `hex-string`); it only affects commitments for
+ * *new* records — already-persisted hashes are never recomputed.
  */
 export class XvpWorkflow extends Workflow {
   readonly type = "XVP" as const;
@@ -128,12 +138,14 @@ export class XvpWorkflow extends Workflow {
   private readonly now: () => number;
   private readonly lock: XvpLock;
   private readonly onPaymentAdmitted: () => Promise<void> | void;
+  private readonly hashMethod: XvpHashMethod;
 
   constructor(store: MockStore, options: XvpWorkflowOptions = {}) {
     super(store);
     this.now = options.now ?? Date.now;
     this.lock = options.lock ?? new InProcessXvpLock();
     this.onPaymentAdmitted = options.onPaymentAdmitted ?? (() => undefined);
+    this.hashMethod = options.hashMethod ?? resolveXvpHashMethod(process.env.XVP_HASH_METHOD);
   }
 
   // The base `apply()` is unused: XvP settles via execute() below.
@@ -147,17 +159,10 @@ export class XvpWorkflow extends Workflow {
       throw new WorkflowRejection(400, "HL-XVP-001", `Invalid XvP transactionType '${params.transactionType}'`);
     }
 
-    const executionKeyBytes = randomBytes(32);
-    const cancellationKeyBytes = randomBytes(32);
-    const executionKey = executionKeyBytes.toString("hex");
-    const cancellationKey = cancellationKeyBytes.toString("hex");
+    const { executionKey, executionHash, cancellationKey, cancellationHash } = generateXvpCommitments(
+      this.hashMethod,
+    );
     const paymentId = randomUUID();
-    // Commitments are derived from the raw secret bytes (issue #141), not the
-    // hex text above. Existing persisted records keep whatever hash they were
-    // created with — only new `init()` calls use this convention, so no
-    // upgrade/migration of stored commitments is needed.
-    const executionHash = xvpCommitmentHash(executionKeyBytes);
-    const cancellationHash = xvpCommitmentHash(cancellationKeyBytes);
     const now = new Date(this.now());
     const timeout = new Date(now.getTime() + (params.timeoutSec ?? DEFAULT_TIMEOUT_SEC) * 1000).toISOString();
 

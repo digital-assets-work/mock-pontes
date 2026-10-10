@@ -368,8 +368,16 @@ official funding/defunding/transaction/wallet endpoints instead.
   coerced) and then conditionally discloses the matching secret (`executionKey`
   to the buyer once `SETTLED`; `cancellationKey` once `UNSETTLED`/`BURNED`) —
   **neither secret is ever echoed at init** (#140). Each hash is `SHA-256` of
-  the key's **decoded 32 bytes**, not of its 64-character hex text (#141); a
-  verifier must hex-decode the key before hashing to reproduce the commitment.
+  the corresponding key, applying one of two configurable conventions
+  (`XVP_HASH_METHOD`, #145, revising #141's unconditional byte-only behavior):
+  **`hex-string`** (default, unset/empty) hashes the UTF-8 bytes of the
+  64-character hex key *text* itself — the convention the OpenAPI examples
+  suggest; **`bytes`** (opt-in) hashes the key's raw **decoded 32 bytes** — a
+  verifier must hex-decode the key before hashing to reproduce that
+  commitment. Neither is confirmed as authoritative real-Pontes behavior; the
+  client/asset ledger must match whichever convention the mock is configured
+  with. An unsupported nonempty value fails the mock at startup; the setting
+  only affects newly `init()`'d records — already-issued hashes never change.
   XvP **init** is **not** NRO-signed (the spec models no `## Signing Rules:`
   there); per the spec, NRO applies to the direct-RTGS XvP `/payment`
   (`xvpTransactionId + amount + buyer.bic + seller.bic`), effective once that
