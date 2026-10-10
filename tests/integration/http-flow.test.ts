@@ -23,7 +23,7 @@ import {
   afterAll,
 } from "@jest/globals";
 import http from "node:http";
-import { createSign, webcrypto } from "node:crypto";
+import { createHash, createSign, webcrypto } from "node:crypto";
 import { toNodeListener, type App } from "h3";
 import jwt from "jsonwebtoken";
 import * as x509 from "@peculiar/x509";
@@ -667,6 +667,42 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
     expect(res.json.status).toBe("INITIALIZED");
     expect(res.json.xvpTransactionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     expect(res.json.executionHash).toHaveLength(64);
+    // Issue #140: neither init variant discloses the hash-lock secrets —
+    // asserted on the full serialized body, not just the top-level keys.
+    expect(res.json.executionKey).toBeUndefined();
+    expect(res.json.cancellationKey).toBeUndefined();
+    expect(Object.keys(res.json)).not.toEqual(expect.arrayContaining(["executionKey", "cancellationKey"]));
+  });
+
+  it("XvP init (both cash-token and direct-RTGS variants) never discloses the execution/cancellation secrets (#140)", async () => {
+    const s = new MemoryStore();
+    s.ensureWallet("WSELL-140-CT", { ownerEntityID: "BSUIFRPPXXX", ownerBIC: "BSUIFRPPXXX", currency: "EUR" });
+    const localApp = buildApp({ store: s, runtimePki: await getRuntimePkiBundle(), authUsersRepository: createInMemoryAuthUsersRepository() });
+    const local = await listen(localApp);
+    try {
+      const ct = await request(local.port, "POST", `/igw/${NCB}/v1/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M", cashWalletAlias: "WSELL-140-CT" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      expect(ct.status).toBe(200);
+      const rtgs = await request(local.port, "POST", `/igw/${NCB}/v1/direct-rtgs/xvps`, {
+        body: { seller: { bic: "BSUIFRPPXXX", marketDLTOperator: "M" }, buyer: { bic: "BEIILULUXXX" }, amount: "10.00", currency: "EUR", type: "DVP" },
+      });
+      expect(rtgs.status).toBe(200);
+      for (const res of [ct, rtgs]) {
+        // Fetch the actual stored secrets and confirm they never appear
+        // anywhere in the serialized init response (not just as top-level
+        // properties — this scans the whole body).
+        const meta = JSON.parse(s.getDraft(res.json.xvpTransactionId)!.supplementaryData!);
+        const raw = JSON.stringify(res.json);
+        expect(raw).not.toContain(meta.executionKey);
+        expect(raw).not.toContain(meta.cancellationKey);
+        // The hashes (derived, non-secret) are still present.
+        expect(res.json.executionHash).toBe(meta.executionHash);
+        expect(res.json.cancellationHash).toBe(meta.cancellationHash);
+      }
+    } finally {
+      await local.close();
+    }
   });
 
   it("XvP payment: buyer pays — debits buyer, credits seller, returns PaymentResponse + executionKey (#102)", async () => {
@@ -694,6 +730,9 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(pay.json.payment.status).toBe("SETTLED");
       expect(pay.json.executionKey).toHaveLength(64);
       expect(pay.json.cancellationKey).toBeUndefined();
+      // Issue #140: the disclosed key is THE matching secret for this XvP —
+      // it must hash to the init response's executionHash.
+      expect(createHash("sha256").update(pay.json.executionKey as string).digest("hex")).toBe(init.json.executionHash);
       // Buyer debited, seller credited, transaction records buyer → seller.
       expect(s.getWallet("EIB-XFER-01")?.balance).toBe("960.00");
       expect(s.getWallet("WSELL-XFER")?.balance).toBe("40.00");
@@ -756,6 +795,8 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       expect(cancel.json.payment.status).toBe("BURNED");
       expect(cancel.json.cancellationKey).toHaveLength(64);
       expect(cancel.json.executionKey).toBeUndefined();
+      // Issue #140: the disclosed cancellation key matches this XvP's hash.
+      expect(createHash("sha256").update(cancel.json.cancellationKey as string).digest("hex")).toBe(init.json.cancellationHash);
     } finally {
       await local.close();
     }
@@ -814,8 +855,16 @@ describe("HTTP integration — money movement + guards (issue #39)", () => {
       });
       expect(init.status).toBe(200);
       const xvpId = init.json.xvpTransactionId as string;
-      const execKey = init.json.executionKey as string;
-      const cancelKey = init.json.cancellationKey as string;
+      // Issue #140: the init response itself no longer echoes the secrets —
+      // read them from the store's internal persisted metadata instead (they
+      // must still exist there, for the payment-outcome disclosure).
+      const meta = JSON.parse(s.getDraft(xvpId)!.supplementaryData!);
+      const execKey = meta.executionKey as string;
+      const cancelKey = meta.cancellationKey as string;
+      expect(execKey).toHaveLength(64);
+      expect(cancelKey).toHaveLength(64);
+      expect(init.json.executionKey).toBeUndefined();
+      expect(init.json.cancellationKey).toBeUndefined();
 
       const token = await mintJwt("user-ims");
       const list = await request(local.port, "GET", `${BASE}/ims/transactions`, {
