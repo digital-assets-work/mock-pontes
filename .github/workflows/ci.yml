@@ -56,6 +56,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && format('ghcr.io/{0}:dev', github.repository) || 'mock-pontes:ci' }}
           build-args: |
