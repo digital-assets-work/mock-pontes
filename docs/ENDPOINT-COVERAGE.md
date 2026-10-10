@@ -351,21 +351,27 @@ official funding/defunding/transaction/wallet endpoints instead.
   receive wallet (`seller.cashWalletAlias`) and the buyer's BIC, and receives an
   `executionHash`, a `cancellationHash` and a `timeout` (persisted as an `XVP`
   draft). **No funds move at init.** The **buyer** then pays —
-  `POST .../xvps/{id}/payment` — naming their cash wallet: when the buyer/seller
-  BICs, amount and currency match the initialisation, the buyer wallet is funded,
-  and the caller may debit it, the buyer's wallet is **debited** and the seller's
-  wallet **credited** (a new `XVP` transaction). `GET .../xvps/{id}` and
-  `.../payment` report status; `.../payment?key=EXECUTION|CANCELLATION`
-  conditionally discloses the matching secret (`executionKey` to the buyer once
-  `SETTLED`; `cancellationKey` once `UNSETTLED`/`BURNED`) — **neither secret is
-  ever echoed at init** (#140). Each hash is `SHA-256` of the key's **decoded 32
-  bytes**, not of its 64-character hex text (#141); a verifier must hex-decode
-  the key before hashing to reproduce the commitment. XvP **init**
-  is **not** NRO-signed (the spec models no `## Signing Rules:` there); per the
-  spec, NRO applies to the direct-RTGS XvP `/payment`
+  `POST .../xvps/{id}/payment`, validated against the official `PaymentRequest`
+  schema (#142: `buyer.bic` + `buyer.marketDLTOperator` required,
+  `buyer.cashWalletAlias` optional/nullable; `seller.bic` required; `amount`
+  2-decimal EUR) before any business logic runs — naming their cash wallet: when
+  the buyer/seller BICs, amount and currency match the initialisation, the buyer
+  wallet is funded, and the caller may debit it, the buyer's wallet is
+  **debited** and the seller's wallet **credited** (a new `XVP` transaction).
+  `GET .../xvps/{id}` and `.../payment` report status; `.../payment?key=` only
+  accepts the exact `EXECUTION`/`CANCELLATION` enum values (#142: missing,
+  empty, repeated/multivalued or lower/mixed-case values are `400`, never
+  coerced) and then conditionally discloses the matching secret (`executionKey`
+  to the buyer once `SETTLED`; `cancellationKey` once `UNSETTLED`/`BURNED`) —
+  **neither secret is ever echoed at init** (#140). Each hash is `SHA-256` of
+  the key's **decoded 32 bytes**, not of its 64-character hex text (#141); a
+  verifier must hex-decode the key before hashing to reproduce the commitment.
+  XvP **init** is **not** NRO-signed (the spec models no `## Signing Rules:`
+  there); per the spec, NRO applies to the direct-RTGS XvP `/payment`
   (`xvpTransactionId + amount + buyer.bic + seller.bic`), effective once that
-  route is implemented (#102). The `/igw` surface is not behind the JWT layer;
-  the caller's entity is taken from the seller BIC.
+  route is implemented (#102; the direct-RTGS payment endpoint, and its request
+  validation, remain out of scope until then). The `/igw` surface is not behind
+  the JWT layer; the caller's entity is taken from the seller BIC.
 - **Auto-created wallets (funding only).** Only the **funding** path auto-creates
   its credited wallet (owned by the caller's entity, from the JWT — issue #77),
   as the on-ramp for cash. **Every other settlement path** (RVS transfers,

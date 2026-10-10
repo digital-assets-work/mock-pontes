@@ -152,3 +152,69 @@ describe("XvP validator compiles despite the ECB `{1, 15}` quantifier typo", () 
     expect(errs).toMatch(/amount/i);
   });
 });
+
+describe("schemaForRequest matches a transaction-ID segment, not just the {ncb} realm (issue #142)", () => {
+  it("maps the XvP payment template with a real UUID in the dynamic segment", () => {
+    expect(
+      schemaForRequest("POST", "/igw/bdf/v1/xvps/517ae232-29e7-4efb-8743-0177bbe6d576/payment"),
+    ).toBe("PaymentRequest");
+  });
+  it("still maps the {ncb}-only templates unaffected by the generalised matcher", () => {
+    expect(schemaForRequest("POST", "/igw/ecb/v1/xvps")).toBe("XvPInitRequest");
+    expect(schemaForRequest("POST", "/igw/ecb/v1/direct-rtgs/xvps")).toBe("RTGSXvPInitRequest");
+  });
+  it("does not match the payment template on GET (read-only, not validated here)", () => {
+    expect(schemaForRequest("GET", "/igw/bdf/v1/xvps/517ae232-29e7-4efb-8743-0177bbe6d576/payment")).toBeUndefined();
+  });
+  it("does not match a wrong segment count (e.g. the direct-RTGS payment endpoint, not yet implemented)", () => {
+    expect(
+      schemaForRequest("POST", "/igw/bdf/v1/direct-rtgs/xvps/517ae232-29e7-4efb-8743-0177bbe6d576/payment"),
+    ).toBeUndefined();
+  });
+});
+
+describe("PaymentRequest validation (issue #142)", () => {
+  function validPayment() {
+    return {
+      buyer: { bic: "BUYRDEFFXXX", marketDLTOperator: "MARKDEFFXXX" },
+      seller: { bic: "SELLFRPPXXX" },
+      amount: "10000.50",
+      currency: "EUR",
+    };
+  }
+  const PAYMENT = "PaymentRequest";
+
+  it("accepts a spec-valid payment body", () => {
+    expect(validateRequestBody(PAYMENT, validPayment())).toEqual([]);
+  });
+
+  it("accepts a spec-valid payment without buyer.cashWalletAlias (optional/nullable)", () => {
+    expect(validateRequestBody(PAYMENT, validPayment())).toEqual([]);
+    expect(validateRequestBody(PAYMENT, { ...validPayment(), buyer: { ...validPayment().buyer, cashWalletAlias: null } })).toEqual([]);
+  });
+
+  it("rejects a missing buyer.marketDLTOperator", () => {
+    const errs = validateRequestBody(PAYMENT, { ...validPayment(), buyer: { bic: "BUYRDEFFXXX" } })
+      .map((e) => e.errorDescription)
+      .join(" ");
+    expect(errs).toMatch(/marketDLTOperator/);
+  });
+
+  it("rejects a missing seller.bic", () => {
+    const errs = validateRequestBody(PAYMENT, { ...validPayment(), seller: {} })
+      .map((e) => e.errorDescription)
+      .join(" ");
+    expect(errs).toMatch(/bic/);
+  });
+
+  it("rejects a malformed amount (3 decimals)", () => {
+    const errs = validateRequestBody(PAYMENT, { ...validPayment(), amount: "10.123" })
+      .map((e) => e.errorDescription)
+      .join(" ");
+    expect(errs).toMatch(/amount/i);
+  });
+
+  it("rejects a non-EUR currency", () => {
+    expect(currencyError({ ...validPayment(), currency: "USD" })?.errorCode).toBe("HL-VAL-001");
+  });
+});
