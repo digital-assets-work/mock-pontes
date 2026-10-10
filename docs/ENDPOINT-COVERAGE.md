@@ -202,7 +202,7 @@ including the JWT `401` on `/dlt` — is normalised.
 |--------|---------------|--------|-----------|----------|-------|
 | POST | `/igw/{ncb}/v1/xvps` | IMPLEMENTED | same | `STATE` (locks funds; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
 | GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}` | IMPLEMENTED | same | `STATE` (404) | unreleased |
-| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (buyer pays: debit buyer + credit seller) | unreleased |
+| POST | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `JWT` `mTLS` `STATE` (buyer/PoA pays: debit buyer + credit seller, issue #143) | unreleased |
 | GET | `/igw/{ncb}/v1/xvps/{xvpTransactionId}/payment` | IMPLEMENTED | same | `STATE` (404) | unreleased |
 | POST | `/igw/{ncb}/v1/direct-rtgs/xvps` | IMPLEMENTED | same | `STATE` (locks funds; no `NRO`/`JWT`/`PROFILE` on `/igw` init) | unreleased |
 | GET | `/igw/{ncb}/v1/direct-rtgs/xvps/{xvpTransactionId}` | NOT IMPLEMENTED | — | — | — |
@@ -350,7 +350,8 @@ official funding/defunding/transaction/wallet endpoints instead.
   XvP — `POST /igw/{ncb}/v1/xvps` (and `.../direct-rtgs/xvps`) — naming their
   receive wallet (`seller.cashWalletAlias`) and the buyer's BIC, and receives an
   `executionHash`, a `cancellationHash` and a `timeout` (persisted as an `XVP`
-  draft). **No funds move at init.** The **buyer** then pays —
+  draft). **No funds move at init.** The **buyer** (or a valid PoA grantee
+  acting for them, issue #143) then pays —
   `POST .../xvps/{id}/payment`, validated against the official `PaymentRequest`
   schema (#142: `buyer.bic` + `buyer.marketDLTOperator` required,
   `buyer.cashWalletAlias` optional/nullable; `seller.bic` required; `amount`
@@ -370,8 +371,23 @@ official funding/defunding/transaction/wallet endpoints instead.
   there); per the spec, NRO applies to the direct-RTGS XvP `/payment`
   (`xvpTransactionId + amount + buyer.bic + seller.bic`), effective once that
   route is implemented (#102; the direct-RTGS payment endpoint, and its request
-  validation, remain out of scope until then). The `/igw` surface is not behind
-  the JWT layer; the caller's entity is taken from the seller BIC.
+  validation, remain out of scope until then).
+  **Payment caller authentication/authorization (issue #143).** Unlike the rest
+  of `/igw` (init, both reads, direct-RTGS), `POST .../xvps/{id}/payment` is
+  individually `JWT`-protected (and, transitively, mTLS-consistency-checked —
+  neither is widened onto any other `/igw` route). The debit-rights caller is
+  the authenticated entity (`entity_bic` claim), never the body's
+  self-asserted `buyer.bic` — a forged/mismatched `buyer.bic` no longer lets an
+  unrelated caller settle. Debit rights follow the existing DCW owner/PoA/
+  whitelisted-operator model (`state/dcw.ts`'s `canDebit`): the resolved buyer
+  wallet's owning entity or a current PoA grantee on *that* wallet may pay — a
+  PoA grant on one wallet does not extend to a different wallet, and a removed
+  grant or a blocked/out-of-validity wallet denies even the owner. A denied
+  caller gets a normalized `403` `HL-AUT-001` business error (no mutation); a
+  missing/malformed/forged/expired JWT gets `401` before the handler runs at
+  all. The `buyer.bic` field is still required and still independently checked
+  against the XvP's initialisation (`HL-XVP-006`) — it now represents only the
+  agreement participant, decoupled from who is actually authorized to debit.
 - **Auto-created wallets (funding only).** Only the **funding** path auto-creates
   its credited wallet (owned by the caller's entity, from the JWT — issue #77),
   as the on-ramp for cash. **Every other settlement path** (RVS transfers,

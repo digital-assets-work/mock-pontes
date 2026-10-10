@@ -430,6 +430,23 @@ Two variants live on the **IGW** (inbound gateway):
 > case-mismatched values are a `400` — the mock never coerces an arbitrary
 > string into a valid enum value, and no secret is disclosed either way.
 
+> **Payment caller authentication/authorization (issue #143).**
+> `POST .../payment` is the one `/igw` XvP route behind the `JWT` middleware
+> (init, both reads and the direct-RTGS variant stay unauthenticated — this is
+> deliberately *not* widened to the rest of `/igw`). The debit-rights caller is
+> the JWT's `entity_bic`, never the request body's self-asserted `buyer.bic` —
+> `buyer.bic` remains only the agreement-participant value matched against the
+> XvP's `init()` (`HL-XVP-006`), decoupled from who may actually debit. Debit
+> rights reuse the existing DCW model (`state/dcw.ts`'s `canDebit`, §2.6/§2.7)
+> unchanged: the resolved buyer wallet's owning entity or a current **PoA**
+> grantee on *that specific wallet* may pay; a grant on one wallet does not
+> carry over to another, and a revoked grant or a blocked/out-of-validity
+> wallet denies even the owner. A denied caller gets `403` `HL-AUT-001`; a
+> missing/invalid/expired JWT gets `401` before the handler (and any
+> mutation) runs at all. No new PoA-specific logic was added for this issue —
+> per the scope the maintainer set, the existing owner/PoA/whitelisted-operator
+> model was reused as-is.
+
 ### Flow
 
 1. **Init** — `POST /igw/{ncb}/v1/xvps` with `XvPInitRequest`. Pontes locks the

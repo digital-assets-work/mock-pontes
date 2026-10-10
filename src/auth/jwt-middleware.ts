@@ -1,7 +1,12 @@
 /**
  * JWT authentication middleware for mock-pontes.
  *
- * Validates Bearer tokens on all /dlt/ routes.
+ * Validates Bearer tokens on all /dlt/ routes, plus any individually named
+ * `extraRoutes` (method + exact path template) elsewhere — issue #143 added
+ * the XvP payment POST on the `/igw` surface this way, deliberately *not*
+ * widening the blanket prefix (which would also cover XvP init, reads,
+ * payment-key queries and direct-RTGS routes that are intentionally out of
+ * this issue's scope; see `XVP_PAYMENT_JWT_ROUTES` in app.ts).
  * Skips /admin/, /iam/, /health, /check/ routes.
  * Attaches decoded user context to event.context.auth.
  */
@@ -9,6 +14,7 @@
 import {
   defineEventHandler,
   getHeader,
+  getMethod,
   setResponseStatus,
   type H3Event,
 } from "h3";
@@ -45,24 +51,55 @@ export function resolveAudienceAllowlist(): string[] {
   return parsed.length > 0 ? parsed : DEFAULT_JWT_AUDIENCE_ALLOWLIST;
 }
 
-function shouldApplyAuth(path: string, protectedPrefixes: readonly string[]): boolean {
-  if (protectedPrefixes.length === 0) return true;
-  return protectedPrefixes.some((prefix) => path.startsWith(prefix));
+/** A single individually JWT-protected route: an exact method + path template. */
+export interface JwtRouteMatcher {
+  readonly method: string;
+  /** `{param}`/`{}`-style template, e.g. "/igw/{ncb}/v1/xvps/{id}/payment". */
+  readonly pathTemplate: string;
+}
+
+/** Turn a `{param}` path template into an anchored regex (one `{}` per path segment). */
+function routeTemplateToRegex(template: string): RegExp {
+  const body = template
+    .split("/")
+    .map((seg) => (/^\{.*\}$/.test(seg) ? "[^/]+" : seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    .join("/");
+  return new RegExp(`^${body}(?:$|\\?)`);
+}
+
+function shouldApplyAuth(
+  path: string,
+  method: string,
+  protectedPrefixes: readonly string[],
+  extraRoutes: readonly { method: string; regex: RegExp }[],
+): boolean {
+  if (protectedPrefixes.length === 0 && extraRoutes.length === 0) return true;
+  if (protectedPrefixes.some((prefix) => path.startsWith(prefix))) return true;
+  return extraRoutes.some((r) => r.method === method && r.regex.test(path));
 }
 
 /**
  * JWT verification middleware. `jwtPublicKeyPem` is the persisted, shared JWT
  * signing public key from the runtime PKI bundle (#47) so tokens verify across
- * restarts and replicas.
+ * restarts and replicas. `extraRoutes` (issue #143) names individual
+ * method+path routes to protect outside `protectedPrefixes`, without widening
+ * a whole prefix's scope.
  */
 export function createJwtMiddleware(
   protectedPrefixes: readonly string[],
   jwtPublicKeyPem: string,
+  extraRoutes: readonly JwtRouteMatcher[] = [],
 ) {
+  const extraMatchers = extraRoutes.map((r) => ({
+    method: r.method,
+    regex: routeTemplateToRegex(r.pathTemplate),
+  }));
+
   return defineEventHandler(async (event: H3Event) => {
     const path = event.path || "";
+    const method = getMethod(event);
 
-    if (!shouldApplyAuth(path, protectedPrefixes)) return;
+    if (!shouldApplyAuth(path, method, protectedPrefixes, extraMatchers)) return;
 
     const authHeader = getHeader(event, "authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
